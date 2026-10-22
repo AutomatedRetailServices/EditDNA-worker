@@ -62,6 +62,9 @@ final class L10n: ObservableObject {
 
     func set(_ choice: AppLanguage, reopen tab: MainTab? = nil) {
         Self.reopenTab = tab
+        // The next launch starts in this language everywhere (also texts iOS itself draws).
+        if choice == .automatic { UserDefaults.standard.removeObject(forKey: "AppleLanguages") }
+        else { UserDefaults.standard.set([choice.rawValue], forKey: "AppleLanguages") }
         UserDefaults.standard.set(choice.rawValue, forKey: Self.storeKey)
         self.choice = choice
         code = Self.resolve(choice)
@@ -214,6 +217,19 @@ final class L10nBundle: Bundle, @unchecked Sendable {
     override func localizedString(forKey key: String, value: String?, table tableName: String?) -> String {
         if tableName == nil || tableName == "Localizable", let spanish = L10nState.format(forKey: key) { return spanish }
         return super.localizedString(forKey: key, value: value, table: tableName)
+    }
+
+    /// SwiftUI (iOS 15+) resolves `Text("…")` through the attributed lookup.
+    override func localizedAttributedString(forKey key: String, value: String?, table tableName: String?) -> NSAttributedString {
+        if tableName == nil || tableName == "Localizable", let spanish = L10nState.format(forKey: key) {
+            return NSAttributedString(string: spanish)
+        }
+        return super.localizedAttributedString(forKey: key, value: value, table: tableName)
+    }
+
+    /// Lookups that pick a .lproj folder (es.lproj/Localizable.strings) follow the app's language.
+    override var preferredLocalizations: [String] {
+        L10nState.code == "es" ? ["es"] : ["en"]
     }
 }
 

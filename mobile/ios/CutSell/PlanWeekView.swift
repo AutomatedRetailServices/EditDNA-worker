@@ -572,7 +572,7 @@ struct PlanBackButton: View {
     let title: String
     let action: () -> Void
     var body: some View {
-        Button(action: action) { Text("‹ \(title)").font(CS.inter(16, .semibold)).foregroundStyle(CS.cyan) }
+        Button(action: action) { Text(L10n.tr("‹ \(title)")).font(CS.inter(16, .semibold)).foregroundStyle(CS.cyan) }
             .accessibilityIdentifier("planBack")
     }
 }
@@ -608,8 +608,8 @@ struct PlanGoalView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     PlanBackButton(title: "Plan") { dismiss() }.padding(.top, 8)
-                    Text("Plan my week").font(CS.inter(28, .bold)).foregroundStyle(.white).padding(.top, 14)
-                    Text("Pick how many videos and when. We spread them so every day has variety.")
+                    Text(L10n.tr("Plan my week")).font(CS.inter(28, .bold)).foregroundStyle(.white).padding(.top, 14)
+                    Text(L10n.tr("Pick how many videos and when. We spread them so every day has variety."))
                         .font(CS.inter(13)).foregroundStyle(PlanStyle.muted).fixedSize(horizontal: false, vertical: true).padding(.top, 6)
 
                     label("HOW MANY VIDEOS").padding(.top, 20)
@@ -629,7 +629,7 @@ struct PlanGoalView: View {
                         }
                         if times.count < Self.maxTimes {
                             Button { editing = TimeEdit(id: -1) } label: {
-                                Text("+ Time").font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
+                                Text(L10n.tr("+ Time")).font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
                                     .frame(maxWidth: .infinity).frame(height: 44)
                                     .overlay(Capsule().strokeBorder(Color(hex: 0x596685), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
                             }
@@ -638,7 +638,7 @@ struct PlanGoalView: View {
                         }
                     }
                     .padding(.top, 8)
-                    Text("\(times.count) time\(times.count == 1 ? "" : "s") = \(times.count) video\(times.count == 1 ? "" : "s") per day. Tap a time to change it.")
+                    Text(L10n.tr("\(times.count) time\(times.count == 1 ? "" : "s") = \(times.count) video\(times.count == 1 ? "" : "s") per day. Tap a time to change it."))
                         .font(CS.inter(11)).foregroundStyle(PlanStyle.muted).padding(.top, 8)
                         .accessibilityIdentifier("goalTimesHelp")
 
@@ -667,7 +667,7 @@ struct PlanGoalView: View {
                         HStack {
                             Text(L10n.tr(startText)).font(CS.inter(14, .semibold)).foregroundStyle(.white)
                             Spacer()
-                            Text("Change").font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
+                            Text(L10n.tr("Change")).font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
                         }
                         .padding(.horizontal, 15).frame(height: 48)
                         .background(PlanStyle.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -678,7 +678,7 @@ struct PlanGoalView: View {
                     .accessibilityIdentifier("goalStart")
 
                     HStack {
-                        Text("Remind me at each time").font(CS.inter(14, .semibold)).foregroundStyle(.white)
+                        Text(L10n.tr("Remind me at each time")).font(CS.inter(14, .semibold)).foregroundStyle(.white)
                         Spacer()
                         Button { remind.toggle() } label: {
                             Image(remind ? "PlanToggleOn" : "PlanToggleOff").resizable().frame(width: 44, height: 26)
@@ -696,7 +696,7 @@ struct PlanGoalView: View {
 
                     Button { Task { await build() } } label: {
                         Group {
-                            if building { ProgressView().tint(.white) } else { Text("Build my plan").font(CS.sf(15, .semibold)) }
+                            if building { ProgressView().tint(.white) } else { Text(L10n.tr("Build my plan")).font(CS.sf(15, .semibold)) }
                         }
                         .foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 50)
                         .background(Capsule().fill(PlanStyle.cta))
@@ -741,11 +741,11 @@ struct PlanGoalView: View {
                 .presentationDetents([.height(470)])
                 .presentationBackground(Color(hex: 0x0D121F))
         }
-        .alert("CutSell", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
-            Button("OK", role: .cancel) {}
+        .alert(L10n.tr("CutSell"), isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+            Button(L10n.tr("OK"), role: .cancel) {}
         } message: { Text(L10n.tr(errorMessage ?? "")) }
-        .alert("Your plan ends early", isPresented: Binding(get: { endedEarly != nil }, set: { if !$0 { endedEarly = nil; onBuilt() } })) {
-            Button("OK", role: .cancel) {}
+        .alert(L10n.tr("Your plan ends early"), isPresented: Binding(get: { endedEarly != nil }, set: { if !$0 { endedEarly = nil; onBuilt() } })) {
+            Button(L10n.tr("OK"), role: .cancel) {}
         } message: { Text(L10n.tr(endedEarly ?? "")) }
     }
 
@@ -754,7 +754,7 @@ struct PlanGoalView: View {
     private var howMany: some View {
         HStack {
             Button { count = max(1, count - 1) } label: {
-                Text("−").font(CS.inter(20, .bold)).foregroundStyle(.white)
+                Text(L10n.tr("−")).font(CS.inter(20, .bold)).foregroundStyle(.white)
                     .frame(width: 40, height: 40).background(Circle().fill(Color(hex: 0x1F2638)))
             }
             .buttonStyle(.plain)
@@ -762,12 +762,12 @@ struct PlanGoalView: View {
             .accessibilityIdentifier("goalMinus")
             Spacer()
             VStack(spacing: 2) {
-                Text("\(count)").font(CS.inter(28, .bold)).foregroundStyle(.white).accessibilityIdentifier("goalCount")
-                Text("of \(ready) ready video\(ready == 1 ? "" : "s")").font(CS.inter(11)).foregroundStyle(PlanStyle.muted)
+                Text(L10n.tr("\(count)")).font(CS.inter(28, .bold)).foregroundStyle(.white).accessibilityIdentifier("goalCount")
+                Text(L10n.tr("of \(ready) ready video\(ready == 1 ? "" : "s")")).font(CS.inter(11)).foregroundStyle(PlanStyle.muted)
             }
             Spacer()
             Button { count = min(max(ready, 1), count + 1) } label: {
-                Text("+").font(CS.inter(20, .bold)).foregroundStyle(.white)
+                Text(L10n.tr("+")).font(CS.inter(20, .bold)).foregroundStyle(.white)
                     .frame(width: 40, height: 40).background(Circle().fill(CS.brandFull))
             }
             .buttonStyle(.plain)
@@ -787,7 +787,7 @@ struct PlanGoalView: View {
         var line2 = range + " · \(products) product\(products == 1 ? "" : "s")"
         if noProduct > 0 { line2 += " · \(noProduct) without a product" }
         return VStack(alignment: .leading, spacing: 4) {
-            Text("✦  \(count) video\(count == 1 ? "" : "s") · \(perDay) per day · \(dates.count) day\(dates.count == 1 ? "" : "s")")
+            Text(L10n.tr("✦  \(count) video\(count == 1 ? "" : "s") · \(perDay) per day · \(dates.count) day\(dates.count == 1 ? "" : "s")"))
                 .font(CS.inter(14, .semibold)).foregroundStyle(.white)
             Text(L10n.tr(line2)).font(CS.inter(12)).foregroundStyle(PlanStyle.muted).padding(.leading, 20)
         }
@@ -884,7 +884,7 @@ struct StartDateSheet: View {
         VStack(spacing: 10) {
             DatePicker("", selection: $value, in: Calendar.current.startOfDay(for: Date())..., displayedComponents: .date)
                 .datePickerStyle(.graphical).labelsHidden().tint(CS.cyan)
-            Button("Save") { onDone(PlanDay.iso.string(from: value)); dismiss() }
+            Button(L10n.tr("Save")) { onDone(PlanDay.iso.string(from: value)); dismiss() }
                 .font(CS.inter(15, .semibold)).foregroundStyle(CS.cyan)
                 .accessibilityIdentifier("startSave")
         }
@@ -907,7 +907,7 @@ struct TimePickerSheet: View {
         VStack(spacing: 12) {
             if let title { Text(L10n.tr(title)).font(CS.inter(15, .semibold)).foregroundStyle(.white) }
             DatePicker("", selection: $value, displayedComponents: .hourAndMinute).datePickerStyle(.wheel).labelsHidden()
-            Button("Save") {
+            Button(L10n.tr("Save")) {
                 let c = Calendar.current.dateComponents([.hour, .minute], from: value)
                 onDone(String(format: "%02d:%02d", c.hour ?? 9, c.minute ?? 0))
                 dismiss()
@@ -915,7 +915,7 @@ struct TimePickerSheet: View {
             .font(CS.inter(15, .semibold)).foregroundStyle(CS.cyan)
             .accessibilityIdentifier("timeSave")
             if let onDelete {
-                Button("Delete this time", role: .destructive) { onDelete(); dismiss() }
+                Button(L10n.tr("Delete this time"), role: .destructive) { onDelete(); dismiss() }
                     .font(CS.inter(14, .semibold))
                     .accessibilityIdentifier("timeDelete")
             }
@@ -952,11 +952,11 @@ struct PlanWeekView: View {
                     HStack {
                         PlanBackButton(title: "Plan") { dismiss() }
                         Spacer()
-                        Button("Settings", action: onSettings).font(CS.inter(14, .semibold)).foregroundStyle(CS.cyan)
+                        Button(L10n.tr("Settings"), action: onSettings).font(CS.inter(14, .semibold)).foregroundStyle(CS.cyan)
                             .accessibilityIdentifier("weekSettings")
                     }
                     .padding(.top, 8)
-                    Text("This week").font(CS.inter(28, .bold)).foregroundStyle(.white).padding(.top, 18)
+                    Text(L10n.tr("This week")).font(CS.inter(28, .bold)).foregroundStyle(.white).padding(.top, 18)
                     Text(L10n.tr(subtitle)).font(CS.inter(13)).foregroundStyle(PlanStyle.muted).padding(.top, 6)
                         .accessibilityIdentifier("weekSubtitle")
                     VStack(spacing: 8) {
@@ -966,13 +966,13 @@ struct PlanWeekView: View {
                     if let missing = store.state?.week?.missing, missing.videos > 0 {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("Videos for \(missing.coveredDays) of \(missing.totalDays) days")
+                                Text(L10n.tr("Videos for \(missing.coveredDays) of \(missing.totalDays) days"))
                                     .font(CS.inter(13, .semibold)).foregroundStyle(Color(hex: 0xFFB840))
-                                Text("Make \(missing.videos) more to fill \(Self.list(missing.days.compactMap { PlanDay.date($0) == nil ? nil : PlanDay.weekdayName($0) })).")
+                                Text(L10n.tr("Make \(missing.videos) more to fill \(Self.list(missing.days.compactMap { PlanDay.date($0) == nil ? nil : PlanDay.weekdayName($0) }))."))
                                     .font(CS.inter(12)).foregroundStyle(PlanStyle.muted).lineLimit(2)
                             }
                             Spacer()
-                            Button("New Mix ›", action: onNewMix).font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
+                            Button(L10n.tr("New Mix ›"), action: onNewMix).font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
                                 .accessibilityIdentifier("weekNewMix")
                         }
                         .padding(.horizontal, 13).padding(.vertical, 10)
@@ -983,7 +983,7 @@ struct PlanWeekView: View {
                         .accessibilityIdentifier("weekMissing")
                     }
                     if let week = store.state?.week, week.endsEarly == true {
-                        Text("Plan ends early: \(week.placed ?? week.slots.count) of \(week.asked ?? 0) videos fit without the same product back to back.")
+                        Text(L10n.tr("Plan ends early: \(week.placed ?? week.slots.count) of \(week.asked ?? 0) videos fit without the same product back to back."))
                             .font(CS.inter(12)).foregroundStyle(Color(hex: 0xFFB840)).padding(.top, 10)
                             .accessibilityIdentifier("weekEndsEarly")
                     }
@@ -1027,10 +1027,10 @@ struct PlanWeekView: View {
                 HStack(spacing: 8) {
                     Text(PlanDay.short(day)).font(CS.inter(14, .bold)).foregroundStyle(.white)
                     if allPosted {
-                        Text("POSTED").font(CS.inter(9, .bold)).foregroundStyle(Color(hex: 0x33D98C))
+                        Text(L10n.tr("POSTED")).font(CS.inter(9, .bold)).foregroundStyle(Color(hex: 0x33D98C))
                             .frame(width: 58, height: 18).background(Color(hex: 0x143324), in: Capsule())
                     } else if isToday {
-                        Text("TODAY").font(CS.inter(9, .bold)).foregroundStyle(.white)
+                        Text(L10n.tr("TODAY")).font(CS.inter(9, .bold)).foregroundStyle(.white)
                             .frame(width: 51, height: 18).background(CS.brandFull, in: Capsule())
                     }
                     Spacer()
@@ -1079,8 +1079,8 @@ struct PlanWeekView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .contextMenu {
-            Button("Move to another day or time") { moving = slot }
-            Button("Remove from this week", role: .destructive) { Task { try? await store.remove(slot, session: appState.session) } }
+            Button(L10n.tr("Move to another day or time")) { moving = slot }
+            Button(L10n.tr("Remove from this week"), role: .destructive) { Task { try? await store.remove(slot, session: appState.session) } }
         }
         .task { if let project { await thumbnails.load(project: project, session: appState.session) } }
         .accessibilityIdentifier("weekSlot")
@@ -1099,7 +1099,7 @@ struct MoveSlotSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Move \(slot.product ?? "this video")").font(CS.inter(20, .bold)).foregroundStyle(.white).padding(.top, 24)
+            Text(L10n.tr("Move \(slot.product ?? "this video")")).font(CS.inter(20, .bold)).foregroundStyle(.white).padding(.top, 24)
             DatePicker("Day", selection: $day, in: Date()..., displayedComponents: .date).accessibilityIdentifier("moveDay")
             DatePicker("Time", selection: $time, displayedComponents: .hourAndMinute).accessibilityIdentifier("moveTime")
             Button {
@@ -1112,7 +1112,7 @@ struct MoveSlotSheet: View {
                     } catch { errorMessage = "Couldn’t move it. Please try again." }
                 }
             } label: {
-                Text("Move").font(CS.sf(15, .semibold)).foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 50)
+                Text(L10n.tr("Move")).font(CS.sf(15, .semibold)).foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 50)
                     .background(Capsule().fill(PlanStyle.cta))
             }
             .accessibilityIdentifier("moveSave")
@@ -1166,7 +1166,7 @@ struct PlanDayView: View {
                         mainCard(slot).padding(.top, 14)
                         actions(slot).padding(.top, 14)
                         ForEach(slots.filter { $0.projectID != slot.projectID }) { other in
-                            Text("\(Int(other.time.prefix(2)) ?? 0 >= 17 ? "Tonight" : "Later") · \(PlanDay.clock(other.time))")
+                            Text(L10n.tr("\(Int(other.time.prefix(2)) ?? 0 >= 17 ? "Tonight" : "Later") · \(PlanDay.clock(other.time))"))
                                 .font(CS.inter(14, .semibold)).foregroundStyle(.white).padding(.top, 22)
                             Button { current = other.projectID } label: { otherCard(other) }.buttonStyle(.plain)
                                 .padding(.top, 10)
@@ -1193,10 +1193,10 @@ struct PlanDayView: View {
                 PostReminders.shared.test(slot, seconds: 4)
             }
         }
-        .alert("Edit caption", isPresented: $editing) {
-            TextField("Caption", text: $draftCaption, axis: .vertical).accessibilityIdentifier("captionField")
-            Button("Save") { Task { await saveCaption() } }
-            Button("Cancel", role: .cancel) {}
+        .alert(L10n.tr("Edit caption"), isPresented: $editing) {
+            TextField(L10n.tr("Caption"), text: $draftCaption, axis: .vertical).accessibilityIdentifier("captionField")
+            Button(L10n.tr("Save")) { Task { await saveCaption() } }
+            Button(L10n.tr("Cancel"), role: .cancel) {}
         }
     }
 
@@ -1206,7 +1206,7 @@ struct PlanDayView: View {
                 .overlay { if let image = thumbnails.image(for: slot.projectID) { Image(uiImage: image).resizable().scaledToFill() } }
                 .overlay(alignment: .topLeading) {
                     if slot.mixCode != nil {
-                        Text("MIX").font(CS.inter(9, .bold)).foregroundStyle(.white).frame(width: 34, height: 18)
+                        Text(L10n.tr("MIX")).font(CS.inter(9, .bold)).foregroundStyle(.white).frame(width: 34, height: 18)
                             .background(CS.brandFull, in: Capsule()).padding(8)
                     }
                 }
@@ -1231,10 +1231,10 @@ struct PlanDayView: View {
                         .accessibilityIdentifier("dayCaption")
                     Spacer(minLength: 0)
                     HStack {
-                        Button("Edit") { draftCaption = slot.caption ?? ""; editing = true }
+                        Button(L10n.tr("Edit")) { draftCaption = slot.caption ?? ""; editing = true }
                             .accessibilityIdentifier("captionEdit")
                         Spacer()
-                        Button("Copy") {
+                        Button(L10n.tr("Copy")) {
                             UIPasteboard.general.string = slot.caption ?? ""
                             notice = "Caption copied"
                         }
@@ -1298,7 +1298,7 @@ struct PlanDayView: View {
                     .font(CS.inter(11)).foregroundStyle(PlanStyle.muted)
             }
             Spacer()
-            Text("›").font(CS.inter(20, .medium)).foregroundStyle(PlanStyle.muted)
+            Text(L10n.tr("›")).font(CS.inter(20, .medium)).foregroundStyle(PlanStyle.muted)
         }
         .padding(.horizontal, 13).padding(.vertical, 11)
         .background(PlanStyle.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))

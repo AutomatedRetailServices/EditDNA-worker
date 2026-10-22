@@ -120,7 +120,7 @@ struct CreateCameraView: View {
                                 .frame(width: 18, height: 28)
                                 .frame(width: 44, height: 44)
                         }
-                        .accessibilityLabel("Back")
+                        .accessibilityLabel(L10n.tr("Back"))
                         .disabled(camera.isRecording)
                         Spacer()
                     }
@@ -129,7 +129,7 @@ struct CreateCameraView: View {
                 .padding(.top, 4)
 
                 if camera.isRecording || elapsed > 0 {
-                    Text("\(timeString(elapsed)) / \(preset.title)")
+                    Text(L10n.tr("\(timeString(elapsed)) / \(preset.title)"))
                         .font(.system(size: 15, weight: .bold, design: .monospaced))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 14)
@@ -202,7 +202,7 @@ struct CreateCameraView: View {
                     Image("IconMirror").renderingMode(.template).resizable()
                         .foregroundStyle(camera.mirrorOn ? CS.cyan : .white)
                         .frame(width: 36, height: 36)
-                    Text("Mirror")
+                    Text(L10n.tr("Mirror"))
                         .font(CS.sf(13, .semibold))
                         .foregroundStyle(camera.mirrorOn ? CS.cyan : .white)
                 }
@@ -288,7 +288,7 @@ struct CreateCameraView: View {
                     .frame(width: 54, height: 58)
                     .overlay(RoundedRectangle(cornerRadius: 9).stroke(CS.cyan, lineWidth: 2))
                     .shadow(color: CS.cyan.opacity(0.24), radius: 5)
-                Text("Upload")
+                Text(L10n.tr("Upload"))
                     .font(CS.sf(14, .bold))
                     .foregroundStyle(.white)
             }

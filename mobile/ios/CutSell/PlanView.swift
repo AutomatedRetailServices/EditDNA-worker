@@ -51,8 +51,8 @@ struct PlanView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     BrandLogo().frame(maxWidth: .infinity).padding(.top, 2)
-                    Text("Plan").font(CS.inter(32, .bold)).foregroundStyle(CS.textPrimaryF).padding(.top, 20)
-                    Text("Make videos in batches and plan what to post.")
+                    Text(L10n.tr("Plan")).font(CS.inter(32, .bold)).foregroundStyle(CS.textPrimaryF).padding(.top, 20)
+                    Text(L10n.tr("Make videos in batches and plan what to post."))
                         .font(CS.inter(14)).foregroundStyle(Color(hex: 0x99A3BD)).padding(.top, 2)
 
                     HStack(spacing: 8) {
@@ -64,9 +64,9 @@ struct PlanView: View {
                     .padding(.top, 18)
 
                     HStack(alignment: .firstTextBaseline) {
-                        Text("In progress").font(CS.inter(16, .semibold)).foregroundStyle(.white)
+                        Text(L10n.tr("In progress")).font(CS.inter(16, .semibold)).foregroundStyle(.white)
                         Spacer()
-                        Button("See all in Edits ›") { openEdits(focus: nil) }
+                        Button(L10n.tr("See all in Edits ›")) { openEdits(focus: nil) }
                             .font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan)
                             .accessibilityIdentifier("planSeeAll")
                     }
@@ -92,7 +92,7 @@ struct PlanView: View {
                             .accessibilityIdentifier("planProgressBulk")
                         }
                         if mixes.active.isEmpty && queue.activeBulks.isEmpty {
-                            Text("Nothing in progress. Start a Mix or a Bulk.")
+                            Text(L10n.tr("Nothing in progress. Start a Mix or a Bulk."))
                                 .font(CS.inter(13)).foregroundStyle(Color(hex: 0x99A3BD))
                                 .frame(maxWidth: .infinity, minHeight: 60)
                                 .background(Color(hex: 0x0F1726), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -182,7 +182,7 @@ struct PlanView: View {
                         }
                     }
                     .frame(height: 6)
-                    Text("\(ready)/\(total)").font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan)
+                    Text(L10n.tr("\(ready)/\(total)")).font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan)
                         .frame(width: 50, alignment: .trailing)
                 }
                 .padding(.top, 8)
@@ -209,7 +209,7 @@ struct PlanView: View {
         name.locale = L10n.locale
         name.dateFormat = "EEE"
         return VStack(alignment: .leading, spacing: 0) {
-            Text("This week").font(CS.inter(16, .semibold)).foregroundStyle(.white)
+            Text(L10n.tr("This week")).font(CS.inter(16, .semibold)).foregroundStyle(.white)
             HStack(spacing: 6) {
                 ForEach(Array(days.enumerated()), id: \.offset) { _, day in
                     let isToday = calendar.isDate(day, inSameDayAs: today)
@@ -217,7 +217,7 @@ struct PlanView: View {
                     Button { if week.hasWeek, slots.contains(where: { $0.date == key }) { path = [.week, .day(key)] } } label: {
                         VStack(spacing: 2) {
                             Text(name.string(from: day).replacingOccurrences(of: ".", with: "").capitalizedFirst).font(CS.inter(11, .semibold)).foregroundStyle(.white)
-                            Text("\(calendar.component(.day, from: day))").font(CS.inter(14, .bold)).foregroundStyle(.white)
+                            Text(L10n.tr("\(calendar.component(.day, from: day))")).font(CS.inter(14, .bold)).foregroundStyle(.white)
                             HStack(spacing: 2) {
                                 ForEach(slots.filter { $0.date == key }.prefix(4)) { slot in
                                     Image(week.dot(for: slot)).resizable().frame(width: 6, height: 6)
@@ -247,7 +247,7 @@ struct PlanView: View {
                         .accessibilityIdentifier("planWeekCardTitle")
                     Text(L10n.tr(cardBody(slots: slots))).font(CS.inter(11)).foregroundStyle(Color(hex: 0x99A3BD))
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("Plan my week ›").font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan)
+                    Text(L10n.tr("Plan my week ›")).font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan)
                         .padding(.top, 2)
                 }
                 .padding(15)

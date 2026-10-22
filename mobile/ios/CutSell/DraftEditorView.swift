@@ -40,7 +40,7 @@ struct DraftEditorView: View {
                 EditorV4View(model: model, project: project, previewState: Self.probeState)
             } else if let model = holder.model, !model.isLoading, model.snapshot == nil, model.errorMessage != nil {
                 VStack(spacing: 14) {
-                    Text("Couldn’t open this cut").font(CS.inter(18, .semibold)).foregroundStyle(.white)
+                    Text(L10n.tr("Couldn’t open this cut")).font(CS.inter(18, .semibold)).foregroundStyle(.white)
                     Text(L10n.tr(model.errorMessage.map { DraftEditorViewModel.plainWords($0) } ?? "Please try again.")).font(CS.inter(13)).foregroundStyle(CS.textSecondaryF)
                         .multilineTextAlignment(.center)
                     PrimaryButton(title: "Try again", height: 48, cornerRadius: 14, fontSize: 15) {
@@ -56,7 +56,7 @@ struct DraftEditorView: View {
                     Color(hex: 0x02040A).ignoresSafeArea()
                     VStack(spacing: 14) {
                         BrandRing(size: 84)
-                        Text("Opening your cut…").font(CS.inter(14, .medium)).foregroundStyle(CS.textSecondaryF)
+                        Text(L10n.tr("Opening your cut…")).font(CS.inter(14, .medium)).foregroundStyle(CS.textSecondaryF)
                     }
                 }
             }
@@ -80,7 +80,7 @@ struct DraftEditorView: View {
                     Image(systemName: "chevron.left").font(.system(size: 17, weight: .semibold)).foregroundStyle(.white)
                         .frame(width: 44, height: 44)
                 }
-                .accessibilityLabel("Back")
+                .accessibilityLabel(L10n.tr("Back"))
                 .padding(.leading, 8)
             }
         }
@@ -92,13 +92,13 @@ struct DraftEditorView: View {
             if model.isSaving {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("Saving…").font(.caption).foregroundStyle(.secondary)
+                    Text(L10n.tr("Saving…")).font(.caption).foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 6)
             }
 
             if model.isLoading {
-                Spacer(); ProgressView("Loading timeline…"); Spacer()
+                Spacer(); ProgressView(L10n.tr("Loading timeline…")); Spacer()
             } else {
                 ScrollViewReader { scroller in
                 ScrollView {
@@ -125,9 +125,9 @@ struct DraftEditorView: View {
 
                         VStack(alignment: .leading, spacing: 10) {
                             HStack {
-                                Text("Clip order").font(.headline)
+                                Text(L10n.tr("Clip order")).font(.headline)
                                 Spacer()
-                                Text("Reorder").font(.caption).foregroundStyle(.secondary)
+                                Text(L10n.tr("Reorder")).font(.caption).foregroundStyle(.secondary)
                             }
                             ReorderList(model: model)
                         }
@@ -139,7 +139,7 @@ struct DraftEditorView: View {
                             Button {
                                 Task { await model.export() }
                             } label: {
-                                Label("Export 1080p", systemImage: "square.and.arrow.up")
+                                Label(L10n.tr("Export 1080p"), systemImage: "square.and.arrow.up")
                                     .font(.headline)
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 8)
@@ -151,7 +151,7 @@ struct DraftEditorView: View {
                                 HStack {
                                     Text(L10n.tr(export.state.replacingOccurrences(of: "_", with: " ").capitalized))
                                     Spacer()
-                                    if let progress = export.progress { Text("\(progress)%").monospacedDigit() }
+                                    if let progress = export.progress { Text(L10n.tr("\(progress)%")).monospacedDigit() }
                                 }
                                 .font(.subheadline)
 
@@ -187,10 +187,10 @@ struct DraftEditorView: View {
         )) {
             CaptionsView(model: model, initialClipID: captionTextClipID)
         }
-        .alert("CutSell", isPresented: Binding(
+        .alert(L10n.tr("CutSell"), isPresented: Binding(
             get: { model.errorMessage != nil },
             set: { if !$0 { model.errorMessage = nil } }
-        )) { Button("OK", role: .cancel) {} } message: { Text(L10n.tr(model.errorMessage ?? "")) }
+        )) { Button(L10n.tr("OK"), role: .cancel) {} } message: { Text(L10n.tr(model.errorMessage ?? "")) }
     }
 }
 
@@ -205,7 +205,7 @@ private struct ReorderList: View {
                 HStack(spacing: 10) {
                     Image(systemName: "line.3.horizontal")
                         .foregroundStyle(.secondary)
-                    Text("\(index + 1)")
+                    Text(L10n.tr("\(index + 1)"))
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                         .frame(width: 22)

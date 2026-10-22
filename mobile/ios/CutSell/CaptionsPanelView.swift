@@ -95,14 +95,14 @@ struct CaptionsPanelView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Text("Captions")
+            Text(L10n.tr("Captions"))
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(CaptionPanelColours.title)
             Spacer()
             Text(L10n.tr(enabled ? "On" : "Off"))
                 .font(.system(size: 12))
                 .foregroundStyle(CaptionPanelColours.label)
-            Toggle("Captions", isOn: Binding(
+            Toggle(L10n.tr("Captions"), isOn: Binding(
                 get: { model.captionsEnabled },
                 set: { newValue in Task { await model.setCaptionSettings(enabled: newValue) } }
             ))
@@ -110,7 +110,7 @@ struct CaptionsPanelView: View {
             .tint(CaptionPanelColours.selected)
             .accessibilityIdentifier("captions.enableToggle")
             Button(action: onDone) {
-                Text("Done")
+                Text(L10n.tr("Done"))
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(CaptionPanelColours.strong)
                     .padding(.horizontal, 14)
@@ -166,17 +166,17 @@ struct CaptionsPanelView: View {
     private func sample(_ look: Look) -> some View {
         switch look {
         case .classic:
-            Text("Aa").font(.system(size: 17, weight: .semibold)).foregroundStyle(Color.white)
+            Text(L10n.tr("Aa")).font(.system(size: 17, weight: .semibold)).foregroundStyle(Color.white)
         case .highlight:
-            Text("Aa").font(.system(size: 17, weight: .semibold))
+            Text(L10n.tr("Aa")).font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Color(captionHex: highlightHex(lastHighlight)))
         case .box:
-            Text("Aa").font(.system(size: 15, weight: .semibold))
+            Text(L10n.tr("Aa")).font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(Color(captionHex: CaptionLook.ink))
                 .frame(width: 34, height: 22)
                 .background(Color.white, in: RoundedRectangle(cornerRadius: 4))
         case .yellow:
-            Text("Aa").font(.system(size: 17, weight: .semibold))
+            Text(L10n.tr("Aa")).font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Color(captionHex: CaptionLook.yellow))
         }
     }
@@ -255,7 +255,7 @@ struct CaptionsPanelView: View {
                 )
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Font \(spec.displayName)")
+        .accessibilityLabel(L10n.tr("Font \(spec.displayName)"))
         .accessibilityAddTraits(selected ? [.isSelected] : [])
         .accessibilityIdentifier("captions.font.\(spec.key)")
     }
@@ -264,7 +264,7 @@ struct CaptionsPanelView: View {
 
     private var wordColourRow: some View {
         HStack(spacing: 12) {
-            Text("Word color")
+            Text(L10n.tr("Word color"))
                 .font(.system(size: 11))
                 .foregroundStyle(CaptionPanelColours.label)
             ForEach(Self.wordColours) { colour in
@@ -283,7 +283,7 @@ struct CaptionsPanelView: View {
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Word color \(colour.name)")
+                .accessibilityLabel(L10n.tr("Word color \(colour.name)"))
                 .accessibilityAddTraits(selected ? [.isSelected] : [])
                 .accessibilityIdentifier("captions.wordColor.\(colour.name.lowercased())")
             }
@@ -313,7 +313,7 @@ struct CaptionsPanelView: View {
             Task { await model.setCaptionSettings(preset: preset) }
         } label: {
             HStack(spacing: 8) {
-                Text("Aa")
+                Text(L10n.tr("Aa"))
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(words)
                     .frame(width: 24, height: 18)

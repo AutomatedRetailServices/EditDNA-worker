@@ -26,9 +26,9 @@ struct CaptionStylePanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                Text("Captions").font(CS.inter(15, .semibold)).foregroundStyle(.white)
+                Text(L10n.tr("Captions")).font(CS.inter(15, .semibold)).foregroundStyle(.white)
                 Spacer()
-                Text("On").font(CS.inter(12)).foregroundStyle(CS.textSecondaryF)
+                Text(L10n.tr("On")).font(CS.inter(12)).foregroundStyle(CS.textSecondaryF)
                 Toggle("", isOn: Binding(
                     get: { model.captionsEnabled },
                     set: { model.applyCaptionSettings(enabled: $0) }
@@ -37,7 +37,7 @@ struct CaptionStylePanel: View {
                 .tint(Color(hex: 0x1677FF))
                 .accessibilityIdentifier("captionsOnToggle")
                 Button(action: onDone) {
-                    Text("Done")
+                    Text(L10n.tr("Done"))
                         .font(CS.inter(14, .semibold)).foregroundStyle(.white)
                         .frame(width: 62, height: 28)
                         .background(Color(hex: 0x040813), in: Capsule())
@@ -86,7 +86,7 @@ struct CaptionStylePanel: View {
             default: EmptyView()
             }
 
-            Text("Drag to move, pinch to resize, tap to fix words.")
+            Text(L10n.tr("Drag to move, pinch to resize, tap to fix words."))
                 .font(CS.inter(10)).foregroundStyle(CS.textMutedF)
                 .frame(maxWidth: .infinity)
         }
@@ -108,12 +108,12 @@ struct CaptionStylePanel: View {
             VStack(spacing: 4) {
                 Group {
                     switch item {
-                    case .classic: Text("Aa").foregroundStyle(.white)
-                    case .highlight: Text("Aa").foregroundStyle(Color(hex: 0x39FF78))
+                    case .classic: Text(L10n.tr("Aa")).foregroundStyle(.white)
+                    case .highlight: Text(L10n.tr("Aa")).foregroundStyle(Color(hex: 0x39FF78))
                     case .box:
-                        Text("Aa").foregroundStyle(.black)
+                        Text(L10n.tr("Aa")).foregroundStyle(.black)
                             .padding(.horizontal, 6).background(.white, in: RoundedRectangle(cornerRadius: 3))
-                    case .yellow: Text("Aa").foregroundStyle(Color(hex: 0xFFD60A))
+                    case .yellow: Text(L10n.tr("Aa")).foregroundStyle(Color(hex: 0xFFD60A))
                     }
                 }
                 .font(CS.inter(16, .bold))
@@ -129,7 +129,7 @@ struct CaptionStylePanel: View {
 
     private var wordColors: some View {
         HStack(spacing: 16) {
-            Text("Word color").font(CS.inter(11)).foregroundStyle(CS.textSecondaryF)
+            Text(L10n.tr("Word color")).font(CS.inter(11)).foregroundStyle(CS.textSecondaryF)
             ForEach([("highlight_green", 0x39FF78), ("highlight_red", 0xFF453A), ("highlight_blue", 0x1AA6FF)], id: \.0) { preset, color in
                 let selected = model.captionPreset == preset || (preset == "highlight_green" && model.captionPreset == "highlight")
                 Button { model.applyCaptionSettings(preset: preset) } label: {
@@ -157,7 +157,7 @@ struct CaptionStylePanel: View {
         let selected = model.captionPreset == preset
         return Button { model.applyCaptionSettings(preset: preset) } label: {
             HStack(spacing: 8) {
-                Text("Aa").font(CS.inter(10, .bold))
+                Text(L10n.tr("Aa")).font(CS.inter(10, .bold))
                     .foregroundStyle(dark ? .white : .black)
                     .frame(width: 22, height: 16)
                     .background(dark ? Color.black : Color.white.opacity(0.85), in: RoundedRectangle(cornerRadius: 2))
@@ -186,10 +186,10 @@ struct StylePanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Style").font(.system(size: 15, weight: .semibold)).foregroundStyle(Color(hex: 0xF2F7FF))
+                Text(L10n.tr("Style")).font(.system(size: 15, weight: .semibold)).foregroundStyle(Color(hex: 0xF2F7FF))
                 Spacer()
                 Button(action: onDone) {
-                    Text("Done").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color(hex: 0xFAFCFF))
+                    Text(L10n.tr("Done")).font(.system(size: 13, weight: .semibold)).foregroundStyle(Color(hex: 0xFAFCFF))
                         .frame(width: 62, height: 28)
                         .background(Color(hex: 0x040813, opacity: 0.95), in: Capsule())
                         .overlay(Capsule().stroke(Color(hex: 0x1AA6FF), lineWidth: 1))
@@ -260,7 +260,7 @@ struct VoiceOverPanel: View {
     private var recordSection: some View {
         VStack(spacing: 0) {
             ZStack {
-                Text("Recording voice-over").font(CS.inter(18, .bold)).foregroundStyle(Color(hex: 0xF7FAFF))
+                Text(L10n.tr("Recording voice-over")).font(CS.inter(18, .bold)).foregroundStyle(Color(hex: 0xF7FAFF))
                 Image("Ed4OfficialMic").resizable().frame(width: 28, height: 28)
                     .offset(x: -(195 - 58 - 14))
             }
@@ -271,7 +271,7 @@ struct VoiceOverPanel: View {
                 .monospacedDigit()
                 .padding(.top, 4)
             HStack(spacing: 6) {
-                Text("Enhance voice").font(CS.inter(12, .medium)).foregroundStyle(Color(hex: 0xF7FAFF))
+                Text(L10n.tr("Enhance voice")).font(CS.inter(12, .medium)).foregroundStyle(Color(hex: 0xF7FAFF))
                 Button { enhance.toggle() } label: {
                     ZStack(alignment: enhance ? .trailing : .leading) {
                         Capsule().fill(enhance ? Color(hex: 0x08CCFA) : Color(hex: 0x2A3A5C))
@@ -330,7 +330,7 @@ struct VoiceOverPanel: View {
             .padding(.top, 2)
             switch recorder.state {
             case .permissionDenied:
-                Text("Allow the microphone in Settings to record.").font(CS.inter(11)).foregroundStyle(CS.error)
+                Text(L10n.tr("Allow the microphone in Settings to record.")).font(CS.inter(11)).foregroundStyle(CS.error)
             case .failed(let message):
                 Text(L10n.tr(message)).font(CS.inter(11)).foregroundStyle(CS.error).lineLimit(1)
             default:
@@ -416,12 +416,12 @@ struct VoiceOverPanel: View {
         let ready = takeURL != nil && !isRecording
         return VStack(spacing: 0) {
             ZStack {
-                Text("Voice-over").font(CS.inter(18, .bold)).foregroundStyle(Color(hex: 0xF7FAFF))
+                Text(L10n.tr("Voice-over")).font(CS.inter(18, .bold)).foregroundStyle(Color(hex: 0xF7FAFF))
                 Image("Ed4OfficialMic").resizable().frame(width: 28, height: 28).offset(x: -77)
             }
             .frame(height: 33)
             .padding(.top, 14)
-            Text("Preview your recording before saving.")
+            Text(L10n.tr("Preview your recording before saving."))
                 .font(CS.inter(13)).foregroundStyle(Color(hex: 0x8FA8D1))
                 .padding(.top, 2)
             waveform
@@ -457,7 +457,7 @@ struct VoiceOverPanel: View {
                     mode = .voiceRecord
                     Task { await recorder.start() }
                 } label: {
-                    Text("↻  Retake").font(CS.inter(14, .semibold)).foregroundStyle(Color(hex: 0xF7FAFF))
+                    Text(L10n.tr("↻  Retake")).font(CS.inter(14, .semibold)).foregroundStyle(Color(hex: 0xF7FAFF))
                         .frame(width: 104, height: 46)
                         .background(Color(hex: 0x0F081A), in: RoundedRectangle(cornerRadius: 14))
                         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(hex: 0x731F8C), lineWidth: 1))
@@ -478,7 +478,7 @@ struct VoiceOverPanel: View {
             .padding(.top, 22)
             .disabled(!ready)
             .opacity(ready ? 1 : 0.45)
-            Button("Cancel") {
+            Button(L10n.tr("Cancel")) {
                 listener.stop()
                 if isRecording { recorder.stop() }
                 recorder.discardTake()
@@ -652,7 +652,7 @@ struct OverlayGallerySheet: View {
                 ZStack {
                     Text(L10n.tr(title)).font(CS.inter(17, .bold)).foregroundStyle(.white)
                     HStack {
-                        Button("Cancel") { dismiss() }.font(CS.inter(15)).foregroundStyle(CS.cyan)
+                        Button(L10n.tr("Cancel")) { dismiss() }.font(CS.inter(15)).foregroundStyle(CS.cyan)
                         Spacer()
                     }
                 }
@@ -710,7 +710,7 @@ struct OverlayGallerySheet: View {
     private func problemCard(_ text: String) -> some View {
         VStack(spacing: 12) {
             Text(L10n.tr(text)).font(CS.inter(14)).foregroundStyle(.white).multilineTextAlignment(.center)
-            Button("OK") { problem = nil }.font(CS.inter(15, .semibold)).foregroundStyle(CS.cyan)
+            Button(L10n.tr("OK")) { problem = nil }.font(CS.inter(15, .semibold)).foregroundStyle(CS.cyan)
         }
         .padding(22)
         .frame(maxWidth: 280)

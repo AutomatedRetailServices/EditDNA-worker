@@ -126,13 +126,13 @@ struct ProcessingContent: View {
                 Button(action: onClose) {
                     Image("ControlBack").resizable().frame(width: 36, height: 36)
                 }
-                .accessibilityLabel("Back")
+                .accessibilityLabel(L10n.tr("Back"))
                 Spacer()
-                Text("Processing")
+                Text(L10n.tr("Processing"))
                     .font(CS.inter(22, .semibold))
                     .foregroundStyle(Color(hex: 0xF2F7FF))
                 Spacer()
-                Button("Edits", action: onOpenEdits)
+                Button(L10n.tr("Edits"), action: onOpenEdits)
                     .font(CS.inter(15, .semibold))
                     .foregroundStyle(CS.cyan)
                     .frame(width: 44, alignment: .trailing)
@@ -194,7 +194,7 @@ struct ProcessingContent: View {
                             .foregroundStyle(Color(hex: 0xFFC48A))
                             .multilineTextAlignment(.center)
                             .accessibilityIdentifier("uploadStalled")
-                        Button("Try again", action: onTryAgain)
+                        Button(L10n.tr("Try again"), action: onTryAgain)
                             .font(CS.sf(15, .semibold))
                             .foregroundStyle(CS.cyan)
                             .accessibilityIdentifier("uploadTryAgain")
@@ -215,7 +215,7 @@ struct ProcessingContent: View {
                     .background(Color(hex: 0x060E1C), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(CS.cyan.opacity(0.18), lineWidth: 1))
                 Button(action: onClose) {
-                    Text("Continue in background")
+                    Text(L10n.tr("Continue in background"))
                         .font(CS.sf(15, .semibold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
@@ -233,7 +233,7 @@ struct ProcessingContent: View {
                 .buttonStyle(.plain)
                 // Build 24: active at every step (uploading, analysing, cutting, saving).
                 .accessibilityIdentifier("continueInBackground")
-                Text("We’ll let you know in CutSell when your cut is ready.")
+                Text(L10n.tr("We’ll let you know in CutSell when your cut is ready."))
                     .font(CS.sf(12))
                     .foregroundStyle(Color(hex: 0x94ADD6))
             }
@@ -342,7 +342,7 @@ struct StageDots: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Step \(current) of \(total)")
+        .accessibilityLabel(L10n.tr("Step \(current) of \(total)"))
     }
 }
 
@@ -370,7 +370,7 @@ struct ReadyContent: View {
                             Image("ControlBack").resizable().frame(width: 36, height: 36)
                                 .frame(width: 44, height: 44)
                         }
-                        .accessibilityLabel("Back")
+                        .accessibilityLabel(L10n.tr("Back"))
                         Spacer()
                     }
                 }
@@ -391,7 +391,7 @@ struct ReadyContent: View {
                 .padding(.top, 8)
                 .onTapGesture(perform: onReview)
 
-                Text("Your cut is ready")
+                Text(L10n.tr("Your cut is ready"))
                     .font(CS.sf(28, .semibold))
                     .foregroundStyle(Color(hex: 0xFAFCFF))
                     .padding(.top, 18)
@@ -402,7 +402,7 @@ struct ReadyContent: View {
                     .padding(.top, 4)
 
                 if let footage = footageSeconds ?? cut.footageSeconds, footage > 0 {
-                    Text("YOU JUST SAVED")
+                    Text(L10n.tr("YOU JUST SAVED"))
                         .font(CS.sf(11, .semibold))
                         .tracking(1.4)
                         .foregroundStyle(Color(hex: 0x4DDBFF))
@@ -412,7 +412,7 @@ struct ReadyContent: View {
                         .tracking(-1.8)
                         .foregroundStyle(.white)
                         .accessibilityIdentifier("timeSaved")
-                    Text("of editing time back in your day")
+                    Text(L10n.tr("of editing time back in your day"))
                         .font(CS.sf(14))
                         .foregroundStyle(Color(hex: 0xB2BDD1))
                 }
@@ -441,13 +441,13 @@ struct ReadyContent: View {
                             Text(TimeSavedLedger.hoursMinutes(totalSaved))
                                 .font(CS.sf(28, .semibold))
                                 .foregroundStyle(.white)
-                            Text("Your total editing time saved")
+                            Text(L10n.tr("Your total editing time saved"))
                                 .font(CS.sf(12))
                                 .foregroundStyle(Color(hex: 0xADB8D1))
                         }
                         Spacer(minLength: 0)
                         if let days = TimeSavedLedger.workdays(totalSaved) {
-                            Text("\(days)+ WORKDAY\(days == 1 ? "" : "S")")
+                            Text(L10n.tr("\(days)+ WORKDAY\(days == 1 ? "" : "S")"))
                                 .font(CS.sf(10, .semibold))
                                 .tracking(1.1)
                                 .foregroundStyle(Color(hex: 0x73D9FF))
@@ -469,7 +469,7 @@ struct ReadyContent: View {
 
                 HStack(spacing: 10) {
                     Button(action: onReview) {
-                        Text("Review & edit")
+                        Text(L10n.tr("Review & edit"))
                             .font(CS.inter(16, .semibold))
                             .foregroundStyle(Color(hex: 0xFAFCFF))
                             .frame(maxWidth: .infinity)
@@ -480,7 +480,7 @@ struct ReadyContent: View {
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("readyReviewButton")
                     Button(action: onReview) {
-                        Text("Export video")
+                        Text(L10n.tr("Export video"))
                             .font(CS.sf(16, .semibold))
                             .foregroundStyle(Color(hex: 0x03050D))
                             .frame(maxWidth: .infinity)

@@ -43,7 +43,7 @@ struct CameraCaptureView: View {
                             .background(.ultraThinMaterial, in: Circle())
                     }
                     Spacer()
-                    Text("\(timeString(elapsed)) / \(preset.title)")
+                    Text(L10n.tr("\(timeString(elapsed)) / \(preset.title)"))
                         .font(.system(.body, design: .monospaced).bold())
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
@@ -72,7 +72,7 @@ struct CameraCaptureView: View {
                         .padding()
                 }
 
-                Picker("Recording length", selection: $preset) {
+                Picker(L10n.tr("Recording length"), selection: $preset) {
                     ForEach(RecordingPreset.allCases) { item in
                         Text(L10n.tr(item.title)).tag(item)
                     }

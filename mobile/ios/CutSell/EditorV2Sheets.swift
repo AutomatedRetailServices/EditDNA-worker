@@ -15,11 +15,11 @@ struct AddCaptionsSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Capsule().fill(Color(hex: 0x3A5280)).frame(width: 40, height: 4).padding(.top, 10)
-            Text("Add Captions")
+            Text(L10n.tr("Add Captions"))
                 .font(CS.inter(26, .bold))
                 .foregroundStyle(.white)
                 .padding(.top, 18)
-            Text("Turn speech into editable captions.")
+            Text(L10n.tr("Turn speech into editable captions."))
                 .font(CS.inter(15))
                 .foregroundStyle(CS.textSecondaryF)
                 .padding(.top, 6)
@@ -27,8 +27,8 @@ struct AddCaptionsSheet: View {
             Button { auto.toggle() } label: {
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Auto captions").font(CS.inter(16, .semibold)).foregroundStyle(.white)
-                        Text("Generate from your video’s speech.").font(CS.inter(12)).foregroundStyle(CS.textSecondaryF)
+                        Text(L10n.tr("Auto captions")).font(CS.inter(16, .semibold)).foregroundStyle(.white)
+                        Text(L10n.tr("Generate from your video’s speech.")).font(CS.inter(12)).foregroundStyle(CS.textSecondaryF)
                     }
                     Spacer()
                     ZStack {
@@ -50,8 +50,8 @@ struct AddCaptionsSheet: View {
             Button { askingText = true } label: {
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Add text manually").font(CS.inter(16, .semibold)).foregroundStyle(.white)
-                        Text("Create text at the playhead.").font(CS.inter(12)).foregroundStyle(CS.textSecondaryF)
+                        Text(L10n.tr("Add text manually")).font(CS.inter(16, .semibold)).foregroundStyle(.white)
+                        Text(L10n.tr("Create text at the playhead.")).font(CS.inter(12)).foregroundStyle(CS.textSecondaryF)
                     }
                     Spacer()
                     Image(systemName: "plus").font(.system(size: 14, weight: .heavy)).foregroundStyle(Color(hex: 0x0B1020))
@@ -65,9 +65,9 @@ struct AddCaptionsSheet: View {
             .padding(.top, 10)
 
             HStack {
-                Text("Language").font(CS.inter(15)).foregroundStyle(.white)
+                Text(L10n.tr("Language")).font(CS.inter(15)).foregroundStyle(.white)
                 Spacer()
-                Text("Auto-detect").font(CS.inter(15, .semibold)).foregroundStyle(CS.cyan)
+                Text(L10n.tr("Auto-detect")).font(CS.inter(15, .semibold)).foregroundStyle(CS.cyan)
             }
             .padding(16)
             .background(CS.surfaceCard, in: RoundedRectangle(cornerRadius: 16))
@@ -87,7 +87,7 @@ struct AddCaptionsSheet: View {
             .padding(.top, 18)
             .accessibilityIdentifier("generateCaptions")
 
-            Text("Audio is processed only when you generate captions.")
+            Text(L10n.tr("Audio is processed only when you generate captions."))
                 .font(CS.inter(11))
                 .foregroundStyle(CS.textMutedF)
                 .frame(maxWidth: .infinity)
@@ -101,9 +101,9 @@ struct AddCaptionsSheet: View {
         .presentationDragIndicator(.hidden)
         .presentationBackground(Color(hex: 0x060B18))
         .preferredColorScheme(.dark)
-        .alert("Add text", isPresented: $askingText) {
-            TextField("Text", text: $manualText)
-            Button("Add") {
+        .alert(L10n.tr("Add text"), isPresented: $askingText) {
+            TextField(L10n.tr("Text"), text: $manualText)
+            Button(L10n.tr("Add")) {
                 let text = manualText.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !text.isEmpty else { return }
                 Task {
@@ -111,9 +111,9 @@ struct AddCaptionsSheet: View {
                     dismiss()
                 }
             }
-            Button("Cancel", role: .cancel) {}
+            Button(L10n.tr("Cancel"), role: .cancel) {}
         } message: {
-            Text("It appears on the video at the playhead for 3 seconds.")
+            Text(L10n.tr("It appears on the video at the playhead for 3 seconds."))
         }
     }
 }
@@ -209,7 +209,7 @@ struct VoiceOverRecordSheet: View {
             .padding(.top, 6)
             switch recorder.state {
             case .permissionDenied:
-                Text("Allow the microphone in Settings to record.").font(CS.inter(12)).foregroundStyle(CS.error)
+                Text(L10n.tr("Allow the microphone in Settings to record.")).font(CS.inter(12)).foregroundStyle(CS.error)
             case .failed(let message):
                 Text(L10n.tr(message)).font(CS.inter(12)).foregroundStyle(CS.error)
             default:
@@ -222,7 +222,7 @@ struct VoiceOverRecordSheet: View {
         VStack(spacing: 14) {
             Image("EdWave").resizable().frame(height: 40).padding(.top, 24)
             HStack {
-                Text("00:00")
+                Text(L10n.tr("00:00"))
                 Spacer()
                 Text(VoiceRecorder.formatted(recorder.elapsed))
             }
@@ -308,7 +308,7 @@ struct ExportSheet: View {
     var body: some View {
         VStack(spacing: 16) {
             Capsule().fill(Color(hex: 0x3A5280)).frame(width: 40, height: 4).padding(.top, 10)
-            Text("Export").font(CS.inter(22, .bold)).foregroundStyle(.white)
+            Text(L10n.tr("Export")).font(CS.inter(22, .bold)).foregroundStyle(.white)
             if let problem = model.exportError {
                 // Build 27: an export that could not start says why, in plain words, with Try again.
                 Text(L10n.tr(problem)).font(CS.inter(14)).foregroundStyle(CS.textSecondaryF).multilineTextAlignment(.center)
@@ -318,26 +318,26 @@ struct ExportSheet: View {
                 ProgressView(value: 0, total: 100).tint(CS.cyan)
             } else if let job = model.exportJob {
                 if job.state == "finished" {
-                    Text("Your video is ready.").font(CS.inter(14)).foregroundStyle(CS.textSecondaryF)
+                    Text(L10n.tr("Your video is ready.")).font(CS.inter(14)).foregroundStyle(CS.textSecondaryF)
                 } else if job.state == "failed" || job.state == "canceled" {
-                    Text("The export didn't finish. Please try again.").font(CS.inter(14)).foregroundStyle(CS.textSecondaryF)
+                    Text(L10n.tr("The export didn't finish. Please try again.")).font(CS.inter(14)).foregroundStyle(CS.textSecondaryF)
                 } else {
                     let percent = Self.shownPercent(job)
                     HStack {
                         Text(L10n.tr(Self.stageText(job))).font(CS.inter(14)).foregroundStyle(CS.textSecondaryF)
                         Spacer()
-                        Text("\(percent)%").font(CS.inter(16, .bold)).monospacedDigit().foregroundStyle(CS.cyan)
+                        Text(L10n.tr("\(percent)%")).font(CS.inter(16, .bold)).monospacedDigit().foregroundStyle(CS.cyan)
                             .accessibilityIdentifier("exportPercent")
                     }
                     ProgressView(value: Double(percent), total: 100).tint(CS.cyan)
-                    Text("You can leave this screen. We'll let you know when it's ready.")
+                    Text(L10n.tr("You can leave this screen. We'll let you know when it's ready."))
                         .font(CS.inter(12)).foregroundStyle(CS.textMutedF).multilineTextAlignment(.center)
                 }
                 if let urlString = job.result?["download_url"]?.stringValue, let url = URL(string: urlString) {
                     FinishedExportActionsView(remoteURL: url, projectID: model.project.projectID, session: model.session)
                 }
             } else {
-                Text("Getting your video ready…").font(CS.inter(14)).foregroundStyle(CS.textSecondaryF)
+                Text(L10n.tr("Getting your video ready…")).font(CS.inter(14)).foregroundStyle(CS.textSecondaryF)
                 ProgressView().tint(CS.cyan)
             }
             if model.exportError != nil || model.exportJob.map({ $0.state == "failed" || $0.state == "canceled" }) == true {

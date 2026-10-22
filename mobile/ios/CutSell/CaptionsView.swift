@@ -40,14 +40,14 @@ struct CaptionsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Text — selected clip only") {
+                Section(L10n.tr("Text — selected clip only")) {
                     // Manual text editing is always per-clip; "All" has no
                     // real, coherent authority here (see the file doc).
                     if clips.isEmpty {
-                        Text("No clips available yet.")
+                        Text(L10n.tr("No clips available yet."))
                             .foregroundStyle(.secondary)
                     } else {
-                        Picker("Clip", selection: Binding(
+                        Picker(L10n.tr("Clip"), selection: Binding(
                             get: { selectedClipID ?? clips.first?["clip_id"]?.stringValue },
                             set: { newValue in
                                 selectedClipID = newValue
@@ -62,21 +62,21 @@ struct CaptionsView: View {
                         }
                         .accessibilityIdentifier("captions.clipPicker")
 
-                        TextField("Caption text", text: $draftText, axis: .vertical)
+                        TextField(L10n.tr("Caption text"), text: $draftText, axis: .vertical)
                             .lineLimit(3...6)
                             .disabled(selectedClip == nil)
                             .accessibilityIdentifier("captions.textField")
-                            .accessibilityLabel("Caption text for selected clip")
+                            .accessibilityLabel(L10n.tr("Caption text for selected clip"))
 
                         HStack {
-                            Button("Save text") {
+                            Button(L10n.tr("Save text")) {
                                 Task { await saveText() }
                             }
                             .disabled(selectedClip == nil)
 
                             Spacer()
 
-                            Button("Delete", role: .destructive) {
+                            Button(L10n.tr("Delete"), role: .destructive) {
                                 Task { await deleteText() }
                             }
                             .disabled(selectedClip == nil || (selectedClip?["caption_text"]?.stringValue ?? "").isEmpty)
@@ -91,16 +91,16 @@ struct CaptionsView: View {
                     Button {
                         Task { await performUndo() }
                     } label: {
-                        Label("Undo", systemImage: "arrow.uturn.backward")
+                        Label(L10n.tr("Undo"), systemImage: "arrow.uturn.backward")
                     }
                     .disabled(!(model.canUndoTimelineMutation || justMutatedCaptions))
                     .frame(minHeight: 44)
                 }
             }
-            .navigationTitle("Fix words")
+            .navigationTitle(L10n.tr("Fix words"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(L10n.tr("Done")) { dismiss() } }
             }
             .onAppear {
                 // Only reads the real current state and seeds the clip/text
@@ -108,10 +108,10 @@ struct CaptionsView: View {
                 selectedClipID = initialClipID ?? clips.first?["clip_id"]?.stringValue
                 syncDraftText()
             }
-            .alert("CutSell", isPresented: Binding(
+            .alert(L10n.tr("CutSell"), isPresented: Binding(
                 get: { model.errorMessage != nil },
                 set: { if !$0 { model.errorMessage = nil } }
-            )) { Button("OK", role: .cancel) {} } message: { Text(L10n.tr(model.errorMessage ?? "")) }
+            )) { Button(L10n.tr("OK"), role: .cancel) {} } message: { Text(L10n.tr(model.errorMessage ?? "")) }
         }
     }
 

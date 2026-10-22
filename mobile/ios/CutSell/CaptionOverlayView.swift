@@ -167,7 +167,7 @@ struct CaptionOverlayView: View {
         let highlight = Color(captionHex: highlightHex)
         var output = Text("")
         for (index, word) in cue.words.enumerated() {
-            if index > 0 { output = output + Text(" ").foregroundColor(base) }
+            if index > 0 { output = output + Text(L10n.tr(" ")).foregroundColor(base) }
             output = output + Text(word).foregroundColor(index == activeIndex ? highlight : base)
         }
         return output
@@ -261,7 +261,7 @@ private struct CaptionTapModifier: ViewModifier {
                 .contentShape(Rectangle())
                 .onTapGesture(perform: onTap)
                 .accessibilityAddTraits(.isButton)
-                .accessibilityHint("Fix the words of this caption")
+                .accessibilityHint(L10n.tr("Fix the words of this caption"))
         } else {
             content.allowsHitTesting(false)
         }

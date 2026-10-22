@@ -116,11 +116,11 @@ struct RootView: View {
                 }
             } else if let error = appState.bootstrapError {
                 ContentUnavailableView {
-                    Label("Couldn’t start CutSell", systemImage: "exclamationmark.triangle")
+                    Label(L10n.tr("Couldn’t start CutSell"), systemImage: "exclamationmark.triangle")
                 } description: {
                     Text(L10n.tr(error))
                 } actions: {
-                    Button("Try Again") {
+                    Button(L10n.tr("Try Again")) {
                         Task { await appState.bootstrap() }
                     }
                     .buttonStyle(.borderedProminent)
@@ -133,13 +133,13 @@ struct RootView: View {
         }
         .preferredColorScheme(.dark)
         .alert(
-            "Signed in",
+            L10n.tr("Signed in"),
             isPresented: Binding(
                 get: { appState.accountNotice != nil },
                 set: { if !$0 { appState.accountNotice = nil } }
             )
         ) {
-            Button("OK", role: .cancel) { appState.accountNotice = nil }
+            Button(L10n.tr("OK"), role: .cancel) { appState.accountNotice = nil }
         } message: {
             Text(L10n.tr(appState.accountNotice ?? ""))
         }

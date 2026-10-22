@@ -155,7 +155,7 @@ struct ReadyBanner: View {
                 Image(systemName: "xmark").font(.system(size: 13, weight: .bold)).foregroundStyle(CS.textMutedF)
                     .frame(width: 32, height: 32)
             }
-            .accessibilityLabel("Dismiss")
+            .accessibilityLabel(L10n.tr("Dismiss"))
         }
         .padding(12)
         .background(CS.surfaceCard, in: RoundedRectangle(cornerRadius: 18, style: .continuous))

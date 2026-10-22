@@ -128,7 +128,7 @@ struct YouView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     BrandLogo().padding(.top, 4)
-                    Text("You").font(.system(size: 30, weight: .semibold)).foregroundStyle(YouStyle.primary).padding(.top, 11)
+                    Text(L10n.tr("You")).font(.system(size: 30, weight: .semibold)).foregroundStyle(YouStyle.primary).padding(.top, 11)
                     accountCard.padding(.top, 9)
                     usageCard.padding(.top, 16)
                     VStack(spacing: 2) {
@@ -199,7 +199,7 @@ struct YouView: View {
         return Button { page = .plan } label: {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
-                    Text("THIS MONTH").font(.system(size: 12, weight: .semibold)).foregroundStyle(CS.cyan)
+                    Text(L10n.tr("THIS MONTH")).font(.system(size: 12, weight: .semibold)).foregroundStyle(CS.cyan)
                     Spacer()
                     Text(verbatim: L10n.tr("Details") + "  ›").font(.system(size: 12, weight: .semibold)).foregroundStyle(YouStyle.secondary)
                 }
@@ -297,7 +297,7 @@ struct YouScreen<Content: View>: View {
                         Image("ControlBack").resizable().frame(width: 44, height: 44).frame(width: 48, height: 48)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Back")
+                    .accessibilityLabel(L10n.tr("Back"))
                     .accessibilityIdentifier("youBack")
                     Text(LocalizedStringKey(title)).font(.system(size: 22, weight: .semibold)).foregroundStyle(YouStyle.primary)
                 }
@@ -506,7 +506,7 @@ struct LanguagePage: View {
                 "Navigation, processing states, export screens and account settings use the selected language.",
                 "Privacy and legal pages open in the selected language when available.",
             ])
-            Text("Video filenames and technical metadata remain unchanged.")
+            Text(L10n.tr("Video filenames and technical metadata remain unchanged."))
                 .font(.system(size: 11)).foregroundStyle(YouStyle.muted).padding(.top, 34)
         }
     }
@@ -676,7 +676,7 @@ struct AccountPage: View {
                     YouRow(title: "Sign out", detail: "This iPhone only", titleColor: CS.error, divider: false) { showingLogout = true }
                 } else {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Sign in with Apple to keep your projects on every iPhone you use.")
+                        Text(L10n.tr("Sign in with Apple to keep your projects on every iPhone you use."))
                             .font(.system(size: 12)).foregroundStyle(YouStyle.secondary).fixedSize(horizontal: false, vertical: true)
                         AppleSignInButton()
                     }
@@ -686,7 +686,7 @@ struct AccountPage: View {
             if let userID = session?.userID {
                 Text(verbatim: L10n.tr("Account ID") + "  •  " + YouStyle.masked(userID))
                     .font(.system(size: 11)).foregroundStyle(YouStyle.muted).padding(.top, 24)
-                Text("This ID links your projects across iPhone and web.")
+                Text(L10n.tr("This ID links your projects across iPhone and web."))
                     .font(.system(size: 11.5)).foregroundStyle(YouStyle.secondary).padding(.top, 10)
             }
             VStack(spacing: 0) {
@@ -697,29 +697,29 @@ struct AccountPage: View {
             .youCard(radius: 18)
             .padding(.top, 46)
         }
-        .alert("Display name", isPresented: $editingName) {
-            TextField("Your name", text: $nameDraft)
-            Button("Save") { Task { await profile.setName(nameDraft, session: session) } }
-            Button("Cancel", role: .cancel) {}
+        .alert(L10n.tr("Display name"), isPresented: $editingName) {
+            TextField(L10n.tr("Your name"), text: $nameDraft)
+            Button(L10n.tr("Save")) { Task { await profile.setName(nameDraft, session: session) } }
+            Button(L10n.tr("Cancel"), role: .cancel) {}
         }
-        .confirmationDialog("Log out of CutSell?", isPresented: $showingLogout, titleVisibility: .visible) {
-            Button("Log Out") { Task { profile.clear(); await appState.logout() } }
-            Button("Cancel", role: .cancel) {}
+        .confirmationDialog(L10n.tr("Log out of CutSell?"), isPresented: $showingLogout, titleVisibility: .visible) {
+            Button(L10n.tr("Log Out")) { Task { profile.clear(); await appState.logout() } }
+            Button(L10n.tr("Cancel"), role: .cancel) {}
         } message: {
-            Text("Your projects stay in your account. Sign in with Apple again to see them.")
+            Text(L10n.tr("Your projects stay in your account. Sign in with Apple again to see them."))
         }
-        .confirmationDialog("Delete CutSell account?", isPresented: $showingDelete, titleVisibility: .visible) {
-            Button("Delete My Account", role: .destructive) {
+        .confirmationDialog(L10n.tr("Delete CutSell account?"), isPresented: $showingDelete, titleVisibility: .visible) {
+            Button(L10n.tr("Delete My Account"), role: .destructive) {
                 Task {
                     do { try await appState.deleteAccount(); profile.clear() } catch { errorMessage = error.localizedDescription }
                 }
             }
-            Button("Cancel", role: .cancel) {}
+            Button(L10n.tr("Cancel"), role: .cancel) {}
         } message: {
-            Text("This permanently deletes your CutSell projects and account data and signs out all indexed sessions.")
+            Text(L10n.tr("This permanently deletes your CutSell projects and account data and signs out all indexed sessions."))
         }
-        .alert("CutSell", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
-            Button("OK", role: .cancel) {}
+        .alert(L10n.tr("CutSell"), isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+            Button(L10n.tr("OK"), role: .cancel) {}
         } message: { Text(L10n.tr(errorMessage ?? "")) }
     }
 }
@@ -778,7 +778,7 @@ struct PlanUsagePage: View {
             YouSection(label: "THIS MONTH") {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
-                        Text("Edits processed").font(.system(size: 14, weight: .semibold)).foregroundStyle(YouStyle.primary)
+                        Text(L10n.tr("Edits processed")).font(.system(size: 14, weight: .semibold)).foregroundStyle(YouStyle.primary)
                         Spacer()
                         Text(verbatim: "\(used) / \(limit)").font(.system(size: 14, weight: .semibold)).foregroundStyle(YouStyle.primary)
                     }

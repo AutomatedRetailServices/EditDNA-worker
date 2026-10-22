@@ -217,8 +217,8 @@ struct ProductsList: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                Text("⌕").font(CS.inter(16, .medium)).foregroundStyle(Color(hex: 0x99A3BD))
-                TextField("", text: $search, prompt: Text("Search brand or product").foregroundStyle(Color(hex: 0x99A3BD)))
+                Text(L10n.tr("⌕")).font(CS.inter(16, .medium)).foregroundStyle(Color(hex: 0x99A3BD))
+                TextField("", text: $search, prompt: Text(L10n.tr("Search brand or product")).foregroundStyle(Color(hex: 0x99A3BD)))
                     .font(CS.inter(13))
                     .foregroundStyle(.white)
                     .accessibilityIdentifier("productsSearch")
@@ -234,10 +234,10 @@ struct ProductsList: View {
             }
 
             if !store.available {
-                Text("Your products will appear here as your cuts are organized.")
+                Text(L10n.tr("Your products will appear here as your cuts are organized."))
                     .font(CS.inter(13)).foregroundStyle(Color(hex: 0x99A3BD)).padding(.top, 24)
             } else if brands.isEmpty && store.overview.uncategorized.isEmpty {
-                Text("No products yet. New cuts are grouped by the brand and product you talk about.")
+                Text(L10n.tr("No products yet. New cuts are grouped by the brand and product you talk about."))
                     .font(CS.inter(13)).foregroundStyle(Color(hex: 0x99A3BD)).padding(.top, 24)
                     .accessibilityIdentifier("productsEmpty")
             }
@@ -246,7 +246,7 @@ struct ProductsList: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text(brand.name).font(CS.inter(17, .bold)).foregroundStyle(.white)
                     Spacer()
-                    Text("\(brand.products.count) product\(brand.products.count == 1 ? "" : "s") · \(brand.videos) video\(brand.videos == 1 ? "" : "s")")
+                    Text(L10n.tr("\(brand.products.count) product\(brand.products.count == 1 ? "" : "s") · \(brand.videos) video\(brand.videos == 1 ? "" : "s")"))
                         .font(CS.inter(11, .medium)).foregroundStyle(Color(hex: 0x99A3BD))
                 }
                 .padding(.top, 14)
@@ -278,12 +278,12 @@ struct ProductsList: View {
             HStack(spacing: 10) {
                 Image("ProductsNeedDot").resizable().frame(width: 10, height: 10)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("\(count) video\(count == 1 ? "" : "s") need\(count == 1 ? "s" : "") a product")
+                    Text(L10n.tr("\(count) video\(count == 1 ? "" : "s") need\(count == 1 ? "s" : "") a product"))
                         .font(CS.inter(14, .semibold)).foregroundStyle(.white)
-                    Text("We couldn’t tell from the video").font(CS.inter(11)).foregroundStyle(Color(hex: 0x99A3BD))
+                    Text(L10n.tr("We couldn’t tell from the video")).font(CS.inter(11)).foregroundStyle(Color(hex: 0x99A3BD))
                 }
                 Spacer()
-                Text("Assign ›").font(CS.inter(13, .semibold)).foregroundStyle(Color(hex: 0xFFB840))
+                Text(L10n.tr("Assign ›")).font(CS.inter(13, .semibold)).foregroundStyle(Color(hex: 0xFFB840))
             }
             .padding(.leading, 15).padding(.trailing, 16)
             .frame(height: 52)
@@ -322,18 +322,18 @@ struct ProductRow: View {
             .padding(.top, 5)
             VStack(alignment: .leading, spacing: 0) {
                 Text(product.name).font(CS.inter(14, .semibold)).foregroundStyle(.white).lineLimit(1)
-                Text("\(product.videos) video\(product.videos == 1 ? "" : "s")")
+                Text(L10n.tr("\(product.videos) video\(product.videos == 1 ? "" : "s")"))
                     .font(CS.inter(11)).foregroundStyle(Color(hex: 0x99A3BD)).padding(.top, 3)
                 HStack(spacing: 10) {
-                    if product.ready > 0 { Text("\(product.ready) ready").foregroundStyle(Color(hex: 0x33D98C)) }
-                    if product.drafts > 0 { Text("\(product.drafts) draft\(product.drafts == 1 ? "" : "s")").foregroundStyle(Color(hex: 0x99A3BD)) }
-                    if product.processing > 0 { Text("\(product.processing) processing").foregroundStyle(CS.cyan) }
+                    if product.ready > 0 { Text(L10n.tr("\(product.ready) ready")).foregroundStyle(Color(hex: 0x33D98C)) }
+                    if product.drafts > 0 { Text(L10n.tr("\(product.drafts) draft\(product.drafts == 1 ? "" : "s")")).foregroundStyle(Color(hex: 0x99A3BD)) }
+                    if product.processing > 0 { Text(L10n.tr("\(product.processing) processing")).foregroundStyle(CS.cyan) }
                 }
                 .font(CS.inter(11, .semibold))
                 .padding(.top, 5)
             }
             Spacer(minLength: 8)
-            Text("›").font(CS.inter(20, .medium)).foregroundStyle(Color(hex: 0x99A3BD)).padding(.trailing, 13)
+            Text(L10n.tr("›")).font(CS.inter(20, .medium)).foregroundStyle(Color(hex: 0x99A3BD)).padding(.trailing, 13)
         }
         .frame(height: 76)
         .frame(maxWidth: .infinity)
@@ -392,15 +392,15 @@ struct ProductDetailView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
                         Button { dismiss() } label: {
-                            Text("‹ \(detail?.brand ?? "Products")").font(CS.inter(16, .semibold)).foregroundStyle(CS.cyan)
+                            Text(L10n.tr("‹ \(detail?.brand ?? "Products")")).font(CS.inter(16, .semibold)).foregroundStyle(CS.cyan)
                         }
                         .accessibilityIdentifier("productBack")
                         Spacer()
                         Menu {
-                            Button("Rename product") { newName = detail?.name ?? ""; renaming = true }
+                            Button(L10n.tr("Rename product")) { newName = detail?.name ?? ""; renaming = true }
                             Button(selecting ? "Done selecting" : "Select videos") { selecting.toggle(); selected = [] }
                         } label: {
-                            Text("•••").font(CS.sf(16, .semibold)).foregroundStyle(Color(hex: 0xF2F7FF))
+                            Text(L10n.tr("•••")).font(CS.sf(16, .semibold)).foregroundStyle(Color(hex: 0xF2F7FF))
                                 .frame(width: 34, height: 34)
                                 .background(Color(hex: 0x040813, opacity: 0.9), in: Circle())
                                 .overlay(Circle().stroke(Color(hex: 0x144080), lineWidth: 1))
@@ -412,7 +412,7 @@ struct ProductDetailView: View {
                             .accessibilityIdentifier("productTitle")
                         Spacer(minLength: 8)
                         Button { newName = detail?.name ?? ""; renaming = true } label: {
-                            Text("✎ Rename").font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
+                            Text(L10n.tr("✎ Rename")).font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
                         }
                         .accessibilityIdentifier("productRename")
                     }
@@ -433,7 +433,7 @@ struct ProductDetailView: View {
                     }
                     .padding(.top, 14)
 
-                    Text("✦  Grouped automatically from what you said in each video.")
+                    Text(L10n.tr("✦  Grouped automatically from what you said in each video."))
                         .font(CS.inter(11, .medium)).foregroundStyle(Color(hex: 0x99A3BD))
                         .padding(.horizontal, 13)
                         .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
@@ -475,7 +475,7 @@ struct ProductDetailView: View {
                             .accessibilityIdentifier("mixExportAll")
                         } else {
                         Button { openFirstDraft() } label: {
-                            Text("Edit \(drafts.count) draft\(drafts.count == 1 ? "" : "s") in bulk")
+                            Text(L10n.tr("Edit \(drafts.count) draft\(drafts.count == 1 ? "" : "s") in bulk"))
                                 .font(CS.sf(15, .semibold)).foregroundStyle(.white)
                                 .frame(maxWidth: .infinity).frame(height: 50)
                                 .background(Capsule().fill(LinearGradient(stops: [
@@ -503,10 +503,10 @@ struct ProductDetailView: View {
         .refreshable { await load() }
         .onReceive(NotificationCenter.default.publisher(for: .mixProgress)) { _ in Task { await load() } }
         .navigationDestination(item: $openProject) { project in ProjectDetailView(project: project) }
-        .alert("Rename product", isPresented: $renaming) {
-            TextField("Product name", text: $newName).accessibilityIdentifier("productRenameField")
-            Button("Save") { Task { await rename() } }
-            Button("Cancel", role: .cancel) {}
+        .alert(L10n.tr("Rename product"), isPresented: $renaming) {
+            TextField(L10n.tr("Product name"), text: $newName).accessibilityIdentifier("productRenameField")
+            Button(L10n.tr("Save")) { Task { await rename() } }
+            Button(L10n.tr("Cancel"), role: .cancel) {}
         }
         .sheet(item: $assigning, onDismiss: { selecting = false; selected = []; Task { await load() } }) { request in
             AssignProductSheet(request: request)
@@ -514,8 +514,8 @@ struct ProductDetailView: View {
                 .presentationDetents([.height(560), .large])
                 .presentationBackground(Color(hex: 0x0D121F))
         }
-        .alert("CutSell", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
-            Button("OK", role: .cancel) {}
+        .alert(L10n.tr("CutSell"), isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+            Button(L10n.tr("OK"), role: .cancel) {}
         } message: { Text(L10n.tr(errorMessage ?? "")) }
     }
 
@@ -579,7 +579,7 @@ struct ProductDetailView: View {
                 }
                 .overlay(alignment: .topLeading) {
                     if video.mixCode != nil {
-                        Text("MIX").font(CS.inter(9, .bold)).foregroundStyle(.white)
+                        Text(L10n.tr("MIX")).font(CS.inter(9, .bold)).foregroundStyle(.white)
                             .frame(width: 34, height: 18).background(CS.brandFull, in: Capsule()).padding(7)
                             .accessibilityIdentifier("mixBadge")
                     }
@@ -674,19 +674,19 @@ struct AssignProductSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Capsule().fill(Color(hex: 0x4D5770)).frame(width: 40, height: 5).frame(maxWidth: .infinity).padding(.top, 9)
-            Text("Which product is this?").font(CS.inter(22, .bold)).foregroundStyle(.white).padding(.top, 17)
-            Text("\(count) video\(count == 1 ? "" : "s") selected").font(CS.inter(13)).foregroundStyle(Color(hex: 0x99A3BD))
+            Text(L10n.tr("Which product is this?")).font(CS.inter(22, .bold)).foregroundStyle(.white).padding(.top, 17)
+            Text(L10n.tr("\(count) video\(count == 1 ? "" : "s") selected")).font(CS.inter(13)).foregroundStyle(Color(hex: 0x99A3BD))
                 .padding(.top, 5)
 
             if let suggestion = request.suggestion, let label = suggestion.label {
                 HStack {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("✦ SUGGESTED FROM THE VIDEO").font(CS.inter(10, .bold)).foregroundStyle(CS.cyan)
+                        Text(L10n.tr("✦ SUGGESTED FROM THE VIDEO")).font(CS.inter(10, .bold)).foregroundStyle(CS.cyan)
                         Text(L10n.tr(label)).font(CS.inter(15, .semibold)).foregroundStyle(.white).lineLimit(1)
                     }
                     Spacer()
                     Button { Task { await move(brand: suggestion.brand, product: suggestion.product) } } label: {
-                        Text("Confirm").font(CS.inter(13, .semibold)).foregroundStyle(.white)
+                        Text(L10n.tr("Confirm")).font(CS.inter(13, .semibold)).foregroundStyle(.white)
                             .frame(width: 78, height: 30)
                             .background(Capsule().fill(LinearGradient(stops: [
                                 .init(color: Color(hex: 0x19E5FF), location: 0), .init(color: Color(hex: 0x1769FF), location: 0.35),
@@ -714,7 +714,7 @@ struct AssignProductSheet: View {
                                     Image("ProductsRadio").resizable().frame(width: 20, height: 20)
                                     if chosen == item.product.productID { Circle().fill(CS.cyan).frame(width: 10, height: 10) }
                                 }
-                                Text("\(item.brand.name) · \(item.product.name)")
+                                Text(L10n.tr("\(item.brand.name) · \(item.product.name)"))
                                     .font(CS.inter(14, .medium)).foregroundStyle(.white).lineLimit(1)
                                 Spacer()
                             }
@@ -726,7 +726,7 @@ struct AssignProductSheet: View {
                         Rectangle().fill(Color(hex: 0x21293B)).frame(height: 1)
                     }
                     Button { addingNew = true } label: {
-                        Text("+  New brand or product").font(CS.inter(14, .semibold)).foregroundStyle(CS.cyan)
+                        Text(L10n.tr("+  New brand or product")).font(CS.inter(14, .semibold)).foregroundStyle(CS.cyan)
                             .frame(maxWidth: .infinity, alignment: .leading).frame(height: 40)
                     }
                     .accessibilityIdentifier("assignNew")
@@ -737,7 +737,7 @@ struct AssignProductSheet: View {
             Button { Task { await move(productID: chosen) } } label: {
                 Group {
                     if working { ProgressView().tint(.white) } else {
-                        Text("Move \(count) video\(count == 1 ? "" : "s")").font(CS.sf(15, .semibold)).foregroundStyle(.white)
+                        Text(L10n.tr("Move \(count) video\(count == 1 ? "" : "s")")).font(CS.sf(15, .semibold)).foregroundStyle(.white)
                     }
                 }
                 .frame(maxWidth: .infinity).frame(height: 50)
@@ -755,14 +755,14 @@ struct AssignProductSheet: View {
         .padding(.horizontal, 23)
         .background(Color(hex: 0x0D121F).ignoresSafeArea())
         .preferredColorScheme(.dark)
-        .alert("New brand or product", isPresented: $addingNew) {
-            TextField("Brand (e.g. CeraVe)", text: $newBrand).accessibilityIdentifier("assignNewBrand")
-            TextField("Product (e.g. Hydrating Cleanser)", text: $newProduct).accessibilityIdentifier("assignNewProduct")
-            Button("Move here") { Task { await move(brand: newBrand, product: newProduct) } }
-            Button("Cancel", role: .cancel) {}
+        .alert(L10n.tr("New brand or product"), isPresented: $addingNew) {
+            TextField(L10n.tr("Brand (e.g. CeraVe)"), text: $newBrand).accessibilityIdentifier("assignNewBrand")
+            TextField(L10n.tr("Product (e.g. Hydrating Cleanser)"), text: $newProduct).accessibilityIdentifier("assignNewProduct")
+            Button(L10n.tr("Move here")) { Task { await move(brand: newBrand, product: newProduct) } }
+            Button(L10n.tr("Cancel"), role: .cancel) {}
         }
-        .alert("CutSell", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
-            Button("OK", role: .cancel) {}
+        .alert(L10n.tr("CutSell"), isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+            Button(L10n.tr("OK"), role: .cancel) {}
         } message: { Text(L10n.tr(errorMessage ?? "")) }
         .task { await store.refresh(session: appState.session, projects: appState.projects) }
     }

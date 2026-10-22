@@ -177,15 +177,15 @@ struct TikTokReturnPrompt: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onChange(of: phase) { _, value in poster.sceneChanged(value) }
-            .alert("Did you post it?", isPresented: Binding(get: { poster.askPosted != nil }, set: { if !$0 { poster.askPosted = nil } }),
+            .alert(L10n.tr("Did you post it?"), isPresented: Binding(get: { poster.askPosted != nil }, set: { if !$0 { poster.askPosted = nil } }),
                    presenting: poster.askPosted) { post in
-                Button("Yes, posted") {
+                Button(L10n.tr("Yes, posted")) {
                     Task { await post.onPosted?() }
                     CutSellDiagnostics.log("tiktok_post_answer", ["posted": "1"])
                 }
-                Button("Not yet", role: .cancel) { CutSellDiagnostics.log("tiktok_post_answer", ["posted": "0"]) }
+                Button(L10n.tr("Not yet"), role: .cancel) { CutSellDiagnostics.log("tiktok_post_answer", ["posted": "0"]) }
             } message: { _ in
-                Text("We'll mark the video as posted in your plan.")
+                Text(L10n.tr("We'll mark the video as posted in your plan."))
             }
     }
 }

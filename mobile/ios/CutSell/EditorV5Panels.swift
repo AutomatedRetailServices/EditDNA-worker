@@ -146,7 +146,7 @@ struct GradientSliderV5: View {
         }
         .frame(height: 30)
         .accessibilityElement()
-        .accessibilityLabel("Volume")
+        .accessibilityLabel(L10n.tr("Volume"))
         .accessibilityValue("\(Int((value * 100).rounded()))%")
         .accessibilityAdjustableAction { direction in
             switch direction {
@@ -208,7 +208,7 @@ struct OverlayPanelV5: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Rectangle().fill(Color(hex: 0x19345F)).frame(height: 1).padding(.horizontal, 15).padding(.top, 4)
-            Text("Layout").font(.system(size: 13, weight: .medium)).foregroundStyle(CS.textSecondaryF)
+            Text(L10n.tr("Layout")).font(.system(size: 13, weight: .medium)).foregroundStyle(CS.textSecondaryF)
                 .padding(.leading, 15).padding(.top, 9)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
@@ -219,7 +219,7 @@ struct OverlayPanelV5: View {
             .frame(height: 74)
             .padding(.top, 2)
             HStack {
-                Text("Edge").font(.system(size: 13, weight: .medium)).foregroundStyle(CS.textSecondaryF)
+                Text(L10n.tr("Edge")).font(.system(size: 13, weight: .medium)).foregroundStyle(CS.textSecondaryF)
                 Spacer()
                 edgeSegments
             }
@@ -243,7 +243,7 @@ struct OverlayPanelV5: View {
                 .padding(.top, 4)
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.overlayTitle(overlayID)).font(.system(size: 16, weight: .semibold)).foregroundStyle(CS.textPrimaryF)
-                Text("Overlay · \(EditorTime.minutes(item?.start ?? 0))–\(EditorTime.minutes(item?.end ?? 0))")
+                Text(L10n.tr("Overlay · \(EditorTime.minutes(item?.start ?? 0))–\(EditorTime.minutes(item?.end ?? 0))"))
                     .font(.system(size: 11.5)).foregroundStyle(CS.textSecondaryF).monospacedDigit()
             }
             .padding(.leading, 8).padding(.top, 5)
@@ -268,7 +268,7 @@ struct OverlayPanelV5: View {
             }
             .buttonStyle(.plain)
             .padding(.top, 4)
-            .accessibilityLabel("Done")
+            .accessibilityLabel(L10n.tr("Done"))
             .accessibilityIdentifier("panelClose")
         }
         .padding(.leading, 15).padding(.trailing, 8).padding(.top, 9)
@@ -311,7 +311,7 @@ struct OverlayPanelV5: View {
             .frame(width: 52)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Layout \(layout.title)")
+        .accessibilityLabel(L10n.tr("Layout \(layout.title)"))
         .accessibilityAddTraits(chosen ? .isSelected : [])
         .accessibilityIdentifier("layout_\(layout.rawValue)")
     }
@@ -419,8 +419,8 @@ struct CleanUpRowV5: View {
             HStack(spacing: 10) {
                 Toggle(isOn: Binding(get: { on }, set: { model.setCleanUp(target, $0) })) {
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("Clean up voice").font(.system(size: 15, weight: .medium)).foregroundStyle(.white)
-                        Text("Removes background noise from the voice")
+                        Text(L10n.tr("Clean up voice")).font(.system(size: 15, weight: .medium)).foregroundStyle(.white)
+                        Text(L10n.tr("Removes background noise from the voice"))
                             .font(.system(size: 12)).foregroundStyle(CS.textSecondaryF).lineLimit(1).minimumScaleFactor(0.8)
                     }
                 }
@@ -430,16 +430,16 @@ struct CleanUpRowV5: View {
             if let progress {
                 HStack(spacing: 8) {
                     ProgressView(value: Double(progress), total: 100).tint(CS.cyan).frame(maxWidth: 140)
-                    Text("Cleaning… \(progress)%").font(.system(size: 12, weight: .medium)).monospacedDigit()
+                    Text(L10n.tr("Cleaning… \(progress)%")).font(.system(size: 12, weight: .medium)).monospacedDigit()
                         .foregroundStyle(CS.textSecondaryF)
                         .accessibilityIdentifier("cleanUpProgress")
                 }
             } else if failed {
-                Button("Couldn't clean the voice. Tap to try again.") { center.retry(keys, project: model.project) }
+                Button(L10n.tr("Couldn't clean the voice. Tap to try again.")) { center.retry(keys, project: model.project) }
                     .font(.system(size: 12, weight: .medium)).foregroundStyle(CS.cyan)
                     .accessibilityIdentifier("cleanUpRetry")
             } else if on {
-                Text("Playing the clean voice").font(.system(size: 12)).foregroundStyle(CS.textMutedF)
+                Text(L10n.tr("Playing the clean voice")).font(.system(size: 12)).foregroundStyle(CS.textMutedF)
                     .accessibilityIdentifier("cleanUpReady")
             }
         }
@@ -526,17 +526,17 @@ struct VoiceClipPanelV5: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Done")
+            .accessibilityLabel(L10n.tr("Done"))
             .accessibilityIdentifier("panelClose")
             .offset(x: 312, y: 8)
             Rectangle().fill(Self.border).frame(width: 326, height: 1).offset(x: 15, y: 69)
-            Text("Voice").font(.system(size: 13, weight: .medium)).foregroundStyle(Self.secondary).offset(x: 15, y: 88)
+            Text(L10n.tr("Voice")).font(.system(size: 13, weight: .medium)).foregroundStyle(Self.secondary).offset(x: 15, y: 88)
             slider.offset(x: 80, y: 85)
             ForEach([(0, 87.5), (100, 182.5), (200, 281.5)], id: \.0) { item in
-                Text("\(item.0)").font(.system(size: 9.5, weight: .medium)).foregroundStyle(Self.muted)
+                Text(L10n.tr("\(item.0)")).font(.system(size: 9.5, weight: .medium)).foregroundStyle(Self.muted)
                     .offset(x: item.1, y: 107)
             }
-            Text("\(Int((value * 100).rounded()))%")
+            Text(L10n.tr("\(Int((value * 100).rounded()))%"))
                 .font(.system(size: 13, weight: .semibold)).monospacedDigit().foregroundStyle(CS.textPrimaryF)
                 .frame(width: 48, height: 26)
                 .background(Self.control, in: RoundedRectangle(cornerRadius: 8))
@@ -545,7 +545,7 @@ struct VoiceClipPanelV5: View {
             Button(action: onDelete) {
                 HStack(spacing: 8) {
                     Image("VoPanelTrash").resizable().frame(width: 18, height: 18)
-                    Text("Delete voiceover").font(.system(size: 13.5, weight: .medium)).foregroundStyle(Self.error)
+                    Text(L10n.tr("Delete voiceover")).font(.system(size: 13.5, weight: .medium)).foregroundStyle(Self.error)
                 }
                 .frame(width: 326, height: 38)
                 .background(Self.error.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
@@ -616,7 +616,7 @@ struct VoiceClipPanelV5: View {
             }
             .onEnded { _ in model.updateAudioClip(id: clipID) { $0.volume = value } })
         .accessibilityElement()
-        .accessibilityLabel("Voice volume")
+        .accessibilityLabel(L10n.tr("Voice volume"))
         .accessibilityValue("\(Int((value * 100).rounded()))%")
         .accessibilityAdjustableAction { direction in
             switch direction {
@@ -645,7 +645,7 @@ struct SoundClipPanelV5: View {
                     subtitle: clip?.kind == .music ? "Music" : "CutSell sound", onClose: onClose) {
             HStack(spacing: 12) {
                 GradientSliderV5(value: $value, maximum: 2) { setVolume(value) }
-                Text("\(Int((value * 100).rounded()))%")
+                Text(L10n.tr("\(Int((value * 100).rounded()))%"))
                     .font(.system(size: 15, weight: .semibold)).monospacedDigit().foregroundStyle(.white)
                     .frame(width: 52, alignment: .trailing)
             }
@@ -744,7 +744,7 @@ struct AudioPanelV5: View {
                 Button(action: onMusic) {
                     HStack(spacing: 8) {
                         Image(systemName: "music.note").font(.system(size: 14, weight: .semibold))
-                        Text("Music from Files").font(.system(size: 15, weight: .medium))
+                        Text(L10n.tr("Music from Files")).font(.system(size: 15, weight: .medium))
                     }
                     .foregroundStyle(.white).padding(.horizontal, 12).frame(height: 36)
                     .background(Color(hex: 0x0A1326), in: RoundedRectangle(cornerRadius: 12))
@@ -754,7 +754,7 @@ struct AudioPanelV5: View {
             }
             .padding(.top, 12)
             if library.failed && !library.loading {
-                Button("Sounds couldn't download. Tap to try again.") { Task { await library.ensure() } }
+                Button(L10n.tr("Sounds couldn't download. Tap to try again.")) { Task { await library.ensure() } }
                     .font(.system(size: 11, weight: .medium)).foregroundStyle(CS.cyan)
                     .padding(.top, 4)
                     .accessibilityIdentifier("soundsRetry")
@@ -818,7 +818,7 @@ struct VoiceOverSheetV5: View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Image("Ed4OfficialMic").resizable().frame(width: 26, height: 26)
-                Text("Recording voice-over").font(.system(size: 18, weight: .semibold)).foregroundStyle(CS.textPrimaryF)
+                Text(L10n.tr("Recording voice-over")).font(.system(size: 18, weight: .semibold)).foregroundStyle(CS.textPrimaryF)
             }
             .padding(.top, 14)
             Text(isRecording ? (recorder.isPaused ? "Paused · " : "● REC · ") + VoiceRecorder.formatted(recorder.elapsed)
@@ -827,8 +827,8 @@ struct VoiceOverSheetV5: View {
                 .padding(.top, 4)
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Enhance voice").font(.system(size: 15, weight: .medium)).foregroundStyle(CS.textPrimaryF)
-                    Text("Removes background noise and sounds, so only your voice is heard.")
+                    Text(L10n.tr("Enhance voice")).font(.system(size: 15, weight: .medium)).foregroundStyle(CS.textPrimaryF)
+                    Text(L10n.tr("Removes background noise and sounds, so only your voice is heard."))
                         .font(.system(size: 12)).foregroundStyle(CS.textSecondaryF).fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 4)
@@ -897,7 +897,7 @@ struct VoiceOverSheetV5: View {
             }
             .padding(.top, 10)
             if case .permissionDenied = recorder.state {
-                Text("Allow the microphone in Settings to record.").font(.system(size: 11)).foregroundStyle(CS.error)
+                Text(L10n.tr("Allow the microphone in Settings to record.")).font(.system(size: 11)).foregroundStyle(CS.error)
             }
         }
     }
@@ -935,10 +935,10 @@ struct VoiceOverSheetV5: View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Image("Ed4OfficialMic").resizable().frame(width: 26, height: 26)
-                Text("Voice-over").font(.system(size: 18, weight: .semibold)).foregroundStyle(CS.textPrimaryF)
+                Text(L10n.tr("Voice-over")).font(.system(size: 18, weight: .semibold)).foregroundStyle(CS.textPrimaryF)
             }
             .padding(.top, 14)
-            Text("Preview your recording before saving.")
+            Text(L10n.tr("Preview your recording before saving."))
                 .font(.system(size: 13)).foregroundStyle(Color(hex: 0x8FA8D1)).padding(.top, 4)
             // Figma 1120:91 (Waveform/MinimalPeaks): 310 x 34 box, 42 rounded peaks, blue = heard, light = still to hear.
             GeometryReader { proxy in
@@ -989,7 +989,7 @@ struct VoiceOverSheetV5: View {
                     recorder.discardTake()
                     step = .record
                 } label: {
-                    Label("Retake", systemImage: "arrow.counterclockwise")
+                    Label(L10n.tr("Retake"), systemImage: "arrow.counterclockwise")
                         .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
                         .frame(maxWidth: .infinity).frame(height: 46)
                         .background(Color(hex: 0x0F081A), in: RoundedRectangle(cornerRadius: 14))
@@ -1042,11 +1042,11 @@ struct CountdownOverlayV5: View {
                     Circle().trim(from: 0, to: progress)
                         .stroke(Tornasol.angular, style: StrokeStyle(lineWidth: 6, lineCap: .round))
                         .rotationEffect(.degrees(-90))
-                    Text("\(value)").font(.system(size: 64, weight: .bold)).foregroundStyle(.white)
+                    Text(L10n.tr("\(value)")).font(.system(size: 64, weight: .bold)).foregroundStyle(.white)
                 }
                 .frame(width: 128, height: 128)
-                Text("Get ready…").font(.system(size: 17, weight: .semibold)).foregroundStyle(.white)
-                Text("Recording starts in \(value) second\(value == 1 ? "" : "s")")
+                Text(L10n.tr("Get ready…")).font(.system(size: 17, weight: .semibold)).foregroundStyle(.white)
+                Text(L10n.tr("Recording starts in \(value) second\(value == 1 ? "" : "s")"))
                     .font(.system(size: 13)).foregroundStyle(CS.textSecondaryF)
             }
             .padding(.top, 28)

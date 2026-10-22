@@ -12,9 +12,9 @@ struct VisualTimelineView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Timeline").font(.headline)
+                Text(L10n.tr("Timeline")).font(.headline)
                 Spacer()
-                Text("\(model.selectedClips.count) clips")
+                Text(L10n.tr("\(model.selectedClips.count) clips"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -49,7 +49,7 @@ struct VisualTimelineView: View {
                let clip = model.selectedClips.first(where: { $0["clip_id"]?.stringValue == selectedClipID }) {
                 TimelineClipInspector(model: model, clip: clip, assets: assetCatalog[clip["source_asset_id"]?.stringValue ?? ""])
             } else {
-                Text("Tap a clip to swap takes, trim, split, edit captions or adjust audio.")
+                Text(L10n.tr("Tap a clip to swap takes, trim, split, edit captions or adjust audio."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -121,7 +121,7 @@ private struct TimelineClipCell: View {
             }
 
             HStack(spacing: 6) {
-                Text("#\(index + 1)").fontWeight(.semibold)
+                Text(L10n.tr("#\(index + 1)")).fontWeight(.semibold)
                 if let role = clip["semantic_role"]?.stringValue, role.lowercased() != "other", !role.isEmpty {
                     Text(L10n.tr(role.capitalized))
                 }
@@ -172,14 +172,14 @@ private struct TimelineClipInspector: View {
                                 Task { await model.swap(selectedClipID: clipID, replacementClipID: replacementID) }
                             } label: {
                                 VStack(alignment: .leading) {
-                                    Text("Take \(index + 1)")
+                                    Text(L10n.tr("Take \(index + 1)"))
                                     Text(L10n.tr(alternate["text"]?.stringValue ?? "Alternate take"))
                                 }
                             }
                         }
                     }
                 } label: {
-                    Label("Swap Take (\(alternates.count))", systemImage: "arrow.triangle.2.circlepath")
+                    Label(L10n.tr("Swap Take (\(alternates.count))"), systemImage: "arrow.triangle.2.circlepath")
                 }
                 .buttonStyle(.borderedProminent)
             }
@@ -190,7 +190,7 @@ private struct TimelineClipInspector: View {
                     .foregroundStyle(Color.accentColor)
             }
 
-            TextField("Caption", text: $caption, axis: .vertical)
+            TextField(L10n.tr("Caption"), text: $caption, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...3)
                 .onSubmit { Task { await model.editCaption(clipID: clipID, text: caption) } }
@@ -198,7 +198,7 @@ private struct TimelineClipInspector: View {
             if end - start >= 0.30 {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("Trim")
+                        Text(L10n.tr("Trim"))
                         Spacer()
                         Text(L10n.tr(String(format: "%.2f – %.2f", trimStart, trimEnd)))
                             .monospacedDigit()
@@ -208,7 +208,7 @@ private struct TimelineClipInspector: View {
 
                     Slider(value: $trimStart, in: start...max(start, trimEnd - 0.15), step: 0.01)
                     Slider(value: $trimEnd, in: min(end, trimStart + 0.15)...end, step: 0.01)
-                    Button("Apply trim") {
+                    Button(L10n.tr("Apply trim")) {
                         Task { await model.trim(clipID: clipID, start: trimStart, end: trimEnd) }
                     }
                     .buttonStyle(.bordered)
@@ -221,18 +221,18 @@ private struct TimelineClipInspector: View {
                     Button {
                         Task { await model.split(clipID: clipID, at: splitTime) }
                     } label: {
-                        Label("Split", systemImage: "scissors")
+                        Label(L10n.tr("Split"), systemImage: "scissors")
                     }
                     .buttonStyle(.bordered)
                 }
 
                 Menu {
-                    Button("Mute") { Task { await model.setAudio(clipID: clipID, muted: true) } }
-                    Button("Unmute") { Task { await model.setAudio(clipID: clipID, muted: false) } }
-                    Button("Volume 50%") { Task { await model.setAudio(clipID: clipID, volume: 0.5) } }
-                    Button("Volume 100%") { Task { await model.setAudio(clipID: clipID, volume: 1.0) } }
+                    Button(L10n.tr("Mute")) { Task { await model.setAudio(clipID: clipID, muted: true) } }
+                    Button(L10n.tr("Unmute")) { Task { await model.setAudio(clipID: clipID, muted: false) } }
+                    Button(L10n.tr("Volume 50%")) { Task { await model.setAudio(clipID: clipID, volume: 0.5) } }
+                    Button(L10n.tr("Volume 100%")) { Task { await model.setAudio(clipID: clipID, volume: 1.0) } }
                 } label: {
-                    Label("Audio", systemImage: "waveform")
+                    Label(L10n.tr("Audio"), systemImage: "waveform")
                 }
                 .buttonStyle(.bordered)
 

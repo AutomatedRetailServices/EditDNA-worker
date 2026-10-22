@@ -93,7 +93,7 @@ struct BrollView: View {
                     stageRow
                 }
 
-                Section("Import") {
+                Section(L10n.tr("Import")) {
                     // Real capability, independent of any timeline
                     // placement precondition: registering a new asset via
                     // /timeline-uploads + /timeline-assets never requires a
@@ -104,37 +104,37 @@ struct BrollView: View {
                     Button {
                         isImporting = true
                     } label: {
-                        Label("Import B-roll video", systemImage: "video.badge.plus")
+                        Label(L10n.tr("Import B-roll video"), systemImage: "video.badge.plus")
                     }
                     .accessibilityIdentifier("broll.importButton")
 
-                    Text("Only videos can go on this track.")
+                    Text(L10n.tr("Only videos can go on this track."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
-                Section("Add existing to timeline") {
+                Section(L10n.tr("Add existing to timeline")) {
                     if readyAssets.isEmpty {
-                        Text("No ready B-roll video yet.")
+                        Text(L10n.tr("No ready B-roll video yet."))
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(readyAssets) { asset in
-                            Button("\(Int(asset.durationSec))s B-roll") {
+                            Button(L10n.tr("\(Int(asset.durationSec))s B-roll")) {
                                 Task { await addToTimeline(asset) }
                             }
                             .disabled(model.baseEditAssetID == nil)
                         }
                         if model.baseEditAssetID == nil {
-                            Text("This cut is still getting ready. Try again in a moment.")
+                            Text(L10n.tr("This cut is still getting ready. Try again in a moment."))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     }
                 }
 
-                Section("B-roll track") {
+                Section(L10n.tr("B-roll track")) {
                     if placements.isEmpty {
-                        Text("No B-roll placed on the timeline yet.")
+                        Text(L10n.tr("No B-roll placed on the timeline yet."))
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(placements) { placement in
@@ -159,26 +159,26 @@ struct BrollView: View {
                 }
 
                 if let selectedPlacement {
-                    Section("Split selected placement") {
+                    Section(L10n.tr("Split selected placement")) {
                         Slider(
                             value: $splitTime,
                             in: selectedPlacement.timelineStartSec...selectedPlacement.timelineEndSec
                         )
-                        .accessibilityLabel("Split point")
+                        .accessibilityLabel(L10n.tr("Split point"))
                         .accessibilityValue("\(String(format: "%.1f", splitTime)) seconds")
 
                         HStack(spacing: 14) {
                             Button {
                                 Task { await performSplit() }
                             } label: {
-                                Label("Split", systemImage: "scissors")
+                                Label(L10n.tr("Split"), systemImage: "scissors")
                             }
                             .disabled(!canSplitAtSplitTime(selectedPlacement))
 
                             Button(role: .destructive) {
                                 Task { await performDelete() }
                             } label: {
-                                Label("Delete", systemImage: "trash")
+                                Label(L10n.tr("Delete"), systemImage: "trash")
                             }
                             .accessibilityIdentifier("broll.deleteButton")
                         }
@@ -191,11 +191,11 @@ struct BrollView: View {
                     // a full-frame visual replacement (never positioned or
                     // scaled), so this is the ONLY per-placement control
                     // this screen offers beyond Split/Delete.
-                    Section("Audio mode") {
-                        Picker("Audio mode", selection: audioModeBinding(for: selectedPlacement)) {
-                            Text("Keep primary voice").tag(TimelineAudioMode.keepPrimaryVoice)
-                            Text("Use B-roll's own audio").tag(TimelineAudioMode.useBrollAudio)
-                            Text("Mute B-roll audio").tag(TimelineAudioMode.muteBrollAudio)
+                    Section(L10n.tr("Audio mode")) {
+                        Picker(L10n.tr("Audio mode"), selection: audioModeBinding(for: selectedPlacement)) {
+                            Text(L10n.tr("Keep primary voice")).tag(TimelineAudioMode.keepPrimaryVoice)
+                            Text(L10n.tr("Use B-roll's own audio")).tag(TimelineAudioMode.useBrollAudio)
+                            Text(L10n.tr("Mute B-roll audio")).tag(TimelineAudioMode.muteBrollAudio)
                         }
                         .pickerStyle(.menu)
                         .accessibilityIdentifier("broll.audioModePicker")
@@ -206,16 +206,16 @@ struct BrollView: View {
                     Button {
                         Task { await performUndo() }
                     } label: {
-                        Label("Undo", systemImage: "arrow.uturn.backward")
+                        Label(L10n.tr("Undo"), systemImage: "arrow.uturn.backward")
                     }
                     .disabled(!canUndo)
                     .frame(minHeight: 44)
                 }
             }
-            .navigationTitle("B-roll")
+            .navigationTitle(L10n.tr("B-roll"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(L10n.tr("Done")) { dismiss() } }
             }
             .onAppear {
                 selectedPlacementID = initialPlacementID ?? placements.first?.placementID
@@ -229,10 +229,10 @@ struct BrollView: View {
                     model.errorMessage = error.localizedDescription
                 }
             }
-            .alert("CutSell", isPresented: Binding(
+            .alert(L10n.tr("CutSell"), isPresented: Binding(
                 get: { model.errorMessage != nil },
                 set: { if !$0 { model.errorMessage = nil } }
-            )) { Button("OK", role: .cancel) {} } message: { Text(L10n.tr(model.errorMessage ?? "")) }
+            )) { Button(L10n.tr("OK"), role: .cancel) {} } message: { Text(L10n.tr(model.errorMessage ?? "")) }
         }
     }
 
@@ -240,18 +240,18 @@ struct BrollView: View {
     private var stageRow: some View {
         switch stage {
         case .empty:
-            Label("No B-roll yet", systemImage: "film.stack")
+            Label(L10n.tr("No B-roll yet"), systemImage: "film.stack")
                 .foregroundStyle(.secondary)
         case .importing:
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text("Importing…")
+                Text(L10n.tr("Importing…"))
             }
         case .ready:
-            Label("Ready", systemImage: "checkmark.circle.fill")
+            Label(L10n.tr("Ready"), systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
         case .error:
-            Label("Error", systemImage: "exclamationmark.triangle.fill")
+            Label(L10n.tr("Error"), systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(.red)
         }
     }

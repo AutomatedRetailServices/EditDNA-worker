@@ -207,7 +207,7 @@ struct TimelineV4: View {
     private func timeLabel(_ now: Double) -> some View {
         HStack(spacing: 4) {
             Text(EditorTime.clock(now)).font(.system(size: 12, weight: .semibold)).foregroundStyle(CS.textPrimaryF)
-            Text("/ \(EditorTime.clock(duration))").font(.system(size: 12, weight: .medium)).foregroundStyle(CS.textMutedF)
+            Text(L10n.tr("/ \(EditorTime.clock(duration))")).font(.system(size: 12, weight: .medium)).foregroundStyle(CS.textMutedF)
         }
         .monospacedDigit()
         .accessibilityElement(children: .combine)
@@ -216,7 +216,7 @@ struct TimelineV4: View {
 
     private func plusButton(action: @escaping () -> Void, label: String) -> some View {
         Button(action: action) {
-            Text("+").font(.system(size: 18, weight: .medium)).foregroundStyle(Color(hex: 0x050814))
+            Text(L10n.tr("+")).font(.system(size: 18, weight: .medium)).foregroundStyle(Color(hex: 0x050814))
                 .frame(width: 24, height: 24)
                 .background(Color.white, in: RoundedRectangle(cornerRadius: 6))
         }
@@ -252,7 +252,7 @@ struct TimelineV4: View {
                                 .frame(width: 32, height: 32)
                                 .background(CS.surfaceCard, in: RoundedRectangle(cornerRadius: 8))
                                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(CS.borderDefault, lineWidth: 1))
-                                .accessibilityLabel("Sounds")
+                                .accessibilityLabel(L10n.tr("Sounds"))
                         case .layer(let layer):
                             rowIcon("Ed4RowLayers", label: "Overlay layer \(layer + 1)", action: onAddOverlay)
                                 .overlay(alignment: .topTrailing) {
@@ -345,7 +345,7 @@ struct TimelineV4: View {
                 }
                 let mid = x(seconds + step / 2)
                 if seconds + step / 2 <= duration, mid > 44, mid < width - 4 {
-                    Text("•").font(.system(size: 8, weight: .bold)).foregroundStyle(CS.textMutedF)
+                    Text(L10n.tr("•")).font(.system(size: 8, weight: .bold)).foregroundStyle(CS.textMutedF)
                         .position(x: mid, y: 6)
                 }
             }
@@ -691,7 +691,7 @@ struct TimelineV4: View {
                         model.moveKeyframe(id: mark.id, to: max(0, min(duration - 0.01, target)))
                     })
                 .accessibilityElement()
-                .accessibilityLabel("Keyframe at \(EditorTime.tenths(mark.time))")
+                .accessibilityLabel(L10n.tr("Keyframe at \(EditorTime.tenths(mark.time))"))
                 .accessibilityValue(String(format: "%.2f", mark.time))
                 .accessibilityIdentifier(mark.isAI ? "zoomKeyframe" : "userKeyframe")
         }
@@ -1121,7 +1121,7 @@ private struct ClipBlockV4: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Clip \(number)")
+        .accessibilityLabel(L10n.tr("Clip \(number)"))
     }
 
     /// Cyan bars where the clip has speech (from the words' times), low where it is quiet.
@@ -1217,7 +1217,7 @@ struct AudioTrimState {
 struct LayerBadge: View {
     let number: Int
     var body: some View {
-        Text("\(number)")
+        Text(L10n.tr("\(number)"))
             .font(.system(size: 9, weight: .semibold)).foregroundStyle(.white)
             .frame(width: 14, height: 14)
             .background(LinearGradient(colors: [CS.cyan, Color(hex: 0x1769FF), Color(hex: 0x7C3AED), Color(hex: 0xFF21D7)],
@@ -1317,7 +1317,7 @@ struct OverlayBlockV4: View {
             }
             if let progress = item.uploading {
                 Color.black.opacity(0.45)
-                Text("\(Int((progress * 100).rounded()))%")
+                Text(L10n.tr("\(Int((progress * 100).rounded()))%"))
                     .font(.system(size: 10, weight: .bold)).monospacedDigit().foregroundStyle(.white)
                     .padding(.leading, 6)
             } else if item.failed {

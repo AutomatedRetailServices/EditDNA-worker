@@ -42,24 +42,24 @@ struct NewCutView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Create") {
-                    Picker("Mode", selection: $mode) {
+                Section(L10n.tr("Create")) {
+                    Picker(L10n.tr("Mode"), selection: $mode) {
                         ForEach(Mode.allCases) { Text(L10n.tr($0.rawValue)).tag($0) }
                     }
                     .pickerStyle(.segmented)
                     .disabled(resumeProjectID != nil || isImportingFromPhotos)
-                    TextField("Project name (optional)", text: $title)
+                    TextField(L10n.tr("Project name (optional)"), text: $title)
                         .disabled(resumeProjectID != nil)
                     if resumeProjectID != nil {
-                        Label("Resuming interrupted upload", systemImage: "arrow.clockwise.icloud")
+                        Label(L10n.tr("Resuming interrupted upload"), systemImage: "arrow.clockwise.icloud")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
 
-                Section("Footage") {
+                Section(L10n.tr("Footage")) {
                     Button { showCamera = true } label: {
-                        Label("Record in CutSell", systemImage: "camera.fill")
+                        Label(L10n.tr("Record in CutSell"), systemImage: "camera.fill")
                     }
                     .disabled(resumeProjectID != nil || isImportingFromPhotos || (mode == .multiple && selected.count >= maxMultiClipSources))
 
@@ -83,11 +83,11 @@ struct NewCutView: View {
                     }
 
                     if selected.isEmpty && !isImportingFromPhotos {
-                        Text("Record here or choose existing footage. Both use the same CutSell AI edit pipeline.")
+                        Text(L10n.tr("Record here or choose existing footage. Both use the same CutSell AI edit pipeline."))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     } else if mode == .multiple {
-                        Text("\(selected.count) of \(maxMultiClipSources) clips selected")
+                        Text(L10n.tr("\(selected.count) of \(maxMultiClipSources) clips selected"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -101,7 +101,7 @@ struct NewCutView: View {
                                 Text(L10n.tr(duration(item.duration))).font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
-                            Text("\(index + 1)").font(.caption.monospacedDigit())
+                            Text(L10n.tr("\(index + 1)")).font(.caption.monospacedDigit())
                         }
                     }
                     .onMove { source, destination in
@@ -115,10 +115,10 @@ struct NewCutView: View {
                 }
 
                 if mode == .multiple {
-                    Section("Cut behavior") {
-                        Toggle("Natural audio overlap", isOn: $audioOverlap)
+                    Section(L10n.tr("Cut behavior")) {
+                        Toggle(L10n.tr("Natural audio overlap"), isOn: $audioOverlap)
                             .disabled(resumeProjectID != nil)
-                        Text("Off is the safest default. You can change audio later in the editor.")
+                        Text(L10n.tr("Off is the safest default. You can change audio later in the editor."))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -135,7 +135,7 @@ struct NewCutView: View {
             .navigationTitle(resumeProjectID == nil ? "New Cut" : "Resume Cut")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(L10n.tr("Cancel")) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(resumeProjectID == nil ? "Create" : "Resume") { Task { await submit() } }
                         .disabled(selected.isEmpty || isSubmitting || isImportingFromPhotos)
@@ -144,10 +144,10 @@ struct NewCutView: View {
             .fullScreenCover(isPresented: $showCamera) {
                 CameraCaptureView { url in Task { await addRecording(url) } }
             }
-            .alert("Couldn’t create cut", isPresented: Binding(
+            .alert(L10n.tr("Couldn’t create cut"), isPresented: Binding(
                 get: { errorMessage != nil },
                 set: { if !$0 { errorMessage = nil } }
-            )) { Button("OK", role: .cancel) {} } message: { Text(L10n.tr(errorMessage ?? "")) }
+            )) { Button(L10n.tr("OK"), role: .cancel) {} } message: { Text(L10n.tr(errorMessage ?? "")) }
         }
     }
 

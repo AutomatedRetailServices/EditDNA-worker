@@ -357,16 +357,16 @@ struct MixSetupView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     ZStack {
-                        Text("Mix").font(CS.inter(18, .bold)).foregroundStyle(.white)
+                        Text(L10n.tr("Mix")).font(CS.inter(18, .bold)).foregroundStyle(.white)
                         HStack {
-                            Button(action: onClose) { Text("✕").font(CS.inter(20, .medium)).foregroundStyle(.white) }
+                            Button(action: onClose) { Text(L10n.tr("✕")).font(CS.inter(20, .medium)).foregroundStyle(.white) }
                                 .accessibilityIdentifier("mixClose")
                             Spacer()
                         }
                         .padding(.leading, 2)
                     }
                     .padding(.top, 10)
-                    Text("Record a few versions of each part. CutSell cleans every clip once and builds every combination for you.")
+                    Text(L10n.tr("Record a few versions of each part. CutSell cleans every clip once and builds every combination for you."))
                         .font(CS.inter(13)).foregroundStyle(Color(hex: 0x99A3BD))
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 22)
@@ -379,7 +379,7 @@ struct MixSetupView: View {
                     .padding(.top, 12)
                     if sections.count < MixCenter.maxSections {
                         Button { addSection() } label: {
-                            Text("+  Add section").font(CS.inter(14, .semibold)).foregroundStyle(Color(hex: 0x99A3BD))
+                            Text(L10n.tr("+  Add section")).font(CS.inter(14, .semibold)).foregroundStyle(Color(hex: 0x99A3BD))
                                 .frame(maxWidth: .infinity).frame(height: 40)
                                 .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
                                     .stroke(Color(hex: 0x596685), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
@@ -408,7 +408,7 @@ struct MixSetupView: View {
                     ProgressView().tint(CS.cyan)
                     Text(L10n.tr(submitter.step.isEmpty ? "Preparing your Mix…" : submitter.step))
                         .font(CS.inter(14, .semibold)).foregroundStyle(.white).multilineTextAlignment(.center)
-                    Text("Keep CutSell open until the audio is sent. The videos keep uploading in the background.")
+                    Text(L10n.tr("Keep CutSell open until the audio is sent. The videos keep uploading in the background."))
                         .font(CS.inter(12)).foregroundStyle(Color(hex: 0x99A3BD)).multilineTextAlignment(.center)
                 }
                 .padding(28)
@@ -416,7 +416,7 @@ struct MixSetupView: View {
             }
             if adding {
                 Color.black.opacity(0.5).ignoresSafeArea()
-                ProgressView("Getting your clips…").tint(CS.cyan).foregroundStyle(.white)
+                ProgressView(L10n.tr("Getting your clips…")).tint(CS.cyan).foregroundStyle(.white)
             }
         }
         .animation(.easeOut(duration: 0.25), value: showingHowMany)
@@ -430,10 +430,10 @@ struct MixSetupView: View {
                 .presentationDetents([.height(520), .large])
                 .presentationBackground(Color(hex: 0x0D121F))
         }
-        .confirmationDialog("Add clips", isPresented: Binding(get: { addingTo != nil }, set: { if !$0 { addingTo = nil } })) {
-            Button("Choose from Photos") { picking = addingTo; addingTo = nil }
-            Button("Record") { recordingFor = addingTo; addingTo = nil }
-            Button("Cancel", role: .cancel) { addingTo = nil }
+        .confirmationDialog(L10n.tr("Add clips"), isPresented: Binding(get: { addingTo != nil }, set: { if !$0 { addingTo = nil } })) {
+            Button(L10n.tr("Choose from Photos")) { picking = addingTo; addingTo = nil }
+            Button(L10n.tr("Record")) { recordingFor = addingTo; addingTo = nil }
+            Button(L10n.tr("Cancel"), role: .cancel) { addingTo = nil }
         }
         .fullScreenCover(item: Binding(get: { picking.map { SectionRef(id: $0) } }, set: { picking = $0?.id })) { ref in
             let left = MixCenter.maxClips - (sections.first { $0.id == ref.id }?.clips.count ?? 0)
@@ -454,19 +454,19 @@ struct MixSetupView: View {
                 Task { await append([video], to: ref.id) }
             })
         }
-        .alert("Rename section", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
-            TextField("Name", text: $newName).accessibilityIdentifier("mixRenameField")
-            Button("Save") {
+        .alert(L10n.tr("Rename section"), isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+            TextField(L10n.tr("Name"), text: $newName).accessibilityIdentifier("mixRenameField")
+            Button(L10n.tr("Save")) {
                 let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
                 if let id = renaming, !name.isEmpty, let i = sections.firstIndex(where: { $0.id == id }) {
                     sections[i].name = String(name.prefix(40))
                 }
                 renaming = nil
             }
-            Button("Cancel", role: .cancel) { renaming = nil }
+            Button(L10n.tr("Cancel"), role: .cancel) { renaming = nil }
         }
-        .alert("CutSell", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
-            Button("OK", role: .cancel) {}
+        .alert(L10n.tr("CutSell"), isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+            Button(L10n.tr("OK"), role: .cancel) {}
         } message: { Text(L10n.tr(errorMessage ?? "")) }
     }
 
@@ -476,7 +476,7 @@ struct MixSetupView: View {
         Button { choosingProduct = true } label: {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("PRODUCT").font(CS.inter(10, .bold)).foregroundStyle(CS.cyan)
+                    Text(L10n.tr("PRODUCT")).font(CS.inter(10, .bold)).foregroundStyle(CS.cyan)
                     Text(product.map { "\($0.brand.name) · \($0.product.name)" } ?? "Choose the product")
                         .font(CS.inter(15, .semibold)).foregroundStyle(.white).lineLimit(1)
                         .accessibilityIdentifier("mixProductName")
@@ -496,26 +496,26 @@ struct MixSetupView: View {
     private func sectionCard(_ index: Int, _ section: MixSectionDraft) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Text("\(index + 1)").font(CS.inter(12, .bold)).foregroundStyle(.white)
+                Text(L10n.tr("\(index + 1)")).font(CS.inter(12, .bold)).foregroundStyle(.white)
                     .frame(width: 24, height: 24).background(CS.brandFull, in: Circle())
                 Text(section.name).font(CS.inter(15, .semibold)).foregroundStyle(.white)
                     .accessibilityIdentifier("mixSectionName_\(index)")
-                Text("\(section.clips.count) clip\(section.clips.count == 1 ? "" : "s")")
+                Text(L10n.tr("\(section.clips.count) clip\(section.clips.count == 1 ? "" : "s")"))
                     .font(CS.inter(12)).foregroundStyle(Color(hex: 0x99A3BD))
                 Spacer()
                 Menu {
-                    Button("Move up") { move(index, by: -1) }.disabled(index == 0)
-                    Button("Move down") { move(index, by: 1) }.disabled(index == sections.count - 1)
+                    Button(L10n.tr("Move up")) { move(index, by: -1) }.disabled(index == 0)
+                    Button(L10n.tr("Move down")) { move(index, by: 1) }.disabled(index == sections.count - 1)
                 } label: {
-                    Text("≡").font(CS.inter(18, .medium)).foregroundStyle(Color(hex: 0x99A3BD)).frame(width: 22, height: 24)
+                    Text(L10n.tr("≡")).font(CS.inter(18, .medium)).foregroundStyle(Color(hex: 0x99A3BD)).frame(width: 22, height: 24)
                 }
                 .accessibilityIdentifier("mixSectionMove_\(index)")
                 Menu {
-                    Button("Rename") { newName = section.name; renaming = section.id }
-                    Button("Delete section", role: .destructive) { sections.removeAll { $0.id == section.id } }
+                    Button(L10n.tr("Rename")) { newName = section.name; renaming = section.id }
+                    Button(L10n.tr("Delete section"), role: .destructive) { sections.removeAll { $0.id == section.id } }
                         .disabled(sections.count <= 1)
                 } label: {
-                    Text("•••").font(CS.inter(12, .bold)).foregroundStyle(Color(hex: 0x99A3BD)).frame(width: 30, height: 24)
+                    Text(L10n.tr("•••")).font(CS.inter(12, .bold)).foregroundStyle(Color(hex: 0x99A3BD)).frame(width: 30, height: 24)
                 }
                 .accessibilityIdentifier("mixSectionMore_\(index)")
             }
@@ -524,7 +524,7 @@ struct MixSetupView: View {
                     ForEach(section.clips) { clip in clipThumb(clip, in: section) }
                     if section.clips.count < MixCenter.maxClips {
                         Button { addingTo = section.id } label: {
-                            Text("+").font(CS.inter(20, .medium)).foregroundStyle(CS.cyan)
+                            Text(L10n.tr("+")).font(CS.inter(20, .medium)).foregroundStyle(CS.cyan)
                                 .frame(width: 42, height: 46)
                                 .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
                                     .stroke(Color(hex: 0x596685), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
@@ -554,7 +554,7 @@ struct MixSetupView: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .contextMenu {
-                Button("Remove clip", role: .destructive) {
+                Button(L10n.tr("Remove clip"), role: .destructive) {
                     if let i = sections.firstIndex(where: { $0.id == section.id }) { sections[i].clips.removeAll { $0.id == clip.id } }
                 }
             }
@@ -572,7 +572,7 @@ struct MixSetupView: View {
                     Text(formula).font(CS.inter(11)).foregroundStyle(Color(hex: 0x99A3BD)).lineLimit(1).minimumScaleFactor(0.8)
                 }
                 Spacer()
-                Button("Pick how many ›") { showingHowMany = true }
+                Button(L10n.tr("Pick how many ›")) { showingHowMany = true }
                     .font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
                     .disabled(!filled || total > MixCenter.maxVideos * 10)
                     .opacity(filled ? 1 : 0.4)
@@ -582,7 +582,7 @@ struct MixSetupView: View {
             .padding(.horizontal, 20)
             .padding(.top, 16)
             Button { Task { await make(howMany: total > MixCenter.maxVideos ? MixCenter.maxVideos : nil) } } label: {
-                Text("Make \(min(total, MixCenter.maxVideos)) video\(total == 1 ? "" : "s")")
+                Text(L10n.tr("Make \(min(total, MixCenter.maxVideos)) video\(total == 1 ? "" : "s")"))
                     .font(CS.sf(15, .semibold)).foregroundStyle(.white)
                     .frame(maxWidth: .infinity).frame(height: 50)
                     .background(Capsule().fill(MixStyle.cta))
@@ -674,20 +674,20 @@ struct MixHowManySheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Capsule().fill(Color(hex: 0x4D5770)).frame(width: 40, height: 5).frame(maxWidth: .infinity).padding(.top, 9)
-            Text("How many videos?").font(CS.inter(22, .bold)).foregroundStyle(.white).padding(.top, 17)
-            Text("\(total) combinations are possible").font(CS.inter(13)).foregroundStyle(Color(hex: 0x99A3BD)).padding(.top, 6)
+            Text(L10n.tr("How many videos?")).font(CS.inter(22, .bold)).foregroundStyle(.white).padding(.top, 17)
+            Text(L10n.tr("\(total) combinations are possible")).font(CS.inter(13)).foregroundStyle(Color(hex: 0x99A3BD)).padding(.top, 6)
             HStack(spacing: 8) {
                 ForEach(options, id: \.self) { n in pill("\(n)", selected: choice == n, width: 70) { choice = n } }
                 pill(total > MixCenter.maxVideos ? "\(MixCenter.maxVideos)" : "All \(total)", selected: choice == nil, width: 96) { choice = nil }
             }
             .padding(.top, 16)
-            Text("We mix the clips so each video starts and ends differently.")
+            Text(L10n.tr("We mix the clips so each video starts and ends differently."))
                 .font(CS.inter(12)).foregroundStyle(Color(hex: 0x99A3BD)).padding(.top, 14)
-            Text("PREVIEW").font(CS.inter(10, .bold)).foregroundStyle(CS.cyan).padding(.top, 18)
+            Text(L10n.tr("PREVIEW")).font(CS.inter(10, .bold)).foregroundStyle(CS.cyan).padding(.top, 18)
             VStack(spacing: 0) {
                 ForEach((plan?.videos ?? []).prefix(4)) { video in
                     HStack(spacing: 0) {
-                        Text("Video \(video.n)").font(CS.inter(13, .semibold)).foregroundStyle(.white).frame(width: 72, alignment: .leading)
+                        Text(L10n.tr("Video \(video.n)")).font(CS.inter(13, .semibold)).foregroundStyle(.white).frame(width: 72, alignment: .leading)
                         Text(L10n.tr(video.names.joined(separator: " · "))).font(CS.inter(12)).foregroundStyle(Color(hex: 0x99A3BD))
                             .lineLimit(1).minimumScaleFactor(0.8)
                         Spacer(minLength: 0)
@@ -699,9 +699,9 @@ struct MixHowManySheet: View {
             }
             .padding(.top, 6)
             if count > 4 {
-                Text("+ \(count - 4) more").font(CS.inter(12, .semibold)).foregroundStyle(Color(hex: 0x99A3BD)).padding(.top, 6)
+                Text(L10n.tr("+ \(count - 4) more")).font(CS.inter(12, .semibold)).foregroundStyle(Color(hex: 0x99A3BD)).padding(.top, 6)
             }
-            Text("Tip: post these over several days, between other products. Feeds reward variety.")
+            Text(L10n.tr("Tip: post these over several days, between other products. Feeds reward variety."))
                 .font(CS.inter(11, .medium)).foregroundStyle(Color(hex: 0xFFB840))
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 13).padding(.vertical, 8)
@@ -710,7 +710,7 @@ struct MixHowManySheet: View {
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color(hex: 0x73521F), lineWidth: 1))
                 .padding(.top, 14)
             Button { onMake(choice ?? (total > MixCenter.maxVideos ? MixCenter.maxVideos : nil)) } label: {
-                Text("Make \(count) video\(count == 1 ? "" : "s")")
+                Text(L10n.tr("Make \(count) video\(count == 1 ? "" : "s")"))
                     .font(CS.sf(15, .semibold)).foregroundStyle(.white)
                     .frame(maxWidth: .infinity).frame(height: 50)
                     .background(Capsule().fill(MixStyle.cta))
@@ -763,7 +763,7 @@ struct MixProductPicker: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Which product is this Mix for?").font(CS.inter(20, .bold)).foregroundStyle(.white).padding(.top, 28)
+            Text(L10n.tr("Which product is this Mix for?")).font(CS.inter(20, .bold)).foregroundStyle(.white).padding(.top, 28)
             ScrollView {
                 VStack(spacing: 0) {
                     ForEach(store.allProducts, id: \.product.productID) { pair in
@@ -773,7 +773,7 @@ struct MixProductPicker: View {
                                     Image("ProductsRadio").resizable().frame(width: 20, height: 20)
                                     if selected == pair.product.productID { Circle().fill(CS.cyan).frame(width: 10, height: 10) }
                                 }
-                                Text("\(pair.brand.name) · \(pair.product.name)").font(CS.inter(15)).foregroundStyle(.white)
+                                Text(L10n.tr("\(pair.brand.name) · \(pair.product.name)")).font(CS.inter(15)).foregroundStyle(.white)
                                 Spacer()
                             }
                             .frame(height: 48)
@@ -786,21 +786,21 @@ struct MixProductPicker: View {
             }
             .padding(.top, 10)
             Button { addingNew = true } label: {
-                Text("+  New brand or product").font(CS.inter(15, .semibold)).foregroundStyle(CS.cyan)
+                Text(L10n.tr("+  New brand or product")).font(CS.inter(15, .semibold)).foregroundStyle(CS.cyan)
             }
             .padding(.vertical, 14)
             .accessibilityIdentifier("mixProductNew")
         }
         .padding(.horizontal, 23)
         .preferredColorScheme(.dark)
-        .alert("New brand or product", isPresented: $addingNew) {
-            TextField("Brand (e.g. CeraVe)", text: $newBrand)
-            TextField("Product (e.g. Hydrating Cleanser)", text: $newProduct)
-            Button("Use it") { Task { await create() } }
-            Button("Cancel", role: .cancel) {}
+        .alert(L10n.tr("New brand or product"), isPresented: $addingNew) {
+            TextField(L10n.tr("Brand (e.g. CeraVe)"), text: $newBrand)
+            TextField(L10n.tr("Product (e.g. Hydrating Cleanser)"), text: $newProduct)
+            Button(L10n.tr("Use it")) { Task { await create() } }
+            Button(L10n.tr("Cancel"), role: .cancel) {}
         }
-        .alert("CutSell", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
-            Button("OK", role: .cancel) {}
+        .alert(L10n.tr("CutSell"), isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+            Button(L10n.tr("OK"), role: .cancel) {}
         } message: { Text(L10n.tr(errorMessage ?? "")) }
     }
 
@@ -829,10 +829,10 @@ struct MixGroupRow: View {
         Button(action: onOpen) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
-                    Text("MIX").font(CS.inter(9, .bold)).foregroundStyle(.white)
+                    Text(L10n.tr("MIX")).font(CS.inter(9, .bold)).foregroundStyle(.white)
                         .frame(width: 34, height: 18).background(CS.brandFull, in: Capsule())
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Mix · \(mix.total) video\(mix.total == 1 ? "" : "s")").font(CS.inter(14, .semibold)).foregroundStyle(.white)
+                        Text(L10n.tr("Mix · \(mix.total) video\(mix.total == 1 ? "" : "s")")).font(CS.inter(14, .semibold)).foregroundStyle(.white)
                             .accessibilityIdentifier("mixGroupTitle")
                         Text([mix.brand, mix.product].compactMap { $0 }.joined(separator: " · ")
                              + (mix.brand == nil && mix.product == nil ? "\(mix.clipCount) clips" : ""))
@@ -847,10 +847,10 @@ struct MixGroupRow: View {
                 ProgressView(value: Double(mix.ready), total: Double(max(1, mix.total))).tint(CS.cyan)
                 if !mix.failedClips.isEmpty {
                     HStack {
-                        Text("Clip \(mix.failedClips.compactMap(\.label).joined(separator: ", ")) couldn’t be cleaned.")
+                        Text(L10n.tr("Clip \(mix.failedClips.compactMap(\.label).joined(separator: ", ")) couldn’t be cleaned."))
                             .font(CS.inter(12)).foregroundStyle(Color(hex: 0xFFB840))
                         Spacer()
-                        Button("Retry", action: onRetry).font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan)
+                        Button(L10n.tr("Retry"), action: onRetry).font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan)
                             .accessibilityIdentifier("mixRetry")
                     }
                 }

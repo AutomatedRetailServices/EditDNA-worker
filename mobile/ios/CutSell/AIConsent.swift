@@ -90,25 +90,25 @@ struct AIConsentSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Before your first cut").font(CS.inter(22, .bold)).foregroundStyle(.white)
-            Text("To make your cut, CutSell uses these two AI services:")
+            Text(L10n.tr("Before your first cut")).font(CS.inter(22, .bold)).foregroundStyle(.white)
+            Text(L10n.tr("To make your cut, CutSell uses these two AI services:"))
                 .font(CS.inter(15)).foregroundStyle(CS.textSecondaryF)
             VStack(alignment: .leading, spacing: 10) {
                 row("Deepgram", "turns the speech in your video's audio into text.")
                 row("Anthropic (Claude)", "reads that text to pick your best takes. It does not receive the video or the audio.")
             }
-            Text("No other AI service receives your content. Cloudflare and Amazon Web Services store your videos, and Modal renders your cut.")
+            Text(L10n.tr("No other AI service receives your content. Cloudflare and Amazon Web Services store your videos, and Modal renders your cut."))
                 .font(CS.inter(13)).foregroundStyle(CS.textSecondaryF).fixedSize(horizontal: false, vertical: true)
-            Text("They receive it only so CutSell can make your cut. CutSell never sells your content. You can delete your cuts or your account at any time.")
+            Text(L10n.tr("They receive it only so CutSell can make your cut. CutSell never sells your content. You can delete your cuts or your account at any time."))
                 .font(CS.inter(13)).foregroundStyle(CS.textSecondaryF).fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 16) {
-                Button("Privacy Policy") { legal = .privacy }.font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
-                Button("Terms of Use") { legal = .terms }.font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
+                Button(L10n.tr("Privacy Policy")) { legal = .privacy }.font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
+                Button(L10n.tr("Terms of Use")) { legal = .terms }.font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
             }
             Spacer(minLength: 0)
             PrimaryButton(title: "Agree", height: 52, cornerRadius: 16, fontSize: 16) { center.answer(true) }
                 .accessibilityIdentifier("aiConsentAgree")
-            Button("Not now") { center.answer(false) }
+            Button(L10n.tr("Not now")) { center.answer(false) }
                 .font(CS.inter(14, .semibold)).foregroundStyle(CS.textMutedF)
                 .frame(maxWidth: .infinity)
                 .accessibilityIdentifier("aiConsentNotNow")
@@ -125,7 +125,7 @@ struct AIConsentSheet: View {
     private func row(_ name: String, _ text: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Circle().fill(CS.cyan).frame(width: 6, height: 6).padding(.top, 7)
-            (Text(L10n.tr(name)).bold().foregroundColor(.white) + Text(" — \(text)").foregroundColor(CS.textSecondaryF))
+            (Text(L10n.tr(name)).bold().foregroundColor(.white) + Text(L10n.tr(" — \(text)")).foregroundColor(CS.textSecondaryF))
                 .font(CS.inter(14)).fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -165,7 +165,7 @@ struct LegalView: View {
             .background(Color(hex: 0x050814).ignoresSafeArea())
             .navigationTitle(L10n.tr(document.title))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(L10n.tr("Done")) { dismiss() } } }
         }
         .preferredColorScheme(.dark)
         .accessibilityIdentifier("legal_\(document.rawValue)")

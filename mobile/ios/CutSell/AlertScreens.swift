@@ -59,7 +59,7 @@ struct PermissionScreen: View {
                                 .foregroundStyle(.white)
                                 .frame(width: 44, height: 44)
                         }
-                        .accessibilityLabel("Close")
+                        .accessibilityLabel(L10n.tr("Close"))
                     }
                 }
                 .padding(.top, 8)
@@ -95,7 +95,7 @@ struct PermissionScreen: View {
                     )
                     .padding(.top, 44)
                     .padding(.horizontal, 6)
-                    Text("You can change this later in Settings.")
+                    Text(L10n.tr("You can change this later in Settings."))
                         .font(CS.inter(13))
                         .foregroundStyle(CS.textMuted)
                         .padding(.top, 22)
@@ -119,7 +119,7 @@ struct PermissionScreen: View {
     @ViewBuilder private var icon: some View {
         switch kind {
         case .camera: Image("TabCreate").resizable().scaledToFit().frame(width: 64)
-        case .microphone: Text("🎙️").font(.system(size: 50))
+        case .microphone: Text(L10n.tr("🎙️")).font(.system(size: 50))
         case .photos: Image("IconUpload").resizable().scaledToFit().frame(width: 54)
         }
     }
@@ -157,7 +157,7 @@ struct ProblemScreen: View {
                 Spacer()
 
                 VStack(spacing: 0) {
-                    Text("!")
+                    Text(L10n.tr("!"))
                         .font(CS.inter(54, .bold))
                         .foregroundStyle(tone == .error ? CS.alert : CS.cyan)
                     Text(L10n.tr(heading))
@@ -215,7 +215,7 @@ struct LimitScreen: View {
                             .foregroundStyle(.white)
                             .frame(width: 44, height: 44)
                     }
-                    .accessibilityLabel("Close")
+                    .accessibilityLabel(L10n.tr("Close"))
                     Spacer()
                     Text(L10n.tr(detail))
                         .font(CS.inter(14, .medium))
@@ -223,7 +223,7 @@ struct LimitScreen: View {
                 }
                 .padding(.horizontal, 12)
                 Spacer()
-                Text("Selected video")
+                Text(L10n.tr("Selected video"))
                     .font(CS.inter(23, .semibold))
                     .foregroundStyle(Color(hex: 0x8FB0E8))
                 Spacer()
@@ -265,10 +265,10 @@ struct GalleryAccessCard: View {
         ZStack {
             Color.black.opacity(0.55).ignoresSafeArea()
             VStack(spacing: 0) {
-                Text("Gallery  access")
+                Text(L10n.tr("Gallery  access"))
                     .font(CS.inter(25, .bold))
                     .foregroundStyle(.white)
-                Text("Choose videos from your library to create a CutSell edit.")
+                Text(L10n.tr("Choose videos from your library to create a CutSell edit."))
                     .font(CS.inter(16))
                     .foregroundStyle(CS.textSecondary)
                     .multilineTextAlignment(.center)

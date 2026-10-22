@@ -92,16 +92,16 @@ struct WelcomeView: View {
         VStack(spacing: 24) {
             Spacer()
             VStack(spacing: 8) {
-                Text("CutSell")
+                Text(L10n.tr("CutSell"))
                     .font(.largeTitle.bold())
-                Text("Sign in to keep your projects on every iPhone you use.")
+                Text(L10n.tr("Sign in to keep your projects on every iPhone you use."))
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
             Spacer()
             AppleSignInButton()
-            Button("Continue without an account") {
+            Button(L10n.tr("Continue without an account")) {
                 Task { await appState.continueWithoutAccount() }
             }
             .font(.callout)
@@ -120,9 +120,9 @@ struct AppleSignInSheet: View {
                 Image(systemName: "person.crop.circle.badge.checkmark")
                     .font(.system(size: 48))
                     .foregroundStyle(.tint)
-                Text("Keep your projects safe")
+                Text(L10n.tr("Keep your projects safe"))
                     .font(.title2.bold())
-                Text("Sign in with Apple and your projects stay with your account, even if you delete the app or change iPhones. The projects you already made stay with you.")
+                Text(L10n.tr("Sign in with Apple and your projects stay with your account, even if you delete the app or change iPhones. The projects you already made stay with you."))
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -131,7 +131,7 @@ struct AppleSignInSheet: View {
             .padding(24)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Not now") { dismiss() }
+                    Button(L10n.tr("Not now")) { dismiss() }
                 }
             }
         }

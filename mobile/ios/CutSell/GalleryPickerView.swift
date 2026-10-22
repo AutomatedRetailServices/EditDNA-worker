@@ -373,7 +373,7 @@ struct GalleryPickerView: View {
     private var grid: some View {
         VStack(spacing: 0) {
             ZStack {
-                Text("Recents")
+                Text(L10n.tr("Recents"))
                     .font(CS.inter(22, .semibold))
                     .foregroundStyle(.white)
                 HStack {
@@ -383,7 +383,7 @@ struct GalleryPickerView: View {
                             .foregroundStyle(.white)
                             .frame(width: 44, height: 44)
                     }
-                    .accessibilityLabel("Close")
+                    .accessibilityLabel(L10n.tr("Close"))
                     Spacer()
                 }
             }
@@ -406,7 +406,7 @@ struct GalleryPickerView: View {
                 }
             } else if library.assets.isEmpty {
                 Spacer()
-                Text("No videos in your library yet.")
+                Text(L10n.tr("No videos in your library yet."))
                     .font(CS.inter(14))
                     .foregroundStyle(CS.textSecondary)
                 Spacer()
@@ -436,13 +436,13 @@ struct GalleryPickerView: View {
     /// "Select more photos" and "Change permission" while the access is Limited.
     private var limitedBanner: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("CutSell sees only the videos you picked.")
+            Text(L10n.tr("CutSell sees only the videos you picked."))
                 .font(CS.inter(13, .medium)).foregroundStyle(.white)
             HStack(spacing: 18) {
-                Button("Select more photos") { presentLimitedPicker() }
+                Button(L10n.tr("Select more photos")) { presentLimitedPicker() }
                     .font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
                     .accessibilityIdentifier("gallerySelectMore")
-                Button("Change permission") {
+                Button(L10n.tr("Change permission")) {
                     if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
                 }
                 .font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
@@ -577,7 +577,7 @@ struct GalleryTileChrome: View {
                 case .check:
                     circle { Image("IconCheck").resizable().frame(width: 14, height: 14) }
                 case .number(let value):
-                    circle { Text("\(value)").font(CS.inter(12, .semibold)).foregroundStyle(.white) }
+                    circle { Text(L10n.tr("\(value)")).font(CS.inter(12, .semibold)).foregroundStyle(.white) }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
@@ -619,7 +619,7 @@ struct GalleryTile: View {
             }
             .contentShape(Rectangle())
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Video, \(CreateLimits.durationText(asset.duration))")
+            .accessibilityLabel(L10n.tr("Video, \(CreateLimits.durationText(asset.duration))"))
             .accessibilityAddTraits(badge == .none ? .isButton : [.isButton, .isSelected])
             .task(id: asset.localIdentifier) { await loadThumbnail() }
     }

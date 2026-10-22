@@ -10,12 +10,12 @@ struct EditorExtrasView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Text & overlays").font(.headline)
+            Text(L10n.tr("Text & overlays")).font(.headline)
 
             HStack {
-                TextField("Add text", text: $newText)
+                TextField(L10n.tr("Add text"), text: $newText)
                     .textFieldStyle(.roundedBorder)
-                Button("Add") {
+                Button(L10n.tr("Add")) {
                     let value = newText.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !value.isEmpty else { return }
                     newText = ""
@@ -93,21 +93,21 @@ private struct TextOverlayRow: View {
             Text(L10n.tr(text)).lineLimit(1)
             Spacer()
             Menu {
-                Button("Top") { Task { await model.updateTextOverlay(id: id, x: 0.5, y: 0.15) } }
-                Button("Center") { Task { await model.updateTextOverlay(id: id, x: 0.5, y: 0.5) } }
-                Button("Bottom") { Task { await model.updateTextOverlay(id: id, x: 0.5, y: 0.82) } }
+                Button(L10n.tr("Top")) { Task { await model.updateTextOverlay(id: id, x: 0.5, y: 0.15) } }
+                Button(L10n.tr("Center")) { Task { await model.updateTextOverlay(id: id, x: 0.5, y: 0.5) } }
+                Button(L10n.tr("Bottom")) { Task { await model.updateTextOverlay(id: id, x: 0.5, y: 0.82) } }
                 Divider()
-                Button("Smaller") { Task { await model.updateTextOverlay(id: id, scale: max(0.5, scale - 0.2)) } }
-                Button("Larger") { Task { await model.updateTextOverlay(id: id, scale: min(3, scale + 0.2)) } }
+                Button(L10n.tr("Smaller")) { Task { await model.updateTextOverlay(id: id, scale: max(0.5, scale - 0.2)) } }
+                Button(L10n.tr("Larger")) { Task { await model.updateTextOverlay(id: id, scale: min(3, scale + 0.2)) } }
                 Divider()
-                Button("Remove", role: .destructive) { Task { await model.removeTextOverlay(id: id) } }
+                Button(L10n.tr("Remove"), role: .destructive) { Task { await model.removeTextOverlay(id: id) } }
             } label: {
                 Image(systemName: "ellipsis.circle")
             }
         }
         .padding(10)
         .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-        .accessibilityLabel("Text overlay \(text), position \(x), \(y)")
+        .accessibilityLabel(L10n.tr("Text overlay \(text), position \(x), \(y)"))
     }
 }
 
@@ -126,12 +126,12 @@ private struct MediaOverlayRow: View {
             Text(L10n.tr(kind.capitalized + " overlay"))
             Spacer()
             Menu {
-                Button("Top left") { Task { await model.updateMediaOverlay(id: id, x: 0.25, y: 0.25) } }
-                Button("Center") { Task { await model.updateMediaOverlay(id: id, x: 0.5, y: 0.5) } }
-                Button("Bottom right") { Task { await model.updateMediaOverlay(id: id, x: 0.75, y: 0.75) } }
+                Button(L10n.tr("Top left")) { Task { await model.updateMediaOverlay(id: id, x: 0.25, y: 0.25) } }
+                Button(L10n.tr("Center")) { Task { await model.updateMediaOverlay(id: id, x: 0.5, y: 0.5) } }
+                Button(L10n.tr("Bottom right")) { Task { await model.updateMediaOverlay(id: id, x: 0.75, y: 0.75) } }
                 Divider()
-                Button("Smaller") { Task { await model.updateMediaOverlay(id: id, width: max(0.1, width - 0.1)) } }
-                Button("Larger") { Task { await model.updateMediaOverlay(id: id, width: min(1, width + 0.1)) } }
+                Button(L10n.tr("Smaller")) { Task { await model.updateMediaOverlay(id: id, width: max(0.1, width - 0.1)) } }
+                Button(L10n.tr("Larger")) { Task { await model.updateMediaOverlay(id: id, width: min(1, width + 0.1)) } }
                 if kind == "video" {
                     Divider()
                     Button(muted ? "Unmute overlay" : "Mute overlay") {
@@ -139,7 +139,7 @@ private struct MediaOverlayRow: View {
                     }
                 }
                 Divider()
-                Button("Remove", role: .destructive) { Task { await model.removeMediaOverlay(id: id) } }
+                Button(L10n.tr("Remove"), role: .destructive) { Task { await model.removeMediaOverlay(id: id) } }
             } label: {
                 Image(systemName: "ellipsis.circle")
             }

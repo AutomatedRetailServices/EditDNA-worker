@@ -28,10 +28,10 @@ struct ProcessingView: View {
             ProgressView(value: Double(job?.progress ?? fallbackProgress) / 100)
                 .padding(.horizontal, 36)
 
-            Text("\(job?.progress ?? fallbackProgress)%")
+            Text(L10n.tr("\(job?.progress ?? fallbackProgress)%"))
                 .font(.headline.monospacedDigit())
 
-            Text("You can leave this screen. CutSell keeps processing on the server.")
+            Text(L10n.tr("You can leave this screen. CutSell keeps processing on the server."))
                 .font(.footnote)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
@@ -39,7 +39,7 @@ struct ProcessingView: View {
 
             if let errorMessage {
                 Text(L10n.tr(errorMessage)).foregroundStyle(.red).font(.footnote)
-                Button("Try again") { Task { await pollOnce() } }
+                Button(L10n.tr("Try again")) { Task { await pollOnce() } }
             }
 
             Spacer()

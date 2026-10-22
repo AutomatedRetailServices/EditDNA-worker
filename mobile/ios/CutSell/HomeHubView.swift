@@ -26,10 +26,10 @@ struct HomeHubView: View {
                         .padding(.top, 6)
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Create")
+                        Text(L10n.tr("Create"))
                             .font(CS.inter(30, .heavy))
                             .foregroundStyle(CS.textPrimaryF)
-                        Text("Turn your raw video into a ready-to-sell cut.")
+                        Text(L10n.tr("Turn your raw video into a ready-to-sell cut."))
                             .font(CS.inter(14))
                             .foregroundStyle(CS.textSecondaryF)
                     }
@@ -48,18 +48,18 @@ struct HomeHubView: View {
                     }
 
                     HStack {
-                        Text("Recent cuts")
+                        Text(L10n.tr("Recent cuts"))
                             .font(CS.inter(15, .bold))
                             .foregroundStyle(CS.textPrimaryF)
                         Spacer()
-                        Button("See all in Edits") { selectTab(.edits) }
+                        Button(L10n.tr("See all in Edits")) { selectTab(.edits) }
                             .font(CS.inter(13, .semibold))
                             .foregroundStyle(CS.cyan)
                     }
                     .padding(.top, 10)
 
                     if recent.isEmpty {
-                        Text("Your cuts will show up here.")
+                        Text(L10n.tr("Your cuts will show up here."))
                             .font(CS.inter(13))
                             .foregroundStyle(CS.textMutedF)
                             .frame(maxWidth: .infinity, minHeight: 92)
@@ -85,10 +85,10 @@ struct HomeHubView: View {
                 CutTracker.shared.follow(project: project)
             }
         }
-        .alert("Faceless video", isPresented: $voiceOverSoon) {
-            Button("OK", role: .cancel) {}
+        .alert(L10n.tr("Faceless video"), isPresented: $voiceOverSoon) {
+            Button(L10n.tr("OK"), role: .cancel) {}
         } message: {
-            Text("Coming soon. For now you can record a voice over inside the editor of any cut.")
+            Text(L10n.tr("Coming soon. For now you can record a voice over inside the editor of any cut."))
         }
     }
 
@@ -104,10 +104,10 @@ struct HomeHubView: View {
                     Capsule().fill(CS.brandFull)
                         .frame(width: max(5, 44 * min(1, CGFloat(used) / CGFloat(limit))), height: 5)
                 }
-                Text("\(used) / \(limit) cuts ·")
+                Text(L10n.tr("\(used) / \(limit) cuts ·"))
                     .font(CS.inter(12, .medium))
                     .foregroundStyle(CS.textSecondaryF)
-                Text("Plan")
+                Text(L10n.tr("Plan"))
                     .font(CS.inter(12, .semibold))
                     .foregroundStyle(CS.cyan)
             }
@@ -131,10 +131,10 @@ struct HomeHubView: View {
                     .frame(width: 52, height: 52)
                     .background(Color(hex: 0x050814, opacity: 0.28), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 Spacer().frame(height: 12)
-                Text("Upload videos")
+                Text(L10n.tr("Upload videos"))
                     .font(CS.inter(24, .heavy))
                     .foregroundStyle(.white)
-                Text("From your gallery. AI cuts it for you.")
+                Text(L10n.tr("From your gallery. AI cuts it for you."))
                     .font(CS.inter(14))
                     .foregroundStyle(.white)
             }
@@ -171,17 +171,17 @@ struct HomeHubView: View {
     private var mixRow: some View {
         Button(action: onMix) {
             HStack(spacing: 14) {
-                Text("⊞")
+                Text(L10n.tr("⊞"))
                     .font(CS.inter(18, .bold))
                     .foregroundStyle(.white)
                     .frame(width: 46, height: 46)
                     .background(CS.brandFull, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(CS.borderDefault, lineWidth: 1))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Mix")
+                    Text(L10n.tr("Mix"))
                         .font(CS.inter(16, .bold))
                         .foregroundStyle(CS.textPrimaryF)
-                    Text("Hooks × bodies × CTAs → many videos")
+                    Text(L10n.tr("Hooks × bodies × CTAs → many videos"))
                         .font(CS.inter(13))
                         .foregroundStyle(CS.textMutedF)
                         .multilineTextAlignment(.leading)

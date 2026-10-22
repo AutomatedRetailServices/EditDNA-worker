@@ -134,11 +134,11 @@ struct EditorV4View: View {
                 }
                 .ignoresSafeArea(.container, edges: .bottom)
                 .transition(.move(edge: .bottom))
-                .alert("Discard recording?", isPresented: $confirmDiscardVoice) {
-                    Button("Discard", role: .destructive) { cancelVoiceSheet() }
-                    Button("Keep recording", role: .cancel) {}
+                .alert(L10n.tr("Discard recording?"), isPresented: $confirmDiscardVoice) {
+                    Button(L10n.tr("Discard"), role: .destructive) { cancelVoiceSheet() }
+                    Button(L10n.tr("Keep recording"), role: .cancel) {}
                 } message: {
-                    Text("Your voice-over hasn’t been saved.")
+                    Text(L10n.tr("Your voice-over hasn’t been saved."))
                 }
             }
             if panel == .micPermission {
@@ -311,11 +311,11 @@ struct EditorV4View: View {
                     }
                 }
             }
-            .alert("Music from Files", isPresented: $musicNotice) {
-                Button("OK") { musicNoticeShown = true; musicPicker = true }
-                Button("Cancel", role: .cancel) {}
+            .alert(L10n.tr("Music from Files"), isPresented: $musicNotice) {
+                Button(L10n.tr("OK")) { musicNoticeShown = true; musicPicker = true }
+                Button(L10n.tr("Cancel"), role: .cancel) {}
             } message: {
-                Text("Use only music you own or have rights to.")
+                Text(L10n.tr("Use only music you own or have rights to."))
             }
             .onAppear {
                 ExportTracker.shared.visibleProjectID = project.projectID
@@ -423,13 +423,13 @@ struct EditorV4View: View {
         view
             .sheet(item: $sheet) { which in sheetView(which) }
             .fullScreenCover(isPresented: $fullScreen) { fullScreenPlayer }
-            .alert("Rename cut", isPresented: $renaming) {
-                TextField("Name", text: $newTitle)
-                Button("Save") { Task { await rename() } }
-                Button("Cancel", role: .cancel) {}
+            .alert(L10n.tr("Rename cut"), isPresented: $renaming) {
+                TextField(L10n.tr("Name"), text: $newTitle)
+                Button(L10n.tr("Save")) { Task { await rename() } }
+                Button(L10n.tr("Cancel"), role: .cancel) {}
             }
-            .alert("CutSell", isPresented: errorShown) {
-                Button("OK", role: .cancel) {}
+            .alert(L10n.tr("CutSell"), isPresented: errorShown) {
+                Button(L10n.tr("OK"), role: .cancel) {}
             } message: {
                 Text(L10n.tr(DraftEditorViewModel.plainWords(model.errorMessage)))
             }
@@ -449,7 +449,7 @@ struct EditorV4View: View {
                     .frame(width: 44, height: 44).background(Color.black.opacity(0.4), in: Circle())
             }
             .padding(16)
-            .accessibilityLabel("Close full screen")
+            .accessibilityLabel(L10n.tr("Close full screen"))
         }
     }
 
@@ -640,12 +640,12 @@ struct EditorV4View: View {
             Button { dismiss() } label: {
                 Image("ControlBack").resizable().frame(width: 44, height: 44).frame(width: 46, height: 47)
             }
-            .accessibilityLabel("Back")
+            .accessibilityLabel(L10n.tr("Back"))
             Button {
                 newTitle = shownTitle
                 renaming = true
             } label: {
-                Text("\(shownTitle) ✎")
+                Text(L10n.tr("\(shownTitle) ✎"))
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(CS.textPrimaryF)
                     .lineLimit(1)
@@ -663,7 +663,7 @@ struct EditorV4View: View {
                 sheet = .export
                 if !model.isExporting { Task { await model.export() } }
             } label: {
-                Text("Export")
+                Text(L10n.tr("Export"))
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 74, height: 32)
@@ -775,13 +775,13 @@ struct EditorV4View: View {
         HStack(spacing: 10) {
             if sounds.failed && !sounds.loading {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color(hex: 0xFFD60A))
-                Text("A sound didn't download").font(CS.inter(13, .medium)).foregroundStyle(.white)
-                Button("Try again") { sounds.retry() }
+                Text(L10n.tr("A sound didn't download")).font(CS.inter(13, .medium)).foregroundStyle(.white)
+                Button(L10n.tr("Try again")) { sounds.retry() }
                     .font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
                     .accessibilityIdentifier("soundRetry")
             } else {
                 ProgressView().controlSize(.small).tint(.white)
-                Text("Getting sounds…").font(CS.inter(13, .medium)).foregroundStyle(.white)
+                Text(L10n.tr("Getting sounds…")).font(CS.inter(13, .medium)).foregroundStyle(.white)
             }
         }
         .padding(.horizontal, 14).frame(height: 36)
@@ -793,13 +793,13 @@ struct EditorV4View: View {
     private func brollPill(_ broll: PendingBroll) -> some View {
         HStack(spacing: 10) {
             if broll.failed {
-                Text("The video wasn't added").font(CS.inter(13, .medium)).foregroundStyle(.white)
-                Button("Try again") { model.retryBroll() }.font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
+                Text(L10n.tr("The video wasn't added")).font(CS.inter(13, .medium)).foregroundStyle(.white)
+                Button(L10n.tr("Try again")) { model.retryBroll() }.font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
                 Button { model.dismissFailedBroll() } label: { Image(systemName: "xmark").foregroundStyle(CS.textMutedF) }
-                    .accessibilityLabel("Dismiss")
+                    .accessibilityLabel(L10n.tr("Dismiss"))
             } else {
                 ProgressView().controlSize(.small).tint(.white)
-                Text("Adding video… \(Int((broll.progress * 100).rounded()))%")
+                Text(L10n.tr("Adding video… \(Int((broll.progress * 100).rounded()))%"))
                     .font(CS.inter(13, .medium)).monospacedDigit().foregroundStyle(.white)
             }
         }
@@ -876,7 +876,7 @@ struct EditorV4View: View {
     private var zoomBadge: some View {
         let percent = Int(((zoomNow - 1) * 100).rounded())
         if percent >= 1 {
-            Text("◇ Zoom \(percent)%")
+            Text(L10n.tr("◇ Zoom \(percent)%"))
                 .font(.system(size: 10, weight: .semibold)).foregroundStyle(.white)
                 .padding(.horizontal, 8).padding(.vertical, 4)
                 .background(Color(hex: 0x040812, opacity: 0.85), in: RoundedRectangle(cornerRadius: 10))
@@ -1117,7 +1117,7 @@ struct EditorV4View: View {
     private func curveBar(_ id: String) -> some View {
         let current = model.keyframeCurve(id: id)
         return HStack(spacing: 6) {
-            Text("Curve").font(.system(size: 11, weight: .semibold)).foregroundStyle(CS.textMutedF)
+            Text(L10n.tr("Curve")).font(.system(size: 11, weight: .semibold)).foregroundStyle(CS.textMutedF)
             ForEach(KeyframeCurve.allCases.reversed()) { curve in
                 Button { model.setKeyframeCurve(id: id, curve) } label: {
                     Text(L10n.tr(curve.title)).font(.system(size: 11, weight: .semibold))
@@ -1486,10 +1486,10 @@ struct EditorV4View: View {
                     .foregroundStyle(CS.magenta)
                     .shadow(color: CS.magenta.opacity(0.8), radius: 10)
                     .padding(.top, 30)
-                Text("Allow microphone access")
+                Text(L10n.tr("Allow microphone access"))
                     .font(CS.inter(21, .bold)).foregroundStyle(.white)
                     .padding(.top, 18)
-                Text("CutSell.ai needs microphone access to record your voiceover.")
+                Text(L10n.tr("CutSell.ai needs microphone access to record your voiceover."))
                     .font(CS.inter(14)).foregroundStyle(CS.textSecondaryF)
                     .multilineTextAlignment(.center)
                     .padding(.top, 10).padding(.horizontal, 22)
@@ -1502,7 +1502,7 @@ struct EditorV4View: View {
                 }
                 .padding(.top, 24).padding(.horizontal, 20)
                 .accessibilityIdentifier("allowMicrophone")
-                Text("You can change this later in iOS Settings.")
+                Text(L10n.tr("You can change this later in iOS Settings."))
                     .font(CS.inter(12)).foregroundStyle(CS.textMutedF)
                     .padding(.top, 12).padding(.bottom, 22)
             }
@@ -1923,12 +1923,12 @@ struct ExportQualityMenu: View {
 
     var body: some View {
         Menu {
-            Button {} label: { Label("1080p Full HD", systemImage: "checkmark") }
-            Button("2K · coming soon") {}.disabled(true)
-            Button("4K Ultra HD · coming soon") {}.disabled(true)
+            Button {} label: { Label(L10n.tr("1080p Full HD"), systemImage: "checkmark") }
+            Button(L10n.tr("2K · coming soon")) {}.disabled(true)
+            Button(L10n.tr("4K Ultra HD · coming soon")) {}.disabled(true)
         } label: {
             HStack(spacing: 6) {
-                Text("1080p HD")
+                Text(L10n.tr("1080p HD"))
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(Self.gradient)
                     .lineLimit(1)
@@ -1939,7 +1939,7 @@ struct ExportQualityMenu: View {
             .background(CS.surfaceCard, in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(CS.borderDefault, lineWidth: 1))
         }
-        .accessibilityLabel("Export quality: 1080p")
+        .accessibilityLabel(L10n.tr("Export quality: 1080p"))
         .accessibilityIdentifier("exportQuality")
     }
 }
@@ -1981,7 +1981,7 @@ struct SoundPanelV4: View {
                     .frame(width: 24, height: 30)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Close")
+            .accessibilityLabel(L10n.tr("Close"))
         }
         .padding(.horizontal, 12)
         .frame(height: 36)
@@ -2046,7 +2046,7 @@ struct SoundSlider: View {
             )
         }
         .accessibilityElement()
-        .accessibilityLabel("Volume")
+        .accessibilityLabel(L10n.tr("Volume"))
         .accessibilityValue(Self.percentText(value))
         .accessibilityAdjustableAction { direction in
             let step = 0.05
@@ -2073,7 +2073,7 @@ private struct ToastPillV4: View {
                 .lineLimit(2)
             if toast.hasUndo {
                 Spacer()
-                Button("Undo", action: onUndo)
+                Button(L10n.tr("Undo"), action: onUndo)
                     .font(CS.inter(13, .semibold))
                     .foregroundStyle(CS.cyan)
             }
@@ -2206,12 +2206,12 @@ private struct MediaOverlayOnVideo: View {
     @ViewBuilder
     private var uploadBadge: some View {
         if overlay.failed {
-            Label("Tap to retry", systemImage: "arrow.clockwise")
+            Label(L10n.tr("Tap to retry"), systemImage: "arrow.clockwise")
                 .font(CS.inter(11, .semibold)).foregroundStyle(.white)
                 .padding(.horizontal, 8).padding(.vertical, 4)
                 .background(CS.error.opacity(0.85), in: Capsule())
         } else if let progress = overlay.uploading {
-            Text("\(Int((progress * 100).rounded()))%")
+            Text(L10n.tr("\(Int((progress * 100).rounded()))%"))
                 .font(CS.inter(12, .bold)).monospacedDigit().foregroundStyle(.white)
                 .padding(.horizontal, 8).padding(.vertical, 4)
                 .background(Color.black.opacity(0.6), in: Capsule())
@@ -2321,7 +2321,7 @@ private struct TornasolSelection<Turn: Gesture>: View {
                     .contentShape(Circle().inset(by: -10))
                     .position(x: proxy.size.width - 2, y: -18)
                     .gesture(onTurn)
-                    .accessibilityLabel("Turn")
+                    .accessibilityLabel(L10n.tr("Turn"))
                     .accessibilityIdentifier("overlayRotate")
             }
             .coordinateSpace(name: "overlayBox")

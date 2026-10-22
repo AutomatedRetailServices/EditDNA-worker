@@ -120,7 +120,7 @@ struct ProjectsView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         header
-                        Text("Edits")
+                        Text(L10n.tr("Edits"))
                             .font(CS.inter(34, .semibold))
                             .foregroundStyle(.white)
                             .padding(.top, 12)
@@ -132,7 +132,7 @@ struct ProjectsView: View {
                             .padding(.top, 2)
 
                         if showingSearch {
-                            TextField("", text: $searchText, prompt: Text("Search edits").foregroundStyle(CS.textMuted))
+                            TextField("", text: $searchText, prompt: Text(L10n.tr("Search edits")).foregroundStyle(CS.textMuted))
                                 .font(CS.inter(15))
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 14)
@@ -259,26 +259,26 @@ struct ProjectsView: View {
                 if empty && selectedTab == .processing { selectedTab = .ready }
             }
             .confirmationDialog(
-                "Delete project?",
+                L10n.tr("Delete project?"),
                 isPresented: Binding(
                     get: { projectPendingDelete != nil },
                     set: { if !$0 { projectPendingDelete = nil } }
                 ),
                 titleVisibility: .visible
             ) {
-                Button("Delete Project", role: .destructive) {
+                Button(L10n.tr("Delete Project"), role: .destructive) {
                     guard let project = projectPendingDelete else { return }
                     projectPendingDelete = nil
                     Task { await deleteProject(project) }
                 }
-                Button("Cancel", role: .cancel) { projectPendingDelete = nil }
+                Button(L10n.tr("Cancel"), role: .cancel) { projectPendingDelete = nil }
             } message: {
-                Text("This permanently removes the project, its uploaded media, exports, overlays, timeline assets and feedback.")
+                Text(L10n.tr("This permanently removes the project, its uploaded media, exports, overlays, timeline assets and feedback."))
             }
-            .alert("CutSell", isPresented: Binding(
+            .alert(L10n.tr("CutSell"), isPresented: Binding(
                 get: { errorMessage != nil },
                 set: { if !$0 { errorMessage = nil } }
-            )) { Button("OK", role: .cancel) {} } message: { Text(L10n.tr(errorMessage ?? "")) }
+            )) { Button(L10n.tr("OK"), role: .cancel) {} } message: { Text(L10n.tr(errorMessage ?? "")) }
         }
         .tint(CS.cyan)
     }
@@ -298,9 +298,9 @@ struct ProjectsView: View {
     private var processingList: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
-                Text("In order").font(CS.inter(16, .semibold)).foregroundStyle(.white)
+                Text(L10n.tr("In order")).font(CS.inter(16, .semibold)).foregroundStyle(.white)
                 Spacer()
-                Text("Each one moves to Ready when it’s done").font(CS.inter(11, .medium)).foregroundStyle(Color(hex: 0x99A3BD))
+                Text(L10n.tr("Each one moves to Ready when it’s done")).font(CS.inter(11, .medium)).foregroundStyle(Color(hex: 0x99A3BD))
             }
             .padding(.top, 16)
             if let focus = queue.focus {
@@ -308,7 +308,7 @@ struct ProjectsView: View {
                     Text(L10n.tr(mixCenter.mixes.contains { $0.mixID == focus } ? "Showing this Mix" : "Showing this Bulk"))
                         .font(CS.inter(12, .semibold)).foregroundStyle(Color(hex: 0x99A3BD))
                     Spacer()
-                    Button("Show all") { queue.focus = nil }
+                    Button(L10n.tr("Show all")) { queue.focus = nil }
                         .font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan)
                         .accessibilityIdentifier("processingShowAll")
                 }
@@ -326,7 +326,7 @@ struct ProjectsView: View {
                 }
             }
             .padding(.top, 12)
-            Text("Editing keeps going on our servers even if you close the app. We’ll notify you as each cut is ready.")
+            Text(L10n.tr("Editing keeps going on our servers even if you close the app. We’ll notify you as each cut is ready."))
                 .font(CS.inter(12))
                 .foregroundStyle(Color(hex: 0x99A3BD))
                 .fixedSize(horizontal: false, vertical: true)
@@ -369,10 +369,10 @@ struct ProjectsView: View {
             }) {
                 Image("IconSearch").resizable().frame(width: 16, height: 16)
             }
-            .accessibilityLabel("Search")
+            .accessibilityLabel(L10n.tr("Search"))
             Menu {
-                Button("New cut") { selectTab(.create) }
-                Button("Refresh") { Task { await refreshAll() } }
+                Button(L10n.tr("New cut")) { selectTab(.create) }
+                Button(L10n.tr("Refresh")) { Task { await refreshAll() } }
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 15, weight: .bold))
@@ -381,7 +381,7 @@ struct ProjectsView: View {
                     .background(Color(hex: 0x050A17), in: Circle())
                     .overlay(Circle().stroke(CS.circleButtonBorder, lineWidth: 1))
             }
-            .accessibilityLabel("More")
+            .accessibilityLabel(L10n.tr("More"))
         }
         .padding(.top, 8)
     }
@@ -394,7 +394,7 @@ struct ProjectsView: View {
                 Text(L10n.tr(pending.title.isEmpty ? "Interrupted Cut" : pending.title))
                     .font(CS.inter(14, .semibold))
                     .foregroundStyle(.white)
-                Text("\(pending.videos.count) clip\(pending.videos.count == 1 ? "" : "s") • Resume upload")
+                Text(L10n.tr("\(pending.videos.count) clip\(pending.videos.count == 1 ? "" : "s") • Resume upload"))
                     .font(CS.inter(12))
                     .foregroundStyle(CS.textSecondary)
             }
@@ -534,7 +534,7 @@ struct EditTile: View {
             .contentShape(Rectangle())
             // .contain (not .combine): the ••• menu stays its own button for VoiceOver and the UI tests
             .accessibilityElement(children: .contain)
-            .accessibilityLabel("\(project.title), \(isReady ? "ready" : isProcessing ? "processing" : "draft")")
+            .accessibilityLabel(L10n.tr("\(project.title), \(isReady ? "ready" : isProcessing ? "processing" : "draft")"))
     }
 }
 
@@ -578,10 +578,10 @@ struct UploadNotFinishedView: View {
         ZStack {
             ScreenBackground()
             VStack(spacing: 14) {
-                Text("!")
+                Text(L10n.tr("!"))
                     .font(CS.inter(46, .bold))
                     .foregroundStyle(CS.alert)
-                Text("This video didn’t finish uploading")
+                Text(L10n.tr("This video didn’t finish uploading"))
                     .font(CS.inter(22, .bold))
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
@@ -669,7 +669,7 @@ struct EditTileMenu: View {
                     }
                 }
             }
-            Button("Delete", role: .destructive, action: onDelete)
+            Button(L10n.tr("Delete"), role: .destructive, action: onDelete)
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 13, weight: .bold))
@@ -677,7 +677,7 @@ struct EditTileMenu: View {
                 .frame(width: 34, height: 28)
                 .contentShape(Rectangle())
         }
-        .accessibilityLabel("Options for \(project.title)")
+        .accessibilityLabel(L10n.tr("Options for \(project.title)"))
         .accessibilityIdentifier(project.state == "draft_ready" ? "editTileMenuReady" : "editTileMenu")
     }
 }

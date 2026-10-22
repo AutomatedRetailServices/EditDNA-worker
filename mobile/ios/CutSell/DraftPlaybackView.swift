@@ -55,7 +55,7 @@ struct DraftPlaybackView: View {
                 )
                 .disabled(!playback.isReady)
 
-                Text("\(time(playback.currentTime)) / \(time(playback.duration))")
+                Text(L10n.tr("\(time(playback.currentTime)) / \(time(playback.duration))"))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .frame(minWidth: 84, alignment: .trailing)
@@ -64,7 +64,7 @@ struct DraftPlaybackView: View {
             if playback.isBuilding {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("Preparing preview…")
+                    Text(L10n.tr("Preparing preview…"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

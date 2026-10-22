@@ -32,7 +32,7 @@ struct FinishedExportActionsView: View {
                 }
                 HStack(spacing: 10) {
                     ShareLink(item: localURL) {
-                        Label("Share", systemImage: "square.and.arrow.up")
+                        Label(L10n.tr("Share"), systemImage: "square.and.arrow.up")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
@@ -55,10 +55,10 @@ struct FinishedExportActionsView: View {
                     Task { await download() }
                 } label: {
                     if isDownloading {
-                        HStack { ProgressView(); Text("Preparing video…") }
+                        HStack { ProgressView(); Text(L10n.tr("Preparing video…")) }
                             .frame(maxWidth: .infinity)
                     } else {
-                        Label("Prepare to share", systemImage: "arrow.down.circle")
+                        Label(L10n.tr("Prepare to share"), systemImage: "arrow.down.circle")
                             .frame(maxWidth: .infinity)
                     }
                 }
@@ -74,7 +74,7 @@ struct FinishedExportActionsView: View {
                     .font(.caption)
                     .foregroundStyle(.red)
                 if localURL == nil {
-                    Button("Retry") { self.errorMessage = nil; Task { await download() } }
+                    Button(L10n.tr("Retry")) { self.errorMessage = nil; Task { await download() } }
                         .accessibilityIdentifier("exportDownloadRetry")
                 }
             }

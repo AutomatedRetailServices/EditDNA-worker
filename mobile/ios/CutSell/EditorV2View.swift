@@ -75,18 +75,18 @@ struct EditorV2View: View {
                         .frame(width: 44, height: 44).background(Color.black.opacity(0.4), in: Circle())
                 }
                 .padding(16)
-                .accessibilityLabel("Close full screen")
+                .accessibilityLabel(L10n.tr("Close full screen"))
             }
         }
-        .alert("Rename cut", isPresented: $renaming) {
-            TextField("Name", text: $newTitle)
-            Button("Save") { Task { await rename() } }
-            Button("Cancel", role: .cancel) {}
+        .alert(L10n.tr("Rename cut"), isPresented: $renaming) {
+            TextField(L10n.tr("Name"), text: $newTitle)
+            Button(L10n.tr("Save")) { Task { await rename() } }
+            Button(L10n.tr("Cancel"), role: .cancel) {}
         }
-        .alert("CutSell", isPresented: Binding(
+        .alert(L10n.tr("CutSell"), isPresented: Binding(
             get: { model.errorMessage != nil },
             set: { if !$0 { model.errorMessage = nil } }
-        )) { Button("OK", role: .cancel) {} } message: { Text(L10n.tr(model.errorMessage ?? "")) }
+        )) { Button(L10n.tr("OK"), role: .cancel) {} } message: { Text(L10n.tr(model.errorMessage ?? "")) }
     }
 
     // MARK: Top
@@ -98,10 +98,10 @@ struct EditorV2View: View {
                 Button { dismiss() } label: {
                     Image("ControlBack").resizable().frame(width: 36, height: 36).frame(width: 44, height: 44)
                 }
-                .accessibilityLabel("Back")
+                .accessibilityLabel(L10n.tr("Back"))
                 Spacer()
                 Button { sheet = .export } label: {
-                    Text("Export")
+                    Text(L10n.tr("Export"))
                         .font(CS.sf(15, .semibold))
                         .foregroundStyle(Color(hex: 0xFAFCFF))
                         .frame(width: 91, height: 38)
@@ -464,7 +464,7 @@ struct EditorTracks: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Text("\(EditorTime.clock(playback.currentTime)) / \(EditorTime.clock(duration))")
+                Text(L10n.tr("\(EditorTime.clock(playback.currentTime)) / \(EditorTime.clock(duration))"))
                     .font(CS.sf(13, .semibold))
                     .foregroundStyle(Color(hex: 0xF2F7FF))
                     .monospacedDigit()
@@ -509,7 +509,7 @@ struct EditorTracks: View {
             lane().frame(height: height)
             Button { onAdd(add) } label: { PlusIcon() }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Add to \(String(describing: add))")
+                .accessibilityLabel(L10n.tr("Add to \(String(describing: add))"))
         }
     }
 
@@ -521,7 +521,7 @@ struct EditorTracks: View {
                 Image("EdVolume").resizable().frame(width: 24, height: 24)
                     .overlay { if allMuted { Rectangle().fill(CS.error).frame(width: 2, height: 26).rotationEffect(.degrees(45)) } }
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Mute clip").font(CS.sf(10, .semibold)).foregroundStyle(Color(hex: 0xEBF2FF))
+                    Text(L10n.tr("Mute clip")).font(CS.sf(10, .semibold)).foregroundStyle(Color(hex: 0xEBF2FF))
                         .lineLimit(1).fixedSize()
                     Text(L10n.tr(allMuted ? "muted" : "audio")).font(CS.sf(9)).foregroundStyle(Color(hex: 0x8CA8D6))
                         .lineLimit(1).fixedSize()
@@ -552,7 +552,7 @@ struct EditorTracks: View {
     private var captionsLabel: some View {
         HStack(spacing: 6) {
             Image("EdCC").resizable().frame(width: 18, height: 14).frame(width: 24)
-            Text("Captions").font(CS.sf(10, .semibold)).foregroundStyle(Color(hex: 0xEBF2FF))
+            Text(L10n.tr("Captions")).font(CS.sf(10, .semibold)).foregroundStyle(Color(hex: 0xEBF2FF))
             Spacer(minLength: 0)
         }
         .padding(.leading, 6)
@@ -590,7 +590,7 @@ struct EditorTracks: View {
             // B-roll placed over the main video: a labelled block on top of the clips.
             ForEach(model.timelineComposition?.brollPlacements ?? []) { placement in
                 let isSelected = selection == .broll(placement.placementID)
-                Text("B-roll")
+                Text(L10n.tr("B-roll"))
                     .font(CS.sf(9, .bold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
@@ -835,7 +835,7 @@ private struct ToastPill: View {
                 .lineLimit(2)
             if toast.hasUndo {
                 Spacer()
-                Button("Undo", action: onUndo)
+                Button(L10n.tr("Undo"), action: onUndo)
                     .font(CS.inter(13, .semibold))
                     .foregroundStyle(CS.cyan)
             }

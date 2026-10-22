@@ -80,7 +80,7 @@ struct VoiceOverView: View {
                     stageRow
                 }
 
-                Section("Import") {
+                Section(L10n.tr("Import")) {
                     // Real capability, independent of any timeline
                     // placement precondition: registering a new asset via
                     // /timeline-uploads + /timeline-assets never requires a
@@ -91,38 +91,38 @@ struct VoiceOverView: View {
                     Button {
                         isImporting = true
                     } label: {
-                        Label("Import audio file", systemImage: "waveform.badge.plus")
+                        Label(L10n.tr("Import audio file"), systemImage: "waveform.badge.plus")
                     }
                     .accessibilityIdentifier("voiceover.importButton")
 
                 }
 
-                Section("Record") {
+                Section(L10n.tr("Record")) {
                     recordSection
                 }
 
-                Section("Add existing to timeline") {
+                Section(L10n.tr("Add existing to timeline")) {
                     if readyAssets.isEmpty {
-                        Text("No ready voice-over audio yet.")
+                        Text(L10n.tr("No ready voice-over audio yet."))
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(readyAssets) { asset in
-                            Button("\(Int(asset.durationSec))s voice-over") {
+                            Button(L10n.tr("\(Int(asset.durationSec))s voice-over")) {
                                 Task { await addToTimeline(asset) }
                             }
                             .disabled(model.baseEditAssetID == nil)
                         }
                         if model.baseEditAssetID == nil {
-                            Text("This cut is still getting ready. Try again in a moment.")
+                            Text(L10n.tr("This cut is still getting ready. Try again in a moment."))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     }
                 }
 
-                Section("Voice-over track") {
+                Section(L10n.tr("Voice-over track")) {
                     if placements.isEmpty {
-                        Text("No voice-over placed on the timeline yet.")
+                        Text(L10n.tr("No voice-over placed on the timeline yet."))
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(placements) { placement in
@@ -147,26 +147,26 @@ struct VoiceOverView: View {
                 }
 
                 if let selectedPlacement {
-                    Section("Split selected placement") {
+                    Section(L10n.tr("Split selected placement")) {
                         Slider(
                             value: $splitTime,
                             in: selectedPlacement.timelineStartSec...selectedPlacement.timelineEndSec
                         )
-                        .accessibilityLabel("Split point")
+                        .accessibilityLabel(L10n.tr("Split point"))
                         .accessibilityValue("\(String(format: "%.1f", splitTime)) seconds")
 
                         HStack(spacing: 14) {
                             Button {
                                 Task { await performSplit() }
                             } label: {
-                                Label("Split", systemImage: "scissors")
+                                Label(L10n.tr("Split"), systemImage: "scissors")
                             }
                             .disabled(!canSplitAtSplitTime(selectedPlacement))
 
                             Button(role: .destructive) {
                                 Task { await performDelete() }
                             } label: {
-                                Label("Delete", systemImage: "trash")
+                                Label(L10n.tr("Delete"), systemImage: "trash")
                             }
                             .accessibilityIdentifier("voiceover.deleteButton")
                         }
@@ -178,28 +178,28 @@ struct VoiceOverView: View {
                 // Audio-shaping controls -- honestly disabled: no real
                 // backend field exists for any of these on a voice-over
                 // placement (see the file doc).
-                Section("Audio (not yet supported)") {
+                Section(L10n.tr("Audio (not yet supported)")) {
                     HStack {
-                        Text("Volume")
+                        Text(L10n.tr("Volume"))
                         Spacer()
                         Slider(value: .constant(1.0), in: 0...1).disabled(true)
                     }
                     HStack {
-                        Text("Fade in")
+                        Text(L10n.tr("Fade in"))
                         Spacer()
                         Slider(value: .constant(0.0), in: 0...5).disabled(true)
                     }
                     HStack {
-                        Text("Fade out")
+                        Text(L10n.tr("Fade out"))
                         Spacer()
                         Slider(value: .constant(0.0), in: 0...5).disabled(true)
                     }
                     HStack {
-                        Text("Pan")
+                        Text(L10n.tr("Pan"))
                         Spacer()
                         Slider(value: .constant(0.0), in: -1...1).disabled(true)
                     }
-                    Text("Change a voice-over's volume from its panel in the editor.")
+                    Text(L10n.tr("Change a voice-over's volume from its panel in the editor."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("voiceover.audioControlsUnsupported")
@@ -209,16 +209,16 @@ struct VoiceOverView: View {
                     Button {
                         Task { await performUndo() }
                     } label: {
-                        Label("Undo", systemImage: "arrow.uturn.backward")
+                        Label(L10n.tr("Undo"), systemImage: "arrow.uturn.backward")
                     }
                     .disabled(!canUndo)
                     .frame(minHeight: 44)
                 }
             }
-            .navigationTitle("Voice-over")
+            .navigationTitle(L10n.tr("Voice-over"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(L10n.tr("Done")) { dismiss() } }
             }
             .onAppear {
                 selectedPlacementID = initialPlacementID ?? placements.first?.placementID
@@ -233,10 +233,10 @@ struct VoiceOverView: View {
                     model.errorMessage = error.localizedDescription
                 }
             }
-            .alert("CutSell", isPresented: Binding(
+            .alert(L10n.tr("CutSell"), isPresented: Binding(
                 get: { model.errorMessage != nil },
                 set: { if !$0 { model.errorMessage = nil } }
-            )) { Button("OK", role: .cancel) {} } message: { Text(L10n.tr(model.errorMessage ?? "")) }
+            )) { Button(L10n.tr("OK"), role: .cancel) {} } message: { Text(L10n.tr(model.errorMessage ?? "")) }
         }
     }
 
@@ -248,17 +248,17 @@ struct VoiceOverView: View {
                 recordNotice = nil
                 Task { await recorder.start() }
             } label: {
-                Label("Record", systemImage: "mic.fill")
+                Label(L10n.tr("Record"), systemImage: "mic.fill")
             }
             .accessibilityIdentifier("voiceover.recordButton")
-            Text("Starts at \(String(format: "%.1f", playheadTime))s on the timeline.")
+            Text(L10n.tr("Starts at \(String(format: "%.1f", playheadTime))s on the timeline."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if case .failed(let message) = recorder.state {
                 Text(L10n.tr(message)).font(.caption).foregroundStyle(.red)
             }
             if recorder.state == .permissionDenied {
-                Text("CutSell can't use the microphone. Turn it on in Settings > CutSell > Microphone.")
+                Text(L10n.tr("CutSell can't use the microphone. Turn it on in Settings > CutSell > Microphone."))
                     .font(.caption)
                     .foregroundStyle(.red)
                     .accessibilityIdentifier("voiceover.micDenied")
@@ -270,7 +270,7 @@ struct VoiceOverView: View {
                     .monospacedDigit()
                     .accessibilityIdentifier("voiceover.recordingTime")
                 Spacer()
-                Button("Stop") { recorder.stop() }
+                Button(L10n.tr("Stop")) { recorder.stop() }
                     .buttonStyle(.borderedProminent)
                     .tint(.red)
                     .accessibilityIdentifier("voiceover.stopButton")
@@ -278,7 +278,7 @@ struct VoiceOverView: View {
         case .recorded:
             HStack {
                 Image(systemName: "waveform")
-                Text("Take: \(VoiceRecorder.formatted(recorder.elapsed))").monospacedDigit()
+                Text(L10n.tr("Take: \(VoiceRecorder.formatted(recorder.elapsed))")).monospacedDigit()
             }
             HStack(spacing: 14) {
                 Button {
@@ -287,13 +287,13 @@ struct VoiceOverView: View {
                         await recorder.start()
                     }
                 } label: {
-                    Label("Record again", systemImage: "arrow.counterclockwise")
+                    Label(L10n.tr("Record again"), systemImage: "arrow.counterclockwise")
                 }
                 .accessibilityIdentifier("voiceover.recordAgainButton")
                 Button {
                     Task { await useTake() }
                 } label: {
-                    if isUsingTake { ProgressView() } else { Label("Use", systemImage: "checkmark") }
+                    if isUsingTake { ProgressView() } else { Label(L10n.tr("Use"), systemImage: "checkmark") }
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(isUsingTake)
@@ -329,18 +329,18 @@ struct VoiceOverView: View {
     private var stageRow: some View {
         switch stage {
         case .empty:
-            Label("No voice-over yet", systemImage: "waveform")
+            Label(L10n.tr("No voice-over yet"), systemImage: "waveform")
                 .foregroundStyle(.secondary)
         case .saving:
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text("Saving…")
+                Text(L10n.tr("Saving…"))
             }
         case .ready:
-            Label("Ready", systemImage: "checkmark.circle.fill")
+            Label(L10n.tr("Ready"), systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
         case .error:
-            Label("Error", systemImage: "exclamationmark.triangle.fill")
+            Label(L10n.tr("Error"), systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(.red)
         }
     }

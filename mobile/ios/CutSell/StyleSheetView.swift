@@ -82,10 +82,10 @@ struct StyleSheetView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Choose your style")
+            Text(L10n.tr("Choose your style"))
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(Color(hex: 0xF2F7FF))
-            Text("You can change this later in the editor.")
+            Text(L10n.tr("You can change this later in the editor."))
                 .font(.system(size: 13))
                 .foregroundStyle(CS.textSecondaryF)
                 .padding(.top, 6)

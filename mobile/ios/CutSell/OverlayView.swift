@@ -79,22 +79,22 @@ struct OverlayView: View {
             Form {
                 Section { stageRow }
 
-                Section("Import") {
+                Section(L10n.tr("Import")) {
                     Button {
                         isImporting = true
                     } label: {
-                        Label("Import photo or video overlay", systemImage: "rectangle.badge.plus")
+                        Label(L10n.tr("Import photo or video overlay"), systemImage: "rectangle.badge.plus")
                     }
                     .accessibilityIdentifier("overlay.importButton")
 
-                    Text("Pick a photo or video to place over your video.")
+                    Text(L10n.tr("Pick a photo or video to place over your video."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
-                Section("Overlays") {
+                Section(L10n.tr("Overlays")) {
                     if overlays.isEmpty {
-                        Text("No overlay added yet.")
+                        Text(L10n.tr("No overlay added yet."))
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(overlays, id: \.overlayRowID) { overlay in
@@ -120,24 +120,24 @@ struct OverlayView: View {
                 if let selectedOverlay {
                     editSection(for: selectedOverlay)
 
-                    Section("Rotation, opacity & keyframes (not yet supported)") {
+                    Section(L10n.tr("Rotation, opacity & keyframes (not yet supported)")) {
                         HStack {
-                            Text("Rotation")
+                            Text(L10n.tr("Rotation"))
                             Spacer()
                             Slider(value: .constant(0.0), in: -180...180).disabled(true)
                         }
                         HStack {
-                            Text("Opacity")
+                            Text(L10n.tr("Opacity"))
                             Spacer()
                             Slider(value: .constant(1.0), in: 0...1).disabled(true)
                         }
                         HStack {
-                            Text("Keyframes")
+                            Text(L10n.tr("Keyframes"))
                             Spacer()
-                            Button("Add keyframe") {}
+                            Button(L10n.tr("Add keyframe")) {}
                                 .disabled(true)
                         }
-                        Text("Move and resize the overlay on the video.")
+                        Text(L10n.tr("Move and resize the overlay on the video."))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .accessibilityIdentifier("overlay.rotationOpacityKeyframeUnsupported")
@@ -147,7 +147,7 @@ struct OverlayView: View {
                         Button(role: .destructive) {
                             Task { await performDelete(overlayID: selectedOverlay["overlay_id"]?.stringValue) }
                         } label: {
-                            Label("Delete overlay", systemImage: "trash")
+                            Label(L10n.tr("Delete overlay"), systemImage: "trash")
                         }
                         .accessibilityIdentifier("overlay.deleteButton")
                         .frame(minHeight: 44)
@@ -158,7 +158,7 @@ struct OverlayView: View {
                     Button {
                         Task { await performUndo() }
                     } label: {
-                        Label("Undo", systemImage: "arrow.uturn.backward")
+                        Label(L10n.tr("Undo"), systemImage: "arrow.uturn.backward")
                     }
                     .disabled(!canUndo)
                     .frame(minHeight: 44)
@@ -166,16 +166,16 @@ struct OverlayView: View {
                     Button {
                         Task { await performRedo() }
                     } label: {
-                        Label("Redo", systemImage: "arrow.uturn.forward")
+                        Label(L10n.tr("Redo"), systemImage: "arrow.uturn.forward")
                     }
                     .disabled(!canRedo)
                     .frame(minHeight: 44)
                 }
             }
-            .navigationTitle("Overlay")
+            .navigationTitle(L10n.tr("Overlay"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(L10n.tr("Done")) { dismiss() } }
             }
             .fileImporter(isPresented: $isImporting, allowedContentTypes: [.image, .movie]) { result in
                 switch result {
@@ -185,10 +185,10 @@ struct OverlayView: View {
                     model.errorMessage = error.localizedDescription
                 }
             }
-            .alert("CutSell", isPresented: Binding(
+            .alert(L10n.tr("CutSell"), isPresented: Binding(
                 get: { model.errorMessage != nil },
                 set: { if !$0 { model.errorMessage = nil } }
-            )) { Button("OK", role: .cancel) {} } message: { Text(L10n.tr(model.errorMessage ?? "")) }
+            )) { Button(L10n.tr("OK"), role: .cancel) {} } message: { Text(L10n.tr(model.errorMessage ?? "")) }
         }
     }
 
@@ -208,7 +208,7 @@ struct OverlayView: View {
     private func editSection(for overlay: [String: JSONValue]) -> some View {
         let overlayID = overlay["overlay_id"]?.stringValue ?? ""
         let kind = overlay["kind"]?.stringValue ?? "photo"
-        Section("Position & scale") {
+        Section(L10n.tr("Position & scale")) {
             CommitSlider(label: "X", value: overlay["x"]?.doubleValue ?? 0.5, range: 0...1, accessibilityID: "overlay.xSlider") { newValue in
                 justMutated = false
                 await model.updateMediaOverlay(overlayID: overlayID, x: newValue)
@@ -226,8 +226,8 @@ struct OverlayView: View {
             }
         }
         if kind == "video" {
-            Section("Audio") {
-                Toggle("Mute overlay audio", isOn: Binding(
+            Section(L10n.tr("Audio")) {
+                Toggle(L10n.tr("Mute overlay audio"), isOn: Binding(
                     get: { overlay["mute_audio"]?.boolValue ?? true },
                     set: { newValue in
                         justMutated = false
@@ -243,18 +243,18 @@ struct OverlayView: View {
     private var stageRow: some View {
         switch stage {
         case .empty:
-            Label("No overlay yet", systemImage: "rectangle.on.rectangle")
+            Label(L10n.tr("No overlay yet"), systemImage: "rectangle.on.rectangle")
                 .foregroundStyle(.secondary)
         case .importing:
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text("Importing…")
+                Text(L10n.tr("Importing…"))
             }
         case .ready:
-            Label("Ready", systemImage: "checkmark.circle.fill")
+            Label(L10n.tr("Ready"), systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
         case .error:
-            Label("Error", systemImage: "exclamationmark.triangle.fill")
+            Label(L10n.tr("Error"), systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(.red)
         }
     }

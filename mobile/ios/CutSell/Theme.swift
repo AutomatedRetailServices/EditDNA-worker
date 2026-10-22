@@ -152,7 +152,7 @@ struct BrandLogo: View {
             .interpolation(.high)
             .scaledToFit()
             .frame(width: width, height: width / 3)
-            .accessibilityLabel("CutSell.ai")
+            .accessibilityLabel(L10n.tr("CutSell.ai"))
     }
 }
 

@@ -233,7 +233,7 @@ struct QueueRowView: View {
         switch row.state {
         case .failed:
             Button(action: onRetry) {
-                Text("Retry")
+                Text(L10n.tr("Retry"))
                     .font(CS.inter(10, .semibold))
                     .foregroundStyle(Self.error)
                     .frame(width: 48, height: 28)
@@ -310,27 +310,27 @@ struct BulkStartedSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             Capsule().fill(Color(hex: 0x4D5770)).frame(width: 40, height: 5)
                 .frame(maxWidth: .infinity).padding(.top, 9)
-            Text("Your \(count) videos are being edited")
+            Text(L10n.tr("Your \(count) videos are being edited"))
                 .font(CS.inter(22, .bold))
                 .foregroundStyle(.white)
                 .padding(.top, 21)
-            Text("You can close this screen or the app. Editing keeps going, one video at a time.")
+            Text(L10n.tr("You can close this screen or the app. Editing keeps going, one video at a time."))
                 .font(CS.inter(14))
                 .foregroundStyle(Color(hex: 0x99A3BD))
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 10)
             HStack(spacing: 0) {
                 card(title: "Processing", subtitle: "In Edits, in order", highlighted: true)
-                Text("→").font(CS.inter(20, .bold)).foregroundStyle(Color(hex: 0x99A3BD)).frame(width: 42)
+                Text(L10n.tr("→")).font(CS.inter(20, .bold)).foregroundStyle(Color(hex: 0x99A3BD)).frame(width: 42)
                 card(title: "Ready", subtitle: "Each one, as soon as it’s done", highlighted: false)
             }
             .padding(.top, 16)
-            Text("We’ll notify you as each cut is ready.")
+            Text(L10n.tr("We’ll notify you as each cut is ready."))
                 .font(CS.inter(12))
                 .foregroundStyle(Color(hex: 0x99A3BD))
                 .padding(.top, 16)
             Button(action: onGoToEdits) {
-                Text("Go to Edits")
+                Text(L10n.tr("Go to Edits"))
                     .font(CS.sf(15, .semibold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
@@ -345,7 +345,7 @@ struct BulkStartedSheet: View {
             .padding(.top, 18)
             .accessibilityIdentifier("bulkGoToEdits")
             Button(action: onStay) {
-                Text("Stay here")
+                Text(L10n.tr("Stay here"))
                     .font(CS.inter(15, .semibold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
@@ -402,12 +402,12 @@ struct ReadyToast: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            Text("✓  \(Self.short(name)) is ready")
+            Text(L10n.tr("✓  \(Self.short(name)) is ready"))
                 .font(CS.inter(13, .semibold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
             Spacer(minLength: 8)
-            Button("View", action: onView)
+            Button(L10n.tr("View"), action: onView)
                 .font(CS.inter(13, .semibold))
                 .foregroundStyle(CS.cyan)
                 .accessibilityIdentifier("readyToastView")

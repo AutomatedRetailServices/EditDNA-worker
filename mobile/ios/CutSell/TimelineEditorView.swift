@@ -188,7 +188,7 @@ struct TimelineEditorView: View {
             header
             timelineTracks
             if !canAddBrollOrVoiceOver {
-                Text("This cut is still getting ready. Try again in a moment.")
+                Text(L10n.tr("This cut is still getting ready. Try again in a moment."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("timeline.noBaseEditAsset")
@@ -222,7 +222,7 @@ struct TimelineEditorView: View {
 
     private var header: some View {
         HStack {
-            Text("Editor").font(.headline)
+            Text(L10n.tr("Editor")).font(.headline)
             Spacer()
             Button {
                 withAnimation { isExpanded.toggle() }
@@ -296,7 +296,7 @@ struct TimelineEditorView: View {
                             .frame(width: 44, height: 56)
                             .background(.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
                     }
-                    .accessibilityLabel("Add \(track.title.lowercased())")
+                    .accessibilityLabel(L10n.tr("Add \(track.title.lowercased())"))
                     .accessibilityIdentifier("timeline.brollButton")
                 } else if track == .voiceOver {
                     // Real, non-decorative entry point into the dedicated
@@ -312,7 +312,7 @@ struct TimelineEditorView: View {
                             .frame(width: 44, height: 56)
                             .background(.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
                     }
-                    .accessibilityLabel("Add voice-over")
+                    .accessibilityLabel(L10n.tr("Add voice-over"))
                     .accessibilityIdentifier("timeline.voiceOverButton")
                 }
             }
@@ -336,21 +336,21 @@ struct TimelineEditorView: View {
             Button {
                 Task { await performSplit() }
             } label: {
-                Label("Split", systemImage: "scissors")
+                Label(L10n.tr("Split"), systemImage: "scissors")
             }
             .disabled(!canSplitAtPlayhead)
 
             Button(role: .destructive) {
                 Task { await performDelete() }
             } label: {
-                Label("Delete", systemImage: "trash")
+                Label(L10n.tr("Delete"), systemImage: "trash")
             }
             .disabled(!canDeleteSelection)
 
             Button {
                 Task { await performUndo() }
             } label: {
-                Label("Undo", systemImage: "arrow.uturn.backward")
+                Label(L10n.tr("Undo"), systemImage: "arrow.uturn.backward")
             }
             .disabled(!canUndo)
 
@@ -367,7 +367,7 @@ struct TimelineEditorView: View {
             Button {
                 Task { await performRedo() }
             } label: {
-                Label("Redo", systemImage: "arrow.uturn.forward")
+                Label(L10n.tr("Redo"), systemImage: "arrow.uturn.forward")
             }
             .disabled(!canRedoMainVideo)
 
@@ -376,7 +376,7 @@ struct TimelineEditorView: View {
             Button {
                 onOpenCaptions()
             } label: {
-                Label("Captions", systemImage: "captions.bubble")
+                Label(L10n.tr("Captions"), systemImage: "captions.bubble")
             }
             .accessibilityIdentifier("timeline.captionsButton")
 
@@ -389,7 +389,7 @@ struct TimelineEditorView: View {
             Button {
                 showOverlayView = true
             } label: {
-                Label("Overlay", systemImage: "rectangle.on.rectangle")
+                Label(L10n.tr("Overlay"), systemImage: "rectangle.on.rectangle")
             }
             .accessibilityIdentifier("timeline.overlayButton")
 
@@ -402,11 +402,11 @@ struct TimelineEditorView: View {
             // dialogue-overlap pacing engine itself is a separate,
             // unauthorized-in-this-gate track.
             Menu {
-                Button("Keyframe at playhead") {}
+                Button(L10n.tr("Keyframe at playhead")) {}
                     .disabled(true)
-                Text("Drag a keyframe on the timeline to move it.")
+                Text(L10n.tr("Drag a keyframe on the timeline to move it."))
             } label: {
-                Label("Keyframe", systemImage: "diamond")
+                Label(L10n.tr("Keyframe"), systemImage: "diamond")
             }
         }
         .buttonStyle(.bordered)
@@ -535,7 +535,7 @@ private struct TimelineRowCell: View {
                 .frame(width: width, alignment: .leading)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(item.label), \(String(format: "%.1f", item.endSec - item.startSec)) seconds")
+        .accessibilityLabel(L10n.tr("\(item.label), \(String(format: "%.1f", item.endSec - item.startSec)) seconds"))
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 }
