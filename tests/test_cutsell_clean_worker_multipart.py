@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -311,3 +312,18 @@ def test_r2_refusal_reaches_the_app_with_its_code(monkeypatch):
     assert "InvalidPart" in response.json()["detail"] and "CompleteMultipartUpload" in response.json()["detail"]
     # Not completed: the session is still open for a retry.
     assert "completed" not in json.loads(list(redis.data.values())[0])
+
+
+def test_part_links_reuse_one_s3_client_and_one_redis(monkeypatch):
+    """22 Oct: a new client per part link made ~80 links take ~50 s; the phone gave up at 20 s."""
+    monkeypatch.setattr(multipart, "load_runtime_config", lambda: SimpleNamespace(aws_region="auto", redis_url="redis://x:6379/0"))
+    multipart._cached_s3.cache_clear()
+    multipart._cached_redis.cache_clear()
+    assert multipart._s3_client() is multipart._s3_client()
+    assert multipart._s3_client(region="eu-west-1") is not multipart._s3_client()
+    assert multipart._redis_client() is multipart._redis_client()
+
+
+def test_a_three_gb_iphone_video_can_start():
+    from cutsell_worker import uploads
+    assert uploads.MAX_UPLOAD_BYTES >= 3 * 1024 ** 3

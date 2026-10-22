@@ -36,7 +36,8 @@ from .storage import parse_s3_uri
 from .storage_routing import is_readable_bucket, presigned_get
 
 DEFAULT_UPLOAD_PREFIX = "cutsell/uploads/"
-MAX_UPLOAD_BYTES = 1024 * 1024 * 1024
+# 4 GiB (22 Oct): a 6-7 minute 4K iPhone video is 1.5-3 GB; 1 GiB refused them (422 at start).
+MAX_UPLOAD_BYTES = 4 * 1024 * 1024 * 1024
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm"}
 ALLOWED_CONTENT_TYPES = {
     "video/mp4",
