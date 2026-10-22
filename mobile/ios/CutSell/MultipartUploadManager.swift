@@ -237,13 +237,24 @@ actor MultipartUploadManager {
                         tally.reset(part: partNumber)
                         retried(attempt, error)
                     }) {
-                        let signed: MultipartPartSignResponse = try await self.api.request(
-                            "/v1/uploads/multipart/\(uploadID)/parts/\(partNumber)/presign",
-                            method: "POST",
-                            // expires_in: 1 h once the server reads it (the current server keeps 15 min).
-                            body: SignBody(project_id: projectID, user_id: userID, expires_in: 3600),
-                            timeout: 20
-                        )
+                        // 22 Oct (production): all ~80 parts of a 5-minute video asked for their link at once;
+                        // the server answers one at a time, the last ones passed the 20 s limit 3 times and
+                        // the upload failed. At most 4 link requests at a time; the 20 s starts when one is sent.
+                        await Self.signSlots.acquire()
+                        let signed: MultipartPartSignResponse
+                        do {
+                            signed = try await self.api.request(
+                                "/v1/uploads/multipart/\(uploadID)/parts/\(partNumber)/presign",
+                                method: "POST",
+                                // expires_in: 1 h once the server reads it (the current server keeps 15 min).
+                                body: SignBody(project_id: projectID, user_id: userID, expires_in: 3600),
+                                timeout: 20
+                            )
+                            await Self.signSlots.release()
+                        } catch {
+                            await Self.signSlots.release()
+                            throw error
+                        }
                         let response = try await Self.uploadPart(
                             file: partFile, bytes: partBytes, partNumber: partNumber, signedURL: signed.uploadURL,
                             uploadID: uploadID, foreground: useForeground, onBytes: { tally.sent(part: partNumber, bytes: $0) }
@@ -433,6 +444,8 @@ actor MultipartUploadManager {
     }
 
     static let foregroundSlots = AsyncSlots(3)
+    /// Part-link requests in flight at once (22 Oct: 80 at once timed out on the server).
+    static let signSlots = AsyncSlots(4)
 
     /// The normal session (short B-roll uploads, and the fallback). A request fails only after
     /// 90 s with no byte moving; three parts at a time.
