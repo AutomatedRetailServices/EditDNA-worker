@@ -1,2 +1,0 @@
-B24UI    48.8 PASS dark: Preferences has no Appearance
-B24UI    61.4 FAILURES: none
