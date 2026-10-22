@@ -1,7 +1,7 @@
-B24UI    31.2 PASS light: Perfil opens
-B24UI   112.1 PASS light → Dark chosen
-B24UI   112.3 FAILURES: none
-Test Case '-[CutSellUITests.Build24UITests testLightMode]' passed (113.033 seconds).
-Test Suite 'Build24UITests' passed at 2026-10-22 14:36:12.474.
-Test Suite 'CutSellUITests.xctest' passed at 2026-10-22 14:36:12.475.
-Test Suite 'Selected tests' passed at 2026-10-22 14:36:12.475.
+B24UI    30.9 PASS light: Perfil opens
+B24UI    92.0 PASS light → Dark chosen
+B24UI    92.2 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testLightMode]' passed (92.728 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-22 15:20:40.528.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-22 15:20:40.529.
+Test Suite 'Selected tests' passed at 2026-10-22 15:20:40.529.

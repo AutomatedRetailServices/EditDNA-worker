@@ -1,20 +1,25 @@
-B24UI    15.8 PASS en: Script on the camera rail
-B24UI    24.9 PASS en: no script yet → the editor opens
-B24UI    36.1 PASS en: the script shows over the camera
-B24UI    36.2 PASS en: Script is on
-B24UI    37.5 PASS en: faster → speed 4 · Speed 4
-B24UI    41.9 PASS en: Script off hides it
-B24UI    43.3 PASS en: Script on shows it again (script kept)
-B24UI    56.2 PASS es: Script on the camera rail
-B24UI    60.3 PASS es: no script yet → the editor opens
-B24UI    71.7 PASS es: the script shows over the camera
-B24UI    71.8 FAIL es: Script is on
-B24UI    73.4 FAIL es: faster → speed 4 · Velocidad 5
-B24UI    77.7 PASS es: Script off hides it
-B24UI    79.2 PASS es: Script on shows it again (script kept)
-B24UI    80.2 FAILURES: es: Script is on | es: faster → speed 4
-/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:1110: error: -[CutSellUITests.Build24UITests testTeleprompter] : XCTAssertTrue failed - es: Script is on | es: faster → speed 4
-Test Case '-[CutSellUITests.Build24UITests testTeleprompter]' failed (81.844 seconds).
-Test Suite 'Build24UITests' failed at 2026-10-22 14:38:20.835.
-Test Suite 'CutSellUITests.xctest' failed at 2026-10-22 14:38:20.836.
-Test Suite 'Selected tests' failed at 2026-10-22 14:38:20.837.
+B24UI    17.4 PASS en: Script on the camera rail
+B24UI    21.3 PASS en: no script yet → the script sheet opens
+B24UI    33.1 PASS en: speed + → 1.1× · 1.1×
+B24UI    38.6 PASS en: the script shows over the camera
+B24UI    38.8 PASS en: Script is on · On
+B24UI    45.5 PASS en: tap shows ✎ · Auto-scroll · ⚙ and the frame
+B24UI    48.7 PASS en: controls hide after 2 s
+B24UI    49.8 PASS en: Speed on the rail → 1.25× · 1.2×, Speed
+B24UI    57.7 PASS en: Script off hides it
+B24UI    59.4 PASS en: Script on shows it again (script kept)
+B24UI    67.8 PASS es: Script on the camera rail
+B24UI    71.1 PASS es: no script yet → the script sheet opens
+B24UI    81.3 PASS es: speed + → 1.1× · 1.1×
+B24UI    86.7 PASS es: the script shows over the camera
+B24UI    86.8 PASS es: Script is on · Activado
+B24UI    92.8 PASS es: tap shows ✎ · Auto-scroll · ⚙ and the frame
+B24UI    96.2 PASS es: controls hide after 2 s
+B24UI    97.4 PASS es: Speed on the rail → 1.25× · 1.2×, Velocidad
+B24UI   105.7 PASS es: Script off hides it
+B24UI   107.2 PASS es: Script on shows it again (script kept)
+B24UI   108.2 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testTeleprompter]' passed (108.112 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-22 15:18:27.068.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-22 15:18:27.070.
+Test Suite 'Selected tests' passed at 2026-10-22 15:18:27.070.
