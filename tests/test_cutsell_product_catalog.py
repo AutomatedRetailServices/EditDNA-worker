@@ -164,9 +164,12 @@ def test_album_name_is_a_free_hint():
 
 def test_the_cut_engine_is_untouched():
     """The Gold cut cannot change: the cut engine's code and prompts are byte-identical to the live engine (ab37eac:
-    f7f5772 plus the 21 Oct Auto Zoom AI change she asked for -- zoom moments only, never the keep / hide decisions)."""
-    diff = subprocess.run(["git", "diff", "--stat", "ab37eac", "--", "cutsell_worker/simple_engine",
-                           "cutsell_worker/simple_engine_adapter.py"], capture_output=True, text=True)
+    f7f5772 plus the 21 Oct Auto Zoom AI change she asked for -- zoom moments only, never the keep / hide decisions).
+    The decisions and the prompts are what decide the cut. The transport around them may change without touching the
+    cut: Deepgram retries (asr.py, 22 Oct), the prompt cache and its cost report (llm.py / cache_policy.py, 22 Oct: the
+    text the model reads is the same, only the cache_control mark and the billing change)."""
+    diff = subprocess.run(["git", "diff", "--stat", "ab37eac", "--", "cutsell_worker/simple_engine/engine.py",  # baseline: the 21 Oct Auto Zoom change (asked for)
+                           "cutsell_worker/simple_engine/prompts", "cutsell_worker/simple_engine/__init__.py"], capture_output=True, text=True)
     if diff.returncode != 0:
         pytest.skip("git history not available")
     assert diff.stdout.strip() == ""

@@ -27,6 +27,7 @@ from .simple_engine import VERSION as ENGINE_VERSION
 from .simple_engine import asr as _asr
 from .simple_engine import caption_groups as _caption_groups
 from .simple_engine import llm as _llm
+from .simple_engine import cache_policy as _cache_policy
 from .simple_engine import process as _process
 from .simple_engine.engine import OV as _JUNCTION_OVERLAP
 from .usage_limits import check_processing_allowance
@@ -171,6 +172,8 @@ def process_with_simple_engine(
     timeline_offset = 0.0
     total = len(sources)
 
+    # Prompt cache for every video (PO 2026-10-22): 1 hour while few videos are being cut, else 5 minutes.
+    cache_ttl, videos_last_hour = _cache_policy.note_video()
     with tempfile.TemporaryDirectory(prefix="cutsell-simple-engine-") as directory:
         for index, source in enumerate(sources):
             path = str(local_paths[source.source_asset_id])
@@ -187,7 +190,7 @@ def process_with_simple_engine(
             # The silence refine reads the audio decoded from the source file itself (what it was calibrated on).
             # A voice-only source (audio first) has no picture yet: no shot-change snap for its first cut.
             voice_only = bool(audio_only) and source.source_asset_id in audio_only
-            with _llm.cache_scope(bulk):
+            with _llm.cache_scope(True, ttl=cache_ttl):
                 out = _process(words, duration, path, video_path=None if voice_only else path,
                                scene_cut_list=[] if voice_only else None, llm=llm)
             notify("composing", base + int(70 / total))
@@ -231,7 +234,7 @@ def process_with_simple_engine(
                 "splits": out["splits"],
                 "log": out["log"],
                 "usage": out["usage"],
-                "prompt_cache": bulk,
+                "prompt_cache": _llm.cache_report(out["usage"], ttl=cache_ttl, videos_last_hour=videos_last_hour),
                 "zoom_moments": zoom_log,
             })
 

@@ -68,8 +68,13 @@ def _content(prompt):
     if not parts or not cache_enabled():
         return str(prompt)
     blocks = [{"type": "text", "text": p} for p in parts]
-    blocks[0]["cache_control"] = {"type": "ephemeral"}
+    blocks[0]["cache_control"] = cache_control()
     return blocks
+
+
+def cache_control() -> dict:
+    """The breakpoint on the fixed instructions: 5 minutes (the default) or 1 hour when few videos are being cut."""
+    return {"type": "ephemeral", "ttl": "1h"} if cache_ttl() == "1h" else {"type": "ephemeral"}
 
 
 def json_enabled() -> bool:
@@ -77,24 +82,70 @@ def json_enabled() -> bool:
     return os.environ.get("CUTSELL_SIMPLE_ENGINE_JSON", "1").strip() != "0"
 
 
-_CACHE_ON: contextvars.ContextVar = contextvars.ContextVar("cutsell_simple_engine_cache", default=False)
+_CACHE_ON: contextvars.ContextVar = contextvars.ContextVar("cutsell_simple_engine_cache", default=True)
+_CACHE_TTL: contextvars.ContextVar = contextvars.ContextVar("cutsell_simple_engine_cache_ttl", default="5m")
 
 
 @contextlib.contextmanager
-def cache_scope(on: bool):
-    """Prompt caching only inside this block. Product Owner decision (2026-10-19): on only for a video that is part of
-    a Bulk send (the next videos of the same send read the cached instructions); a lone video never pays the cache-write
-    premium."""
+def cache_scope(on: bool = True, ttl: str | None = None):
+    """Prompt caching for the calls inside. Product Owner (2026-10-22): caching is on for EVERY video (Single, Combine,
+    Bulk, Mix; every user), 1 hour while few videos are being cut and 5 minutes when many are (see cache_policy).
+    Before (2026-10-19) it was on only for the videos of a Bulk send."""
     token = _CACHE_ON.set(bool(on))
+    ttl_token = _CACHE_TTL.set(ttl if ttl in ("5m", "1h") else _CACHE_TTL.get())
     try:
         yield
     finally:
+        _CACHE_TTL.reset(ttl_token)
         _CACHE_ON.reset(token)
 
 
 def cache_enabled() -> bool:
-    """On inside cache_scope(True) only. CUTSELL_SIMPLE_ENGINE_CACHE=0 turns it off everywhere (no redeploy)."""
+    """On unless a cache_scope(False) says otherwise. CUTSELL_SIMPLE_ENGINE_CACHE=0 turns it off everywhere (no redeploy)."""
     return _CACHE_ON.get() and os.environ.get("CUTSELL_SIMPLE_ENGINE_CACHE", "1").strip() != "0"
+
+
+def cache_ttl() -> str:
+    return _CACHE_TTL.get()
+
+
+# Claude Sonnet 5.5, USD per million tokens (platform.claude.com/docs/en/about-claude/pricing, read 2026-10-22).
+PRICES = {"claude-sonnet-5-5": {"input": 2.0, "output": 10.0, "write_5m": 2.5, "write_1h": 4.0, "read": 0.10}}
+
+
+def call_cost(usage: dict, model: str | None = None) -> dict:
+    """What one call cost with the cache, and what the same tokens would have cost without it (all at the input price)."""
+    price = PRICES.get(model or model_name(), PRICES["claude-sonnet-5-5"])
+    inp = int(usage.get("input_tokens") or 0)
+    out = int(usage.get("output_tokens") or 0)
+    read = int(usage.get("cache_read_input_tokens") or 0)
+    created = usage.get("cache_creation") or {}
+    w1h = int(created.get("ephemeral_1h_input_tokens") or 0)
+    w5m = int(created.get("ephemeral_5m_input_tokens") or 0)
+    if not created:
+        w5m = int(usage.get("cache_creation_input_tokens") or 0)
+    actual = (inp * price["input"] + out * price["output"] + read * price["read"] + w5m * price["write_5m"]
+              + w1h * price["write_1h"]) / 1e6
+    without = ((inp + read + w5m + w1h) * price["input"] + out * price["output"]) / 1e6
+    return {"usd": round(actual, 6), "usd_without_cache": round(without, 6), "read_tokens": read,
+            "write_5m_tokens": w5m, "write_1h_tokens": w1h}
+
+
+def cache_report(usages: list[dict], *, ttl: str | None = None, videos_last_hour: int | None = None) -> dict:
+    """Per video: was the cache used, and how much did it save (negative = the write premium cost more)."""
+    total = {"usd": 0.0, "usd_without_cache": 0.0, "read_tokens": 0, "write_5m_tokens": 0, "write_1h_tokens": 0}
+    for usage in usages or []:
+        for key, value in call_cost(usage).items():
+            total[key] += value
+    total["usd"] = round(total["usd"], 6)
+    total["usd_without_cache"] = round(total["usd_without_cache"], 6)
+    total["saved_usd"] = round(total["usd_without_cache"] - total["usd"], 6)
+    total["cache_used"] = total["read_tokens"] > 0
+    total["cache_on"] = cache_enabled()
+    total["ttl"] = ttl or cache_ttl()
+    if videos_last_hour is not None:
+        total["videos_last_hour"] = videos_last_hour
+    return total
 
 
 def model_name() -> str:
@@ -133,11 +184,11 @@ def call_anthropic(prompt, *, max_tokens: int = 16000, attempts: int = 4) -> tup
                     "thinking_blocks": sum(1 for b in data.get("content", []) if b.get("type") == "thinking"),
                     "answer_chars": len(text), "stop_reason": data.get("stop_reason"),
                     "json_format": "format" in body.get("output_config", {}), "json_refused": json_refused,
-                    "cache": cache_enabled(),
+                    "cache": cache_enabled(), "cache_ttl": cache_ttl() if cache_enabled() else None,
                 })
                 _LOG.info("simple_engine_llm_call %s", json.dumps({k: usage.get(k) for k in (
                     "step", "input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens",
-                    "max_tokens", "thinking", "effort", "answer_chars", "stop_reason", "cache", "json_format")}))
+                    "max_tokens", "thinking", "effort", "answer_chars", "stop_reason", "cache", "cache_ttl", "json_format")}))
                 return text, usage
             if response.status_code == 400 and "format" in body.get("output_config", {}):
                 # The JSON format was refused: ask again in free text (the parsers read both) and say so in the logs.

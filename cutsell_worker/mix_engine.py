@@ -25,6 +25,8 @@ from typing import Callable, Optional
 import requests
 
 from .simple_engine import engine as _engine
+from .simple_engine import cache_policy as _cache_policy
+from .simple_engine import llm as _llm
 
 _LOG = logging.getLogger("cutsell.mix")
 MIX_VERSION = "mix-1.0.1"
@@ -204,12 +206,18 @@ def ask(clips: list[dict], *, call: Optional[LLMCall] = None, model: Optional[st
     """The one AI call of a Mix. Returns (answer, lines per clip, usage {model, tokens, cost_usd, calls})."""
     text, units = mix_transcript(clips)
     model = model or model_name()
+    fixed = {"type": "text", "text": PROMPT + "\nCLIPS:\n"}
+    # Prompt cache for every Mix too (PO 2026-10-22): 1 hour while few videos are being cut, else 5 minutes.
+    ttl, recent = _cache_policy.note_video()
+    if _llm.cache_enabled():
+        with _llm.cache_scope(True, ttl=ttl):
+            fixed["cache_control"] = _llm.cache_control()
     body = {"model": model, "max_tokens": 16000,
-            "messages": [{"role": "user", "content": [{"type": "text", "text": PROMPT + "\nCLIPS:\n"},
-                                                      {"type": "text", "text": text}]}],
+            "messages": [{"role": "user", "content": [fixed, {"type": "text", "text": text}]}],
             "output_config": {"effort": effort, "format": {"type": "json_schema", "schema": SCHEMA}}}
     call = call or call_anthropic
     usage = {"model": model, "input_tokens": 0, "output_tokens": 0, "calls": 0, "cost_usd": 0.0}
+    raw_usages: list[dict] = []
     last = None
     for attempt in range(3):                       # an unreadable answer is asked again, never guessed
         try:
@@ -217,7 +225,10 @@ def ask(clips: list[dict], *, call: Optional[LLMCall] = None, model: Optional[st
             usage["calls"] += 1
             usage["input_tokens"] += int(u.get("input_tokens") or 0)
             usage["output_tokens"] += int(u.get("output_tokens") or 0)
-            usage["cost_usd"] = round(cost_usd(model, usage), 6)
+            raw_usages.append(u)
+            report = _llm.cache_report(raw_usages, ttl=ttl, videos_last_hour=recent)
+            usage["cost_usd"] = report["usd"] if model in _llm.PRICES else round(cost_usd(model, usage), 6)
+            usage["prompt_cache"] = report
             return _parse(answer_text), units, usage
         except Exception as exc:
             last = exc

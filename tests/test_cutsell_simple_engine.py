@@ -901,13 +901,45 @@ def test_prompt_parts_keep_the_same_text_and_cache_the_fixed_instructions(monkey
     from cutsell_worker.simple_engine import llm
     p = llm.Prompt("FIXED", "own", "\n(run x)", schema={"type": "object"})
     assert str(p) == "FIXEDown\n(run x)" and p.schema == {"type": "object"}
-    assert llm._content(p) == "FIXEDown\n(run x)"            # a lone video: no caching (PO decision)
-    with llm.cache_scope(True):                                # a video of a Bulk send
-        blocks = llm._content(p)
-        assert [b["text"] for b in blocks] == ["FIXED", "own", "\n(run x)"]
-        assert blocks[0]["cache_control"] == {"type": "ephemeral"} and "cache_control" not in blocks[1]
-        monkeypatch.setenv("CUTSELL_SIMPLE_ENGINE_CACHE", "0")
-        assert llm._content(p) == "FIXEDown\n(run x)"     # the env switch wins
+    blocks = llm._content(p)                                   # PO 2026-10-22: every video caches (5 min by default)
+    assert [b["text"] for b in blocks] == ["FIXED", "own", "\n(run x)"]
+    assert blocks[0]["cache_control"] == {"type": "ephemeral"} and "cache_control" not in blocks[1]
+    with llm.cache_scope(True, ttl="1h"):                      # few videos in the last hour: 1 hour
+        assert llm._content(p)[0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+    with llm.cache_scope(False):
+        assert llm._content(p) == "FIXEDown\n(run x)"
+    monkeypatch.setenv("CUTSELL_SIMPLE_ENGINE_CACHE", "0")
+    assert llm._content(p) == "FIXEDown\n(run x)"             # the env switch wins
+
+
+def test_cache_lifetime_follows_how_many_videos_are_being_cut():
+    from cutsell_worker.simple_engine import cache_policy as cp
+
+    class FakeRedis:
+        def __init__(self): self.z = {}
+        def zremrangebyscore(self, key, lo, hi): self.z = {k: v for k, v in self.z.items() if not (lo <= v <= hi)}
+        def zcard(self, key): return len(self.z)
+        def zadd(self, key, mapping): self.z.update(mapping)
+        def expire(self, key, sec): pass
+
+    r = FakeRedis()
+    ttls = [cp.note_video(r, now=1000.0 + i)[0] for i in range(14)]
+    assert ttls[:12] == ["1h"] * 12 and ttls[12:] == ["5m", "5m"]     # the 13th video in an hour: 5 minutes
+    assert cp.note_video(r, now=1000.0 + 4000)[0] == "1h"            # an hour later the count starts again
+    assert cp.note_video(object())[0] == "5m"                          # no Redis: 5 minutes, never an error
+
+
+def test_cache_report_says_what_the_cache_saved():
+    from cutsell_worker.simple_engine import llm
+    hit = {"input_tokens": 1000, "output_tokens": 2000, "cache_read_input_tokens": 9000,
+           "cache_creation_input_tokens": 0, "cache_creation": {"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0}}
+    write = {"input_tokens": 1000, "output_tokens": 2000, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 9000,
+             "cache_creation": {"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 9000}}
+    r = llm.cache_report([hit])
+    assert r["cache_used"] and abs(r["usd_without_cache"] - (10000 * 2 + 2000 * 10) / 1e6) < 1e-9
+    assert abs(r["usd"] - (1000 * 2 + 2000 * 10 + 9000 * 0.10) / 1e6) < 1e-9 and r["saved_usd"] > 0
+    w = llm.cache_report([write], ttl="1h")
+    assert not w["cache_used"] and w["saved_usd"] < 0 and w["ttl"] == "1h"   # a 1-hour write costs 2x the input once
 
 
 def test_only_a_bulk_send_turns_prompt_caching_on():
