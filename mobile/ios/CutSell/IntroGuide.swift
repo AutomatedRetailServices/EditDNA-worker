@@ -193,7 +193,7 @@ private enum IntroArt {
                 }
             }
             .offset(at(40, 326))
-            photo(width: 110, height: 96, radius: 14).offset(at(140, 412))
+            photo("IntroAvatarCut", width: 110, height: 96, radius: 14).offset(at(140, 412))
         }
     }
 
@@ -201,7 +201,7 @@ private enum IntroArt {
     static var edit: some View {
         ZStack(alignment: .topLeading) {
             ZStack(alignment: .topLeading) {
-                Image("IntroPerson").resizable().scaledToFill().frame(width: 160, height: 284).clipped()
+                Image("IntroAvatarPhone").resizable().scaledToFill().frame(width: 160, height: 284).clipped()
                 Text(L10n.tr("Look at this!"))
                     .font(CS.inter(13, .bold)).foregroundStyle(.white)
                     .frame(width: 132, height: 28)
@@ -229,7 +229,7 @@ private enum IntroArt {
                     .background(CS.brandStroke, in: RoundedRectangle(cornerRadius: 15))
                     .offset(at(40, CGFloat(row.1)))
                 ForEach(0..<row.2, id: \.self) { k in
-                    photo(width: 40, height: 50, radius: 8).offset(at(122 + CGFloat(k) * 46, CGFloat(row.1) - 10))
+                    photo("IntroAvatarClip", width: 40, height: 50, radius: 8).offset(at(122 + CGFloat(k) * 46, CGFloat(row.1) - 10))
                 }
             }
             Text(L10n.tr("= 24 videos")).font(CS.inter(20, .bold)).foregroundStyle(.white)
@@ -298,8 +298,9 @@ private enum IntroArt {
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(stroke, lineWidth: width))
     }
 
-    private static func photo(width: CGFloat, height: CGFloat, radius: CGFloat) -> some View {
-        Image("IntroPerson").resizable().scaledToFill()
+    /// The creator's AI avatar, cropped per size (face in view, never stretched).
+    private static func photo(_ name: String, width: CGFloat, height: CGFloat, radius: CGFloat) -> some View {
+        Image(name).resizable().scaledToFill()
             .frame(width: width, height: height)
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).stroke(line, lineWidth: 1))

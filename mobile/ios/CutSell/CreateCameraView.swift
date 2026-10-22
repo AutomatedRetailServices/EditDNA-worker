@@ -48,6 +48,7 @@ struct CreateCameraView: View {
     @ObservedObject private var prompter = TeleprompterStore.shared
     @State private var editingScript = false
     @State private var countingDown = false
+    @State private var railTop: CGFloat = 0
 
     var body: some View {
         ZStack {
@@ -154,13 +155,19 @@ struct CreateCameraView: View {
                 HStack {
                     Spacer()
                     // Hidden while recording (Figma 645:23 / 626:361); back between clips.
+                    // With the script on, the column starts under the script frame and its hint (Figma 1151:2835).
                     if !camera.isRecording {
                         controlsColumn
-                            .padding(.top, prompter.isOn && prompter.hasScript ? max(0, prompter.frame.maxY - 50) : 0)
+                            .padding(.top, prompter.isOn && prompter.hasScript ? railOffset : 0)
                     } else if prompter.isOn && prompter.hasScript {
-                        recordingColumn.padding(.top, max(0, prompter.frame.maxY - 60))
+                        recordingColumn.padding(.top, railOffset)
                     }
                 }
+                .background(GeometryReader { g in
+                    Color.clear
+                        .onAppear { railTop = g.frame(in: .global).minY }
+                        .onChange(of: g.frame(in: .global).minY) { _, y in railTop = y }
+                })
                 .padding(.top, camera.isRecording || elapsed > 0 ? 6 : 20)
 
                 Spacer()
@@ -206,8 +213,11 @@ struct CreateCameraView: View {
         }
     }
 
+    /// Screen y of the rail's row → how far down the column goes to clear the script frame (+ its hint, 34 pt).
+    private var railOffset: CGFloat { max(0, prompter.frame.maxY + 34 - railTop) }
+
     private var controlsColumn: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: prompter.isOn && prompter.hasScript ? 10 : 24) {
             controlButton(title: "Flip", image: "IconFlip", size: CGSize(width: 42, height: 34)) {
                 Task {
                     if torchOn { camera.setTorch(false); torchOn = false }

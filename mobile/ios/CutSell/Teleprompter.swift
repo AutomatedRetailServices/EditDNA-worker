@@ -206,6 +206,8 @@ struct TeleprompterOverlay: View {
                 if showControls { controls(f, scale: scale) }
             }
         }
+        // Figma positions are screen positions (y 86 = just under the Dynamic Island).
+        .ignoresSafeArea()
         .onChange(of: running) { _, _ in lastTick = nil }
         .onChange(of: store.shownScript) { _, _ in position = 0 }
         .task(id: lastTouch) {
