@@ -1,0 +1,8 @@
+B24UI    14.4 PASS You → Language card
+B24UI    15.0 PASS Automatic · English · Español
+B24UI    15.1 PASS Automatic is the default
+B24UI    26.0 FAIL Español: the app re-draws in Spanish at once, still on You
+B24UI    26.6 PASS Español is checked
+B24UI    30.9 FAIL create in Spanish · Subir videos
+B24UI    33.7 PASS edits in Spanish · Ediciones
+B24UI    36.5 PASS plan in Spanish · Plan
