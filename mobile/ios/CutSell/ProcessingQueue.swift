@@ -233,14 +233,20 @@ struct QueueRowView: View {
         switch row.state {
         case .failed:
             Button(action: onRetry) {
+                // "Reintentar" is longer than "Retry": the button grows instead of breaking the word.
                 Text(L10n.tr("Retry"))
                     .font(CS.inter(10, .semibold))
                     .foregroundStyle(Self.error)
-                    .frame(width: 48, height: 28)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .padding(.horizontal, 8)
+                    .frame(minWidth: 48)
+                    .frame(height: 28)
                     .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Self.error, lineWidth: 1))
             }
             .buttonStyle(.plain)
-            .frame(width: 48, height: 60)
+            .frame(minWidth: 48)
+            .frame(height: 60)
             .accessibilityIdentifier("queueRowRetry")
         case .queued:
             Image("QueueIconQueued").resizable().frame(width: 26, height: 26).frame(width: 32, height: 60)
