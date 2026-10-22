@@ -1042,12 +1042,12 @@ struct EditorV4View: View {
             .accessibilityIdentifier("editorPlay")
             HStack(spacing: 0) {
                 Spacer()
-                if let target = keyTarget, model.hasKeyframes(target) {
+                if showKeyArrows {
                     arrow("chevron.left", "Previous keyframe", id: "editorKeyPrev") { jumpKeyframe(forward: false) }
                 }
                 keyframeControl
                     .accessibilityIdentifier("editorKeyframe")
-                if let target = keyTarget, model.hasKeyframes(target) {
+                if showKeyArrows {
                     arrow("chevron.right", "Next keyframe", id: "editorKeyNext") { jumpKeyframe(forward: true) }
                 }
                 control("Ed4CtlUndo", "Undo") { Task { await model.undo() } }
@@ -1079,6 +1079,15 @@ struct EditorV4View: View {
         .frame(width: 36, height: 24)
         .accessibilityLabel(onKey ? "Delete keyframe" : "Add keyframe")
         .accessibilityValue(onKey ? "filled" : "empty")
+    }
+
+    /// ‹ › only while the selected clip (or the clip under the line) has its own keyframes (21 Oct).
+    private var showKeyArrows: Bool {
+        switch keyTarget {
+        case .video(let clipID)?: return !model.videoKeyframes(clipID: clipID).isEmpty
+        case .overlay(let id)?: return !model.overlayKeyframes(overlayID: id).isEmpty
+        case nil: return false
+        }
     }
 
     /// ‹ › : the white line jumps to the previous / next ◇ (CapCut).
