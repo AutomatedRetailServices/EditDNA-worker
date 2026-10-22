@@ -321,6 +321,30 @@ def _unsupported_actions_present(plan: "snp.SourceNormalizationPlan") -> tuple[s
     return tuple(a for a in candidate_actions if a in _UNSUPPORTED_ACTIONS)
 
 
+def _display_rotation_degrees(path: str) -> int:
+    """The source's own display rotation (display-matrix side data, or the older `rotate` tag), 0 when none or
+    unreadable. 22 Oct: an iPhone video stores its orientation this way."""
+    try:
+        # Popen (not subprocess.run): a read-only probe kept apart from the one ffmpeg generation `run` executes.
+        with subprocess.Popen(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+             "stream_side_data=rotation:stream_tags=rotate", "-of", "json", str(path)],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+        ) as proc:
+            stdout, _ = proc.communicate(timeout=60)
+        data = json.loads(stdout or "{}")
+        for stream in data.get("streams") or []:
+            for side in stream.get("side_data_list") or []:
+                if side.get("rotation") not in (None, ""):
+                    return int(float(side["rotation"])) % 360
+            tag = (stream.get("tags") or {}).get("rotate")
+            if tag not in (None, ""):
+                return int(float(tag)) % 360
+    except Exception:
+        return 0
+    return 0
+
+
 def _build_filter_chain(plan: "snp.SourceNormalizationPlan") -> tuple[list[str], list[str], bool, bool]:
     """Builds the ONE-PASS (Stage 17) video/audio filter chains for the
     supported actions this plan actually requests. Returns
@@ -600,9 +624,21 @@ def execute_source_normalization(
     # confirmed (real ffmpeg -h full input option), guarantees ffmpeg never
     # ALSO applies its own metadata-driven rotation on top of the plan's
     # explicit transpose (Stage 8's own "no double autorotation").
+    # 22 Oct (production failure, iPhone 1920x1080 + display matrix -90): with -noautorotate the encoder COPIES
+    # the source's display matrix onto the output, so the pixels were turned by `transpose` AND the output still
+    # said "rotate -90" -- players would turn it twice, and the mandatory re-probe saw a rotation again, so
+    # verification failed and the whole cut was blocked. When the source really carries a display rotation,
+    # ffmpeg's own autorotate turns the pixels exactly as the iPhone shows them and writes NO matrix, on
+    # ffmpeg 5.x and 6.x alike. The explicit `transpose` stays for a plan whose source has no matrix.
+    autorotate = plan.rotation_action != snp.ACTION_NO_ACTION and _display_rotation_degrees(str(source)) != 0
+    if autorotate:
+        rotation_filter = _ROTATION_FILTER.get(plan.rotation_action)
+        video_filters = [f for f in video_filters if f != rotation_filter]
+    diagnostics["rotation_mode"] = "autorotate" if autorotate else (
+        "transpose" if plan.rotation_action != snp.ACTION_NO_ACTION else "none")
     command: list[str] = [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-        "-noautorotate",
+        *([] if autorotate else ["-noautorotate"]),
         "-i", str(source),
         "-map", "0:v:0", "-map", "0:a:0?",
     ]
