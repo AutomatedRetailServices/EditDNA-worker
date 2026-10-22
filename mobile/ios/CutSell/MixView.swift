@@ -61,7 +61,7 @@ struct MixSectionDraft: Identifiable, Hashable {
 
 struct MixClipDraft: Identifiable, Hashable {
     let id = UUID()
-    let video: LocalVideo
+    var video: LocalVideo
     var thumbnail: UIImage?
 }
 
@@ -235,6 +235,24 @@ final class MixSubmitter: ObservableObject {
         if MixCenter.shared.mock { return mockSubmit(sections: sections, productID: productID, howMany: howMany) }
         guard let session = appState.session else { throw UploadFlowError.notSignedIn }
         guard await AIConsentCenter.shared.ensure() else { throw AIConsentError.declined }
+        // 22 Oct: a heavy clip (over ~14 Mb/s) is made lighter before upload, like Single, Combine and Bulk.
+        var sections = sections
+        var prepared = 0
+        let totalClips = sections.reduce(0) { $0 + $1.clips.count }
+        for s in sections.indices {
+            for c in sections[s].clips.indices {
+                let video = sections[s].clips[c].video
+                prepared += 1
+                guard FileManager.default.fileExists(atPath: video.url.path) else { continue }
+                step = "Clip \(prepared) of \(totalClips) · Preparing…"
+                let lighter = try await VideoPreparation.shared.prepare(fileURL: video.url, contentType: video.contentType)
+                if lighter.wasTranscoded {
+                    sections[s].clips[c].video = LocalVideo(url: lighter.url, name: video.name, duration: video.duration,
+                                                            contentType: lighter.contentType, cloudAssetID: video.cloudAssetID,
+                                                            previewURL: video.previewURL, albumHint: video.albumHint)
+                }
+            }
+        }
         let clips = sections.flatMap(\.clips)
         let started = Date()
         let project = try await Retry.run("project") { try await appState.createProject(title: "Mix · \(productName)") }

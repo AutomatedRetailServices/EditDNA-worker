@@ -627,10 +627,19 @@ final class Build24UITests: XCTestCase {
                   element("cameraScript").value as? String ?? "")
             pause(3.5)                                     // 3·2·1 (no camera in the simulator: nothing records)
             shot("\(lang)_prompter_on")
+            // 22 Oct: ONE tap must show the controls (in Spanish the first tap once did nothing).
+            log("\(lang): before first tap: countdown=\(element("prompterCountdownOverlay").exists) sheet=\(element("prompterEditorText").exists)")
             element("prompterText").tap(); pause(0.6)
-            if !element("prompterAutoScroll").exists { element("prompterText").tap(); pause(0.6) }
             check(element("prompterAutoScroll").exists && element("prompterEdit").exists && element("prompterSettings").exists,
-                  "\(lang): tap shows ✎ · Auto-scroll · ⚙ and the frame")
+                  "\(lang): ONE tap shows ✎ · Auto-scroll · ⚙ and the frame")
+            if !element("prompterAutoScroll").exists { element("prompterText").tap(); pause(0.6) }
+            // The right column never touches the text frame (Figma: the column starts under it).
+            let textFrame = element("prompterText").frame
+            for rail in ["cameraScript", "cameraScriptSpeed"] where element(rail).exists {
+                let r = element(rail).frame
+                check(!r.intersects(textFrame.insetBy(dx: -4, dy: -4)), "\(lang): \(rail) clear of the text frame",
+                      "rail \(Int(r.minX)),\(Int(r.minY)) \(Int(r.width))x\(Int(r.height)) · text \(Int(textFrame.minX)),\(Int(textFrame.minY)) \(Int(textFrame.width))x\(Int(textFrame.height))")
+            }
             shot("\(lang)_prompter_controls")
             pause(2.6)
             check(!element("prompterAutoScroll").exists, "\(lang): controls hide after 2 s")

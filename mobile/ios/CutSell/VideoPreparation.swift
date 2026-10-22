@@ -43,45 +43,25 @@ actor VideoPreparation {
             return PreparedVideo(url: fileURL, contentType: contentType, wasTranscoded: false)
         }
 
-        // Otherwise it is only made SMALLER: HEVC 1080p capped near 10 Mb/s (+ audio), and used only
-        // if it really came out lighter than the original.
-        guard let exporter = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHEVC1920x1080)
-                ?? AVAssetExportSession(asset: asset, presetName: AVAssetExportPreset1920x1080) else {
-            return PreparedVideo(url: fileURL, contentType: contentType, wasTranscoded: false)
-        }
+        // Otherwise a LIGHTER COPY is made for cutting and preview (the export uses the original in
+        // Photos): HEVC at most 1080p, ~10 Mb/s, lower for long videos so the file stays under ~950 MB.
         let seconds = seconds0
-        // A ceiling, not a target (the 1080p preset decides the quality); the check below refuses a cut-short file.
-        exporter.fileLengthLimit = min(size - 1, Int64(seconds * (Self.ceilingBitsPerSecond + 192_000) / 8))
+        let videoBits = Self.videoBitrate(seconds: seconds)
         let destination = try preparedDestination()
         try? FileManager.default.removeItem(at: destination)
-        exporter.outputURL = destination
-        exporter.outputFileType = .mp4
-        exporter.shouldOptimizeForNetworkUse = true
-
         CutSellDiagnostics.log("prepare_started", ["width": String(Int(width)), "height": String(Int(height)), "heavy": heavy ? "1" : "0",
-                                                   "codec": Self.fourCC(codec), "mb": String(size / 1_048_576)])
-        let watcher = Task {
-            while !Task.isCancelled {
-                progress(Double(exporter.progress))
-                try? await Task.sleep(nanoseconds: 400_000_000)
-            }
-        }
-        defer { watcher.cancel() }
+                                                   "codec": Self.fourCC(codec), "mb": String(size / 1_048_576),
+                                                   "kbps": String(Int(videoBits / 1000))])
+        let started = Date()
         do {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                exporter.exportAsynchronously {
-                    switch exporter.status {
-                    case .completed: continuation.resume(returning: ())
-                    case .cancelled: continuation.resume(throwing: VideoPreparationError.cancelled)
-                    default: continuation.resume(throwing: exporter.error ?? VideoPreparationError.exportFailed)
-                    }
-                }
-            }
+            try await LightCopyWriter.write(asset: asset, videoTrack: track, to: destination, videoBitsPerSecond: videoBits,
+                                            seconds: seconds, progress: progress)
         } catch {
-            // A video CutSell can't shrink is uploaded as it is.
+            // A video CutSell can't make lighter is uploaded as it is.
             try? FileManager.default.removeItem(at: destination)
             CutSellDiagnostics.log("prepare_failed_original_kept", ["mb": String(size / 1_048_576),
-                                                                     "code": String((error as NSError).code)])
+                                                                     "code": String((error as NSError).code),
+                                                                     "error": String(describing: error).prefix(120).description])
             progress(1)
             return PreparedVideo(url: fileURL, contentType: contentType, wasTranscoded: false)
         }
@@ -89,8 +69,7 @@ actor VideoPreparation {
         let preparedAttributes = try? FileManager.default.attributesOfItem(atPath: destination.path)
         let preparedSize = (preparedAttributes?[.size] as? NSNumber)?.int64Value ?? 0
         progress(1)
-        // 22 Oct: the size ceiling stops the export early instead of failing; a lighter copy that is
-        // shorter than the original (her last words cut off) is never used.
+        // A copy shorter than the original (her last words cut off) is never used.
         let preparedSeconds = CMTimeGetSeconds((try? await AVURLAsset(url: destination).load(.duration)) ?? .zero)
         let complete = preparedSeconds >= seconds - 0.5
         // Never upload a file heavier than the original.
@@ -102,14 +81,23 @@ actor VideoPreparation {
             return PreparedVideo(url: fileURL, contentType: contentType, wasTranscoded: false)
         }
         CutSellDiagnostics.log("prepare_finished", ["mb_before": String(size / 1_048_576),
-                                                    "mb_after": String(preparedSize / 1_048_576), "used": "smaller"])
+                                                    "mb_after": String(preparedSize / 1_048_576), "used": "smaller",
+                                                    "seconds": String(format: "%.1f", Date().timeIntervalSince(started))])
         return PreparedVideo(url: destination, contentType: "video/mp4", wasTranscoded: true)
     }
 
     /// ~10 Mb/s for 1080p.
     static let targetBitsPerSecond: Double = 10_000_000
-    /// Size ceiling of the lighter copy (a 6:39 video stays under ~800 MB).
-    static let ceilingBitsPerSecond: Double = 16_000_000
+    /// The light copy stays under this (the server accepts up to 1 GiB).
+    static let maxCopyBytes: Double = 950_000_000
+    static let audioBitsPerSecond: Double = 128_000
+
+    /// ~10 Mb/s; for a video longer than ~12.5 min, what fits in 950 MB (20 min: ~6.2 Mb/s; 40 min: ~3 Mb/s),
+    /// never under 1.5 Mb/s (enough to cut and preview; the export uses the original).
+    static func videoBitrate(seconds: Double) -> Double {
+        let fits = maxCopyBytes * 8 / max(1, seconds) - audioBitsPerSecond
+        return max(1_500_000, min(targetBitsPerSecond, fits * 0.97))
+    }
     /// Over this (video + audio) a video is re-encoded before upload even when it is under 4K.
     static let heavyBitsPerSecond: Double = 14_000_000
 
