@@ -70,6 +70,8 @@ final class NotificationCenterModel: ObservableObject {
     }
 
     private func scheduleLocalAlert(for item: CutSellNotification) async {
+        // You → Preferences → "Processing complete" off: no alert (the list still shows it).
+        guard AppPrefs.processingAlertsOn else { return }
         let content = UNMutableNotificationContent()
         content.title = "CutSell"
         switch item.kind {
@@ -84,6 +86,7 @@ final class NotificationCenterModel: ObservableObject {
         default:
             return
         }
+        content.body = L10n.tr(content.body)
         content.sound = .default
         content.userInfo = ["project_id": item.projectID, "kind": item.kind]
         let request = UNNotificationRequest(

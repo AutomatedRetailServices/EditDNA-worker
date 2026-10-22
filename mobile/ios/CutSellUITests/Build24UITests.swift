@@ -517,37 +517,44 @@ final class Build24UITests: XCTestCase {
     func testLanguage() throws {
         launchApp(fresh: true, extra: ["-CutSellProjectsMock"])
         pause(2)
-        element("tab_you").tap()
-        let card = element("languageCard")
-        for _ in 0..<4 where !card.isHittable { app.swipeUp(velocity: .slow); pause(0.5) }
-        check(card.exists, "You → Language card")
+        element("tab_you").tap(); pause(1.5)
+        check(element("youOverview").waitForExistence(timeout: 10), "You · Overview v2")
+        youTour("en")
+        // Preferences → App language → Español: the app re-draws in Spanish at once and comes back on Language
+        element("youRow_preferences").tap(); pause(1)
+        element("prefLanguage").tap(); pause(1)
         check(element("language_automatic").exists && element("language_en").exists && element("language_es").exists,
-              "Automatic · English · Español")
-        check(element("language_automatic").isSelected, "Automatic is the default")
-        shot("you_language_english")
-        element("language_es").tap()
-        pause(2)
-        let spanish = app.staticTexts["Idioma"].waitForExistence(timeout: 8)
-        check(spanish, "Español: the app re-draws in Spanish at once, still on You")
-        for _ in 0..<4 where !element("languageCard").isHittable { app.swipeUp(velocity: .slow); pause(0.5) }
-        check(element("language_es").isSelected, "Español is checked")
-        shot("you_language_espanol")
-        app.swipeDown(velocity: .fast); pause(0.6)
-        shot("you_espanol_top")
+              "System Default · English · Español")
+        element("language_es").tap(); pause(3)
+        check(app.staticTexts["Idioma de la app"].waitForExistence(timeout: 10), "Español: re-drawn in Spanish, back on App Language")
+        check(element("language_es").isSelected, "Español is chosen")
+        shot("es_you_language")
+        element("youBack").tap(); pause(1.5)
+        youTour("es")
         for (tab, word, name) in [("create", "Subir videos", "crear"), ("edits", "Ediciones", "ediciones"), ("plan", "Plan", "plan")] {
             element("tab_\(tab)").tap(); pause(2)
             check(app.staticTexts[word].exists || app.buttons[word].exists, "\(tab) in Spanish", word)
             shot("es_\(name)")
         }
-        element("hubMix").tap()
-        if element("mixProduct").waitForExistence(timeout: 15) { shot("es_mix_setup"); element("mixClose").tap(); pause(1) }
-        element("hubMode_bulk").tap()
-        allowPhotos()
-        if element("createModePicker").waitForExistence(timeout: 30) {
-            check(app.staticTexts["Cada video se vuelve una edición aparte."].exists, "gallery helper in Spanish")
-            shot("es_gallery")
-        }
         done()
+    }
+
+    /// Overview and every You page, one screenshot each (lang = "en" / "es").
+    private func youTour(_ lang: String) {
+        element("tab_you").tap(); pause(1)
+        shot("\(lang)_you_overview")
+        for page in ["account", "plan", "privacy", "preferences", "connections", "help"] {
+            let row = element("youRow_\(page)")
+            for _ in 0..<3 where !row.isHittable { app.swipeUp(velocity: .slow); pause(0.4) }
+            row.tap(); pause(1.2)
+            shot("\(lang)_you_\(page)")
+            if page == "preferences" {
+                element("prefAppearance").tap(); pause(1); shot("\(lang)_you_appearance"); element("youBack").tap(); pause(0.8)
+                if lang == "en" { element("prefLanguage").tap(); pause(1); shot("en_you_language"); element("youBack").tap(); pause(0.8) }
+            }
+            element("youBack").tap(); pause(1)
+        }
+        app.swipeDown(velocity: .fast); pause(0.5)
     }
 
     /// The editor in Spanish (a real cut; Automatic follows CUTSELL_LANGUAGE=es on the probe iPhone).

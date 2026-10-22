@@ -19,7 +19,7 @@ struct AppleSignInButton: View {
         VStack(spacing: 8) {
             SignInWithAppleButton(.signIn) { request in
                 hashedNonce = AppleNonce.sha256(AppleNonce.random())
-                request.requestedScopes = [.email]
+                request.requestedScopes = [.fullName, .email]
                 request.nonce = hashedNonce
             } onCompletion: { result in
                 handle(result)
@@ -52,12 +52,17 @@ struct AppleSignInButton: View {
                 return
             }
             let nonce = hashedNonce
+            // The name comes only the first time she signs in with Apple; the email is in the token every time.
+            let name = credential.fullName.flatMap { PersonNameComponentsFormatter.localizedString(from: $0, style: .default) }
+            AccountProfile.shared.remember(name: name, email: credential.email ?? AccountProfile.email(fromIdentityToken: identityToken))
             isWorking = true
             errorMessage = nil
             Task {
                 defer { isWorking = false }
                 do {
                     try await appState.signInWithApple(identityToken: identityToken, nonce: nonce)
+                    if let name, !name.isEmpty { await AccountProfile.shared.setName(name, session: appState.session) }
+                    await AccountProfile.shared.refresh(session: appState.session)
                     onSignedIn()
                 } catch {
                     errorMessage = "Couldn't sign in right now. Please try again."

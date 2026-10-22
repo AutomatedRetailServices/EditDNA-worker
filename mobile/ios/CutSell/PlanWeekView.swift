@@ -494,12 +494,19 @@ final class PostReminders: NSObject, UNUserNotificationCenterDelegate {
 
     func install() { UNUserNotificationCenter.current().delegate = self }
 
+    private var lastState: PlanState?
+
+    /// You → Preferences → "Time to post reminders" was switched: on schedules the plan's reminders again, off removes them.
+    func remindersChanged() { schedule(lastState) }
+
     func schedule(_ state: PlanState?) {
+        lastState = state
+        let remindersOn = AppPrefs.remindersOn
         let center = UNUserNotificationCenter.current()
         center.getPendingNotificationRequests { requests in
             let old = requests.map(\.identifier).filter { $0.hasPrefix(Self.prefix) }
             center.removePendingNotificationRequests(withIdentifiers: old)
-            guard let state, let week = state.week else { return }
+            guard remindersOn, let state, let week = state.week else { return }
             // Goal v2: "Remind me at each time" (one reminder per planned video); old Goal: the reminders that are on
             let on = state.prefs.times != nil ? ((state.prefs.remind ?? true) ? Set(week.slots.map(\.time)) : [])
                                               : Set(state.prefs.reminders.filter(\.on).map(\.time))
@@ -509,8 +516,8 @@ final class PostReminders: NSObject, UNUserNotificationCenterDelegate {
                 guard parts.count == 2, let when = Calendar.current.date(bySettingHour: parts[0], minute: parts[1], second: 0, of: day),
                       when > Date() else { continue }
                 let content = UNMutableNotificationContent()
-                content.title = "Time to post: \(slot.product ?? "your video")"
-                content.body = [slot.brand, "Caption and video are ready."].compactMap { $0 }.joined(separator: " · ")
+                content.title = L10n.tr("Time to post: \(slot.product ?? L10n.tr("your video"))")
+                content.body = [slot.brand, L10n.tr("Caption and video are ready.")].compactMap { $0 }.joined(separator: " · ")
                 content.sound = .default
                 content.userInfo = ["plan_day": slot.date, "project_id": slot.projectID]
                 let trigger = UNCalendarNotificationTrigger(
