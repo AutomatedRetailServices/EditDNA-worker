@@ -17,6 +17,9 @@ on:
       plan_fixture:
         description: "testPlanRealData: base64 JSON of her plan (computed read-only on the server)"
         default: ""
+      video_mbps:
+        description: "Test video bitrate in Mb/s (8 = normal; 24 = a heavy iPhone 1080p60 clip, made lighter before upload)"
+        default: "8"
   push:
     branches: [probe/build24]
 
@@ -93,7 +96,7 @@ jobs:
             i=$((i+1))
             ffmpeg -loglevel error -y -f lavfi -i "testsrc2=s=1080x1920:r=30:d=$d" -i speech.wav \
               -vf "noise=alls=20:allf=t,hue=h=$((i*40))" -af "apad" -map 0:v -map 1:a -t $d -metadata creation_time=2026-10-18T1$i:00:00Z \
-              -c:v libx264 -preset ultrafast -b:v 8M -maxrate 8M -bufsize 16M -pix_fmt yuv420p -c:a aac -b:a 128k c$i.mp4
+              -c:v libx264 -preset ultrafast -b:v ${{ inputs.video_mbps || 8 }}M -maxrate ${{ inputs.video_mbps || 8 }}M -bufsize 48M -pix_fmt yuv420p -c:a aac -b:a 128k c$i.mp4
           done
           ls -la c*.mp4
 
@@ -134,7 +137,7 @@ jobs:
             set -e
             grep -E "B24UI|error:|failed|passed" "$RUNNER_TEMP/test_$t.log" | grep -v Bearer | tail -60 > "$RUNNER_TEMP/b24/xctest_$t.txt" || true
             xcrun simctl spawn "$SIM_UDID" log show --start "$start" --style compact \
-              --predicate 'subsystem == "ai.cutsell.app"' 2>/dev/null | grep -oE '(upload_|job_|processing_|audio_|server_step|editor_opened|video_|clip_|combine_|continue_in_background|follow_|cut_ready|queue_|bulk|asset_|export_|caption_font|save_to_photos|result_received).*' \
+              --predicate 'subsystem == "ai.cutsell.app"' 2>/dev/null | grep -oE '(prepare_|upload_|job_|processing_|audio_|server_step|editor_opened|video_|clip_|combine_|continue_in_background|follow_|cut_ready|queue_|bulk|asset_|export_|caption_font|save_to_photos|result_received).*' \
               | cut -c1-300 > "$RUNNER_TEMP/b24/app_events_$t.txt" || true
           done
           sudo pfctl -f /etc/pf.conf 2>/dev/null; sudo dnctl -q flush 2>/dev/null || true

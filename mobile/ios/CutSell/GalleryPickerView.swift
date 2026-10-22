@@ -180,6 +180,9 @@ extension GalleryExport {
               max(asset.pixelWidth, asset.pixelHeight) < 3840, min(asset.pixelWidth, asset.pixelHeight) < 2160,
               let bytes = (original.value(forKey: "fileSize") as? NSNumber)?.int64Value, bytes > 0 else { return nil }
         if CreateLimits.sizeAndLengthLimitsOn && bytes > CreateLimits.maxFileBytes { throw Failure.tooLarge(bytes) }
+        // 22 Oct: a heavy original (over ~14 Mb/s) is not uploaded byte for byte: it takes the normal path
+        // (downloaded, then made lighter before upload). Uploaded as it was, a 6:39 video was 1.2 GB.
+        guard !VideoPreparation.isHeavy(bytes: bytes, seconds: asset.duration) else { return nil }
         guard await isOnlyInCloud(asset) else { return nil }
         let started = Date()
         guard let preview = try? await fastCopy(asset, progress: progress) else { return nil }

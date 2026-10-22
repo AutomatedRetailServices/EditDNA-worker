@@ -33,7 +33,11 @@ actor VideoPreparation {
         let codec = try await Self.codec(of: track)
         let under4K = max(width, height) < 3839.5 && min(width, height) < 2159.5
         let fineCodec = codec == kCMVideoCodecType_H264 || codec == kCMVideoCodecType_HEVC
-        if fineCodec && under4K {
+        // 22 Oct (production): a 6:39 1080p iPhone video at ~25 Mb/s weighs 1.2 GB; the server refused it
+        // (1 GB limit) and a 5:22 one needed ~80 parts. A heavy video (over ~14 Mb/s) is made lighter too.
+        let seconds0 = max(1, CMTimeGetSeconds(try await asset.load(.duration)))
+        let heavy = Self.isHeavy(bytes: size, seconds: seconds0)
+        if fineCodec && under4K && !heavy {
             CutSellDiagnostics.log("prepare_skipped", ["width": String(Int(width)), "height": String(Int(height)),
                                                        "codec": Self.fourCC(codec), "mb": String(size / 1_048_576)])
             return PreparedVideo(url: fileURL, contentType: contentType, wasTranscoded: false)
@@ -45,15 +49,16 @@ actor VideoPreparation {
                 ?? AVAssetExportSession(asset: asset, presetName: AVAssetExportPreset1920x1080) else {
             return PreparedVideo(url: fileURL, contentType: contentType, wasTranscoded: false)
         }
-        let seconds = max(1, CMTimeGetSeconds(try await asset.load(.duration)))
-        exporter.fileLengthLimit = min(size - 1, Int64(seconds * (Self.targetBitsPerSecond + 192_000) / 8))
+        let seconds = seconds0
+        // A ceiling, not a target (the 1080p preset decides the quality); the check below refuses a cut-short file.
+        exporter.fileLengthLimit = min(size - 1, Int64(seconds * (Self.ceilingBitsPerSecond + 192_000) / 8))
         let destination = try preparedDestination()
         try? FileManager.default.removeItem(at: destination)
         exporter.outputURL = destination
         exporter.outputFileType = .mp4
         exporter.shouldOptimizeForNetworkUse = true
 
-        CutSellDiagnostics.log("prepare_started", ["width": String(Int(width)), "height": String(Int(height)),
+        CutSellDiagnostics.log("prepare_started", ["width": String(Int(width)), "height": String(Int(height)), "heavy": heavy ? "1" : "0",
                                                    "codec": Self.fourCC(codec), "mb": String(size / 1_048_576)])
         let watcher = Task {
             while !Task.isCancelled {
@@ -84,11 +89,16 @@ actor VideoPreparation {
         let preparedAttributes = try? FileManager.default.attributesOfItem(atPath: destination.path)
         let preparedSize = (preparedAttributes?[.size] as? NSNumber)?.int64Value ?? 0
         progress(1)
+        // 22 Oct: the size ceiling stops the export early instead of failing; a lighter copy that is
+        // shorter than the original (her last words cut off) is never used.
+        let preparedSeconds = CMTimeGetSeconds((try? await AVURLAsset(url: destination).load(.duration)) ?? .zero)
+        let complete = preparedSeconds >= seconds - 0.5
         // Never upload a file heavier than the original.
-        guard preparedSize > 0, preparedSize < size else {
+        guard preparedSize > 0, preparedSize < size, complete else {
             try? FileManager.default.removeItem(at: destination)
             CutSellDiagnostics.log("prepare_finished", ["mb_before": String(size / 1_048_576),
-                                                        "mb_after": String(preparedSize / 1_048_576), "used": "original"])
+                                                        "mb_after": String(preparedSize / 1_048_576), "used": "original",
+                                                        "complete": complete ? "1" : "0"])
             return PreparedVideo(url: fileURL, contentType: contentType, wasTranscoded: false)
         }
         CutSellDiagnostics.log("prepare_finished", ["mb_before": String(size / 1_048_576),
@@ -98,6 +108,14 @@ actor VideoPreparation {
 
     /// ~10 Mb/s for 1080p.
     static let targetBitsPerSecond: Double = 10_000_000
+    /// Size ceiling of the lighter copy (a 6:39 video stays under ~800 MB).
+    static let ceilingBitsPerSecond: Double = 16_000_000
+    /// Over this (video + audio) a video is re-encoded before upload even when it is under 4K.
+    static let heavyBitsPerSecond: Double = 14_000_000
+
+    static func isHeavy(bytes: Int64, seconds: Double) -> Bool {
+        seconds > 0 && Double(bytes) * 8 / seconds > heavyBitsPerSecond
+    }
 
     static func codec(of track: AVAssetTrack) async throws -> FourCharCode {
         let descriptions = try await track.load(.formatDescriptions)
