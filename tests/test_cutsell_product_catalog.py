@@ -163,8 +163,9 @@ def test_album_name_is_a_free_hint():
 
 
 def test_the_cut_engine_is_untouched():
-    """The Gold cut cannot change: the cut engine's code and prompts are byte-identical to the live engine (f7f5772)."""
-    diff = subprocess.run(["git", "diff", "--stat", "f7f5772", "--", "cutsell_worker/simple_engine",
+    """The Gold cut cannot change: the cut engine's code and prompts are byte-identical to the live engine (ab37eac:
+    f7f5772 plus the 21 Oct Auto Zoom AI change she asked for -- zoom moments only, never the keep / hide decisions)."""
+    diff = subprocess.run(["git", "diff", "--stat", "ab37eac", "--", "cutsell_worker/simple_engine",
                            "cutsell_worker/simple_engine_adapter.py"], capture_output=True, text=True)
     if diff.returncode != 0:
         pytest.skip("git history not available")
