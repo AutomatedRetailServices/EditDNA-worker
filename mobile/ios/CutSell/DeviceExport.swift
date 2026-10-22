@@ -195,8 +195,8 @@ final class DeviceExport: ObservableObject {
                 allOriginals = false
             }
             if first, let url = Self.localFile(forURI: uri), let track = try? await AVURLAsset(url: url).loadTracks(withMediaType: .video).first {
-                if let (size, transform) = try? await track.load(.naturalSize, .preferredTransform), OriginalLinks.asset(forURI: uri) == nil {
-                    let shown = size.applying(transform)
+                if let loaded = try? await track.load(.naturalSize, .preferredTransform), OriginalLinks.asset(forURI: uri) == nil {
+                    let shown = loaded.0.applying(loaded.1)
                     found.width = Int(abs(shown.width)); found.height = Int(abs(shown.height))
                 }
                 if let rate = try? await track.load(.nominalFrameRate), rate > 1 { found.fps = Int(rate.rounded()) }
