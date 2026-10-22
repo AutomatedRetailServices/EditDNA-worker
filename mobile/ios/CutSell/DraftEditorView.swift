@@ -69,7 +69,10 @@ struct DraftEditorView: View {
             let model = DraftEditorViewModel(project: project, session: session)
             holder.model = model
             await model.load()
+            // 22 Oct: a copy the server removed (30 days unused) is made again from the original in Photos.
+            await SourceRestore.shared.restoreIfNeeded(model: model)
         }
+        .overlay { RestoreBanner(projectID: project.projectID) }
         // The editor has its own header (back · name · 1080p HD · Export): never the system bar
         // on top of it (build 14 showed a second, large "‹ Cut 14 Oct" bar).
         .toolbar(.hidden, for: .navigationBar)
@@ -252,4 +255,37 @@ private final class Holder: ObservableObject {
         }
     }
     private var forward: AnyCancellable?
+}
+
+/// "Restoring video… 40%" over the editor while a removed copy is made again; the reason when it can't be.
+private struct RestoreBanner: View {
+    let projectID: String
+    @ObservedObject private var restore = SourceRestore.shared
+
+    var body: some View {
+        if let value = restore.progress[projectID] {
+            pill {
+                ProgressView().controlSize(.small).tint(.white)
+                Text(L10n.tr("Restoring video…")).font(CS.inter(13, .medium)).foregroundStyle(.white)
+                Text(verbatim: "\(Int((value * 100).rounded()))%").font(CS.inter(13, .semibold)).monospacedDigit().foregroundStyle(CS.cyan)
+            }
+            .accessibilityIdentifier("restoringVideo")
+        } else if let problem = restore.problem[projectID] {
+            pill {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color(hex: 0xFFD60A))
+                Text(L10n.tr(problem)).font(CS.inter(12, .medium)).foregroundStyle(.white).lineLimit(2)
+            }
+            .accessibilityIdentifier("restoreProblem")
+        }
+    }
+
+    private func pill<C: View>(@ViewBuilder _ content: () -> C) -> some View {
+        HStack(spacing: 8) { content() }
+            .padding(.horizontal, 14).padding(.vertical, 9)
+            .background(Color(hex: 0x040812, opacity: 0.92), in: Capsule())
+            .overlay(Capsule().stroke(CS.borderDefault, lineWidth: 1))
+            .frame(maxHeight: .infinity, alignment: .top)
+            .padding(.top, 64)
+            .padding(.horizontal, 16)
+    }
 }

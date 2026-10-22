@@ -1107,6 +1107,7 @@
 "The upload didn’t start" = "La subida no empezó";
 "The upload is missing one or more parts." = "A la subida le faltan una o más partes.";
 "The upload stopped" = "La subida se detuvo";
+"The video couldn't be restored. Try again." = "No se pudo restaurar el video. Inténtalo de nuevo.";
 "The video couldn’t be prepared. Check your connection and try again." = "No se pudo preparar el video. Revisa tu conexión y vuelve a intentarlo.";
 "The video editor stays dark" = "El editor de video sigue oscuro";
 "The video for this cut isn't on this iPhone." = "El video de este corte no está en este iPhone.";
@@ -1144,6 +1145,7 @@
 "This video format isn’t supported yet. Choose another video or review the formats CutSell accepts." = "Este formato de video todavía no es compatible. Elige otro video o revisa los formatos que acepta CutSell.";
 "This video is too long" = "Este video es demasiado largo";
 "This video's format isn't supported. Please pick another one." = "El formato de este video no es compatible. Elige otro.";
+"This video's original isn't in Photos anymore, so it can't be restored." = "El original de este video ya no está en Fotos, así que no se puede restaurar.";
 "This week" = "Esta semana";
 "TikTok · coming soon" = "TikTok · próximamente";
 "Time" = "Hora";

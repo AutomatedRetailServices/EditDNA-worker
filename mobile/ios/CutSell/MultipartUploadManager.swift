@@ -80,6 +80,9 @@ struct MultipartCompleteResponse: Codable {
 
 actor MultipartUploadManager {
     static let shared = MultipartUploadManager()
+    /// 22 Oct (Restoring video…): files uploaded again to the place of a copy the server removed.
+    private var restoreURIs: [String: String] = [:]
+    func setRestore(uri: String, for fileURL: URL) { restoreURIs[fileURL.path] = uri }
     private let api = APIClient.shared
     private let resumeStore = UploadResumeStore.shared
     static let requestedPartSize = 8 * 1024 * 1024
@@ -386,6 +389,8 @@ actor MultipartUploadManager {
             /// Build 21: 8 MiB parts (all equal except the last, as R2 requires). The current server
             /// ignores it and answers 16 MiB; the app always uses the part size the server answers.
             let part_size: Int
+            /// 22 Oct: the copy goes back to where the removed one was (nil = a new upload).
+            let restore_uri: String?
         }
         return try await api.request(
             "/v1/uploads/multipart/start",
@@ -396,7 +401,8 @@ actor MultipartUploadManager {
                 original_name: fileURL.lastPathComponent,
                 content_type: contentType,
                 size_bytes: size,
-                part_size: Self.requestedPartSize
+                part_size: Self.requestedPartSize,
+                restore_uri: restoreURIs[fileURL.path]
             ),
             timeout: 20
         )
