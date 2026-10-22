@@ -43,6 +43,8 @@ struct CreateCameraView: View {
     @State private var torchOn = false
     @State private var showGrid = false
     @State private var recordingFailed = false
+    @ObservedObject private var prompter = TeleprompterStore.shared
+    @State private var editingScript = false
 
     var body: some View {
         ZStack {
@@ -88,6 +90,8 @@ struct CreateCameraView: View {
             if torchOn { camera.setTorch(false) }
             camera.stopSession()
         }
+        .sheet(isPresented: $editingScript) { TeleprompterEditor() }
+        .animation(.easeOut(duration: 0.2), value: prompter.isOn)
         .fullScreenCover(isPresented: $recordingFailed) {
             CreateProblemView(
                 problem: .couldNotAdd,
@@ -174,6 +178,20 @@ struct CreateCameraView: View {
                 }
                 .padding(.bottom, 26)
             }
+            // Teleprompter (Script on the side rail): at the top, next to the lens; scrolls while recording.
+            if prompter.isOn && prompter.hasScript {
+                VStack(spacing: 0) {
+                    TeleprompterOverlay(running: camera.isRecording, onEdit: {
+                        if !camera.isRecording { editingScript = true }
+                    })
+                    .frame(height: 232)
+                    .padding(.leading, 14)
+                    .padding(.trailing, camera.isRecording ? 14 : 84)
+                    .padding(.top, camera.isRecording || elapsed > 0 ? 100 : 58)
+                    Spacer()
+                }
+                .transition(.opacity)
+            }
         }
     }
 
@@ -211,6 +229,24 @@ struct CreateCameraView: View {
             .buttonStyle(.plain)
             .accessibilityValue(camera.mirrorOn ? "On" : "Off")
             .accessibilityIdentifier("cameraMirror")
+            Button {
+                // No script yet: write it first. With a script: show / hide it.
+                if prompter.hasScript { prompter.isOn.toggle() } else { editingScript = true }
+            } label: {
+                VStack(spacing: 4) {
+                    Image(systemName: "text.alignleft")
+                        .font(.system(size: 26, weight: .semibold))
+                        .foregroundStyle(prompter.isOn && prompter.hasScript ? CS.cyan : .white)
+                        .frame(width: 36, height: 36)
+                    Text(L10n.tr("Script"))
+                        .font(CS.sf(13, .semibold))
+                        .foregroundStyle(prompter.isOn && prompter.hasScript ? CS.cyan : .white)
+                }
+                .frame(width: 62)
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(prompter.isOn && prompter.hasScript ? "On" : "Off")
+            .accessibilityIdentifier("cameraScript")
         }
         .frame(width: 62)
         .padding(.trailing, 8)

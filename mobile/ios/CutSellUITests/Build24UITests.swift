@@ -595,6 +595,43 @@ final class Build24UITests: XCTestCase {
         done()
     }
 
+    /// Teleprompter on the camera (Script on the side rail), EN and ES.
+    func testTeleprompter() throws {
+        for lang in ["en", "es"] {
+            app = XCUIApplication()
+            app.launchArguments = ["-CutSellScreen", "camera", "-cutsell.prompter.script", "", "-cutsell.prompter.on", "NO"]
+            app.launchEnvironment["CUTSELL_LANGUAGE"] = lang
+            app.launch()
+            check(element("cameraScript").waitForExistence(timeout: 20), "\(lang): Script on the camera rail")
+            shot("\(lang)_prompter_rail")
+            element("cameraScript").tap(); pause(1.2)
+            let editor = element("prompterEditorText")
+            check(editor.waitForExistence(timeout: 5), "\(lang): no script yet → the editor opens")
+            editor.tap()
+            editor.typeText(lang == "es"
+                ? "¡Hola! Hoy te muestro mi nuevo perfume. Huele a vainilla y dura todo el día. Lo uso para el trabajo y para salir. Si te gusta, el link está aquí abajo."
+                : "Hi! Today I'm showing you my new perfume. It smells like vanilla and lasts all day. I wear it to work and to go out. If you like it, the link is right below.")
+            pause(0.6)
+            shot("\(lang)_prompter_editor")
+            element("prompterDone").tap(); pause(1.2)
+            check(element("prompterOverlay").waitForExistence(timeout: 5), "\(lang): the script shows over the camera")
+            check(element("cameraScript").value as? String == "On", "\(lang): Script is on")
+            shot("\(lang)_prompter_on")
+            element("prompterFaster").tap(); pause(0.4)
+            check(element("prompterSpeed").label.hasSuffix("4"), "\(lang): faster → speed 4", element("prompterSpeed").label)
+            element("prompterSize").tap(); pause(0.6)
+            shot("\(lang)_prompter_large")
+            element("prompterText").swipeUp(velocity: .slow); pause(0.6)
+            shot("\(lang)_prompter_dragged")
+            element("cameraScript").tap(); pause(0.8)
+            check(!element("prompterOverlay").exists, "\(lang): Script off hides it")
+            element("cameraScript").tap(); pause(0.8)
+            check(element("prompterOverlay").exists, "\(lang): Script on shows it again (script kept)")
+            app.terminate()
+        }
+        done()
+    }
+
     /// Overview and every You page, one screenshot each (lang = "en" / "es").
     private func youTour(_ lang: String) {
         element("tab_you").tap(); pause(1)

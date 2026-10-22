@@ -343,6 +343,7 @@
 "Edit" = "Editar";
 "Edit caption" = "Editar subtítulo";
 "Edit it your way" = "Edítalo a tu manera";
+"Edit script" = "Editar guion";
 "Edit %@ draft%@ in bulk" = "Editar %1$@ borrador%2$@ juntos";
 "Edit %@ draft%lld in bulk" = "Editar %1$@ borrador%2$lld juntos";
 "Edit %lld draft%@ in bulk" = "Editar %1$lld borrador%2$@ juntos";
@@ -378,6 +379,7 @@
 "Faceless video" = "Video sin cámara";
 "Fade in" = "Entrada suave";
 "Fade out" = "Salida suave";
+"Faster" = "Más rápido";
 "Fill" = "Rellenar";
 "Finishing…" = "Terminando…";
 "Fix stuck screens · keeps your projects" = "Arregla pantallas trabadas · conserva tus proyectos";
@@ -441,6 +443,7 @@
 "Haptic feedback" = "Vibración";
 "Help & Legal" = "Ayuda y legal";
 "Help & Support" = "Ayuda y soporte";
+"Hi! Today I'm showing you…" = "¡Hola! Hoy te muestro…";
 "Hidden by Apple" = "Oculto por Apple";
 "Highlight" = "Resaltado";
 "Hold on…" = "Un momento…";
@@ -673,6 +676,7 @@
 "Pan" = "Mover";
 "Part %@" = "Parte %1$@";
 "Part %lld" = "Parte %1$lld";
+"Paste" = "Pegar";
 "Pause" = "Pausa";
 "Paused · " = "En pausa · ";
 "Permanently removes account and eligible data" = "Borra para siempre la cuenta y sus datos";
@@ -830,6 +834,7 @@
 "Saving your changes…" = "Guardando tus cambios…";
 "Saving…" = "Guardando…";
 "Scale" = "Tamaño";
+"Script" = "Guion";
 "Search" = "Buscar";
 "Search brand or product" = "Buscar marca o producto";
 "Search edits" = "Buscar ediciones";
@@ -872,6 +877,7 @@
 "Single clip" = "Un clip";
 "Skip" = "Omitir";
 "Slide the timeline under the white line to move through the video." = "Desliza la línea de tiempo bajo la línea blanca para moverte por el video.";
+"Slower" = "Más lento";
 "Smaller" = "Más pequeño";
 "Smooth audio between cuts, no abrupt jumps." = "Audio suave entre cortes, sin saltos bruscos.";
 "Soft" = "Suave";
@@ -886,6 +892,8 @@
 "Sounds couldn't download. Tap to try again." = "Los sonidos no se descargaron. Toca para intentarlo otra vez.";
 "Sources" = "Fuentes";
 "Speed" = "Velocidad";
+"Speed %@" = "Velocidad %1$@";
+"Speed %lld" = "Velocidad %1$lld";
 "Split" = "Dividir";
 "Split at %@ · tap ↶ to undo" = "Dividido en %1$@ · toca ↶ para deshacer";
 "Split at %lld · tap ↶ to undo" = "Dividido en %1$lld · toca ↶ para deshacer";
@@ -893,6 +901,7 @@
 "Split selected placement" = "Dividir la selección";
 "Stacked" = "Apilado";
 "Start creating" = "Empezar a crear";
+"Start over" = "Desde el inicio";
 "Starting AI edit" = "Empezando la edición con IA";
 "Starting AI edit…" = "Empezando la edición con IA…";
 "Starting the export…" = "Empezando la exportación…";
@@ -951,6 +960,7 @@
 "Text overlay %lld, position %@, %lld" = "Texto %1$lld, posición %2$@, %3$lld";
 "Text overlay %lld, position %lld, %@" = "Texto %1$lld, posición %2$lld, %3$@";
 "Text overlay %lld, position %lld, %lld" = "Texto %1$lld, posición %2$lld, %3$lld";
+"Text size" = "Tamaño del texto";
 "Text — selected clip only" = "Texto — solo el clip seleccionado";
 "That song couldn't be read. Please pick another file." = "No se pudo leer esa canción. Elige otro archivo.";
 "That take was too short. Please record again." = "Esa toma fue muy corta. Graba de nuevo.";
@@ -1149,6 +1159,7 @@
 "Word color" = "Color de las palabras";
 "Word color %@" = "Color de palabras %1$@";
 "Word color %lld" = "Color de palabras %1$lld";
+"Write what you'll say. It scrolls by itself while you record, next to the camera." = "Escribe lo que vas a decir. Se desplaza solo mientras grabas, junto a la cámara.";
 "Writing caption…" = "Escribiendo el caption…";
 "Writing your caption…" = "Escribiendo tu caption…";
 "Wrong" = "Incorrecto";
@@ -1328,6 +1339,10 @@
 "%lld video%@ · about %lld s each" = "%1$lld video%2$@ · unos %3$lld s cada uno";
 "%lld video%lld · about %@ s each" = "%1$lld video%2$lld · unos %3$@ s cada uno";
 "%lld video%lld · about %lld s each" = "%1$lld video%2$lld · unos %3$lld s cada uno";
+"%@ words · about %@" = "%1$@ palabras · unos %2$@";
+"%@ words · about %lld" = "%1$@ palabras · unos %2$lld";
+"%lld words · about %@" = "%1$lld palabras · unos %2$@";
+"%lld words · about %lld" = "%1$lld palabras · unos %2$lld";
 "%@ %@%@ selected" = "%1$@ %2$@%3$@ seleccionado%3$@";
 "%@ %@%lld selected" = "%1$@ %2$@%3$lld seleccionado%3$lld";
 "%@ %lld%@ selected" = "%1$@ %2$lld%3$@ seleccionado%3$@";
