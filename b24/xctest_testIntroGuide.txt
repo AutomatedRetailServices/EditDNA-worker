@@ -1,0 +1,6 @@
+B24UI    10.3 PASS en: intro shows on the first visit
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:552: error: -[CutSellUITests.Build24UITests testIntroGuide] : Failed to tap "intro_next" Any: No matches found for first query match sequence: `Descendants matching type Any` -> `Elements matching predicate '"intro_next" IN identifiers'`, given input App element pid: 16969
+Test Case '-[CutSellUITests.Build24UITests testIntroGuide]' failed (16.186 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-22 13:56:59.837.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-22 13:56:59.838.
+Test Suite 'Selected tests' failed at 2026-10-22 13:56:59.838.
