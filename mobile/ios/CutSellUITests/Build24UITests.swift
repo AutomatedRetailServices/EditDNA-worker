@@ -602,7 +602,8 @@ final class Build24UITests: XCTestCase {
         for lang in ["en", "es"] {
             app = XCUIApplication()
             app.launchArguments = ["-CutSellScreen", "camera", "-cutsell.prompter.scripts", "", "-cutsell.prompter.on", "NO",
-                                   "-cutsell.prompter.speed2", "1.0", "-cutsell.prompter.size2", "28", "-cutsell.prompter.frame", ""]
+                                   "-cutsell.prompter.speed2", "1.0", "-cutsell.prompter.size2", "28", "-cutsell.prompter.frame", "",
+                                   "-cutsell.prompter.color", "white"]
             app.launchEnvironment["CUTSELL_LANGUAGE"] = lang
             app.launch()
             check(element("cameraScript").waitForExistence(timeout: 20), "\(lang): Script on the camera rail")
@@ -627,6 +628,7 @@ final class Build24UITests: XCTestCase {
             pause(3.5)                                     // 3·2·1 (no camera in the simulator: nothing records)
             shot("\(lang)_prompter_on")
             element("prompterText").tap(); pause(0.6)
+            if !element("prompterAutoScroll").exists { element("prompterText").tap(); pause(0.6) }
             check(element("prompterAutoScroll").exists && element("prompterEdit").exists && element("prompterSettings").exists,
                   "\(lang): tap shows ✎ · Auto-scroll · ⚙ and the frame")
             shot("\(lang)_prompter_controls")

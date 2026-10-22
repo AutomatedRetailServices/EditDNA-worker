@@ -156,7 +156,7 @@ struct CreateCameraView: View {
                     // Hidden while recording (Figma 645:23 / 626:361); back between clips.
                     if !camera.isRecording {
                         controlsColumn
-                            .padding(.top, prompter.isOn && prompter.hasScript ? max(0, prompter.frame.maxY - 90) : 0)
+                            .padding(.top, prompter.isOn && prompter.hasScript ? max(0, prompter.frame.maxY - 50) : 0)
                     } else if prompter.isOn && prompter.hasScript {
                         recordingColumn.padding(.top, max(0, prompter.frame.maxY - 60))
                     }

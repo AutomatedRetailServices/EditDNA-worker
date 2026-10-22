@@ -15,6 +15,7 @@ struct PlanView: View {
     @ObservedObject private var week = PlanWeekStore.shared
     @State private var path: [PlanRoute] = []
     @ObservedObject private var router = AppRouter.shared
+    @Environment(\.colorScheme) private var scheme
 
     enum PlanRoute: Hashable { case goal, week, day(String) }
 
@@ -147,7 +148,8 @@ struct PlanView: View {
                         if highlighted {
                             RoundedRectangle(cornerRadius: 12, style: .continuous).fill(CS.brandFull)
                         } else {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(hex: 0x1F2638))
+                            // Day mode (Figma 1146:178): no box behind the Bulk icon.
+                            RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(dark: 0x1F2638, light: 0xFFFFFF))
                         }
                     }
                 Text(L10n.tr(title)).font(CS.inter(16, .bold)).foregroundStyle(Color.ink).padding(.top, 12)
@@ -159,7 +161,9 @@ struct PlanView: View {
             .frame(maxWidth: .infinity, minHeight: 132, maxHeight: 132, alignment: .topLeading)
             .background(Color(hex: 0x0F1726), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(highlighted ? Color(hex: 0x19E5FF) : Color(hex: 0x33405C), lineWidth: highlighted ? 1.5 : 1))
+                .stroke(highlighted ? (scheme == .light ? AnyShapeStyle(CS.brandStroke) : AnyShapeStyle(Color(hex: 0x19E5FF)))
+                                    : AnyShapeStyle(Color(hex: 0x33405C)), lineWidth: highlighted ? 1.5 : 1))
+            .dayCardShadow()
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(id)
