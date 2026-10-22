@@ -246,7 +246,7 @@ final class DeviceExport: ObservableObject {
 
     func reset() { if !running { phase = .idle } }
 
-    private func run(model: DraftEditorViewModel, settings: ExportSettings) async throws -> URL {
+    func run(model: DraftEditorViewModel, settings: ExportSettings) async throws -> URL {
         let started = Date()
         guard !model.selectedClips.isEmpty else { throw DeviceExportError.noClips }
         await detect(model: model)
@@ -391,6 +391,44 @@ final class DeviceExport: ObservableObject {
         }
         await writer.finishWriting()
         if writer.status != .completed { throw writer.error ?? DeviceExportError.failed("The export didn't finish.") }
+    }
+
+    // MARK: Plan my week (no screen)
+
+    /// The finished video of a planned cut made on this iPhone (1080p, from the original), or nil when this iPhone
+    /// can't make it exactly like the preview (a voice, sound or overlay file isn't here): then the server makes it.
+    static func postFile(projectID: String, session: CutSellSession, progress: @escaping (Double) -> Void) async -> URL? {
+        let project = Project(projectID: projectID, userID: session.userID, title: "", state: "draft_ready")
+        let model = DraftEditorViewModel(project: project, session: session)
+        await model.load()
+        guard !model.selectedClips.isEmpty else { return nil }
+        let voicesHere = model.previewVoices.allSatisfy { FileManager.default.fileExists(atPath: $0.url.path) }
+        let soundsHere = model.soundClips.allSatisfy { $0.kind != .sfx || $0.sfxID.flatMap { SfxLibrary.localURL($0) } != nil }
+        let overlaysHere = model.overlaysOnScreen.allSatisfy { $0.url?.isFileURL == true }
+        guard voicesHere, soundsHere, overlaysHere else {
+            CutSellDiagnostics.log("device_export_skipped", ["why": !voicesHere ? "voice" : !soundsHere ? "sound" : "overlay"])
+            return nil
+        }
+        let exporter = DeviceExport()
+        let watch = Task { @MainActor in
+            while !Task.isCancelled {
+                switch exporter.phase {
+                case .original(let v): progress(0.05 + v * 0.15)
+                case .exporting(let v): progress(0.2 + v * 0.78)
+                default: break
+                }
+                try? await Task.sleep(nanoseconds: 300_000_000)
+            }
+        }
+        defer { watch.cancel() }
+        do {
+            let url = try await exporter.run(model: model, settings: ExportSettings(resolution: .p1080))
+            CutSellDiagnostics.log("post_video_device_export", ["copy": exporter.usedCopy ? "1" : "0"])
+            return url
+        } catch {
+            CutSellDiagnostics.log("device_export_failed", ["where": "plan", "error": String(describing: error).prefix(120).description])
+            return nil
+        }
     }
 
     // MARK: Helpers

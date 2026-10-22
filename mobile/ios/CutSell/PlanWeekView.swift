@@ -1,3 +1,4 @@
+import Network
 import BackgroundTasks
 import Photos
 import SwiftUI
@@ -404,6 +405,14 @@ final class PostExporter: ObservableObject {
         guard let session else { throw APIError.invalidResponse }
         progress[projectID] = 0.02
         defer { progress[projectID] = nil }
+        // 22 Oct: made on this iPhone from the original (the server only when this iPhone can't).
+        if let made = await DeviceExport.postFile(projectID: projectID, session: session, progress: { [weak self] value in
+            self?.progress[projectID] = max(0.03, min(0.99, value))
+        }) {
+            try? FileManager.default.removeItem(at: target)
+            try FileManager.default.moveItem(at: made, to: target)
+            return target
+        }
         let snap: DraftSnapshot = try await APIClient.shared.request("/v1/projects/\(projectID)/draft",
                                                                      query: [URLQueryItem(name: "user_id", value: session.userID)])
         let sources = snap.sources.compactMap { object -> JSONValue? in
@@ -468,6 +477,8 @@ enum PostPrefetch {
 
     /// Exports tomorrow's (and today's remaining) unposted videos. True when all of them are on the iPhone.
     static func run() async -> Bool {
+        // 22 Oct: the night export runs on this iPhone, so only on WiFi (iOS already waits for the charger).
+        guard await WiFiCheck.onWiFi() else { CutSellDiagnostics.log("post_prefetch", ["skipped": "not_wifi"]); return false }
         if await APIClient.shared.session == nil, let saved = try? KeychainStore.load() {
             await APIClient.shared.setSession(saved)
         }
@@ -1382,4 +1393,21 @@ struct ShareSheet: UIViewControllerRepresentable {
         UIActivityViewController(activityItems: items, applicationActivities: nil)
     }
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
+/// WiFi (not cellular / not a hotspot) right now.
+enum WiFiCheck {
+    static func onWiFi() async -> Bool {
+        await withCheckedContinuation { continuation in
+            let monitor = NWPathMonitor()
+            let once = Flag()
+            monitor.pathUpdateHandler = { path in
+                monitor.cancel()
+                guard !once.value else { return }
+                once.set()
+                continuation.resume(returning: path.status == .satisfied && path.usesInterfaceType(.wifi) && !path.isExpensive)
+            }
+            monitor.start(queue: DispatchQueue(label: "cutsell.wifi"))
+        }
+    }
 }
