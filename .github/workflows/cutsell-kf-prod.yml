@@ -1,0 +1,85 @@
+name: CutSell keyframes across a join, live export (probe)
+
+# Production check: a test video goes to the live server, a draft with TWO clips (a join) and a zoom from 100 % to
+# 130 % that crosses the join is exported by the live worker, and the exported zoom is measured every 0.1 s.
+# Synthetic media only; numbers only in the log.
+on:
+  push:
+    branches: ['probe/kf-prod']
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Test video (white square = zoom meter, moving boxes, a tone)
+        run: |
+          sudo apt-get -qq update >/dev/null && sudo apt-get -qq install -y ffmpeg >/dev/null
+          ffmpeg -loglevel error -f lavfi -i color=c=0x203060:s=720x1280:r=30:d=10 -f lavfi -i "sine=frequency=330:sample_rate=48000:duration=10" \
+            -vf "drawbox=x=260:y=540:w=200:h=200:color=white:t=fill,drawbox=x='mod(t*300,720)-150':y=150:w=300:h=300:color=0xE04080:t=fill,drawbox=x='720-mod(t*260,870)':y=900:w=260:h=260:color=0x40E0A0:t=fill,noise=alls=24:allf=t+u" \
+            -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest "$RUNNER_TEMP/src.mp4"
+      - name: Live export of a zoom across a join
+        run: |
+          python3 - <<'PY'
+          import json, os, time, subprocess, urllib.request
+          API = "https://cutsell-api.onrender.com"; T = None
+          video = os.path.join(os.environ["RUNNER_TEMP"], "src.mp4")
+          def call(m, p, b=None, q=""):
+              r = urllib.request.Request(API + p + q, method=m, data=None if b is None else json.dumps(b).encode(),
+                  headers={"content-type": "application/json", **({"authorization": "Bearer " + T} if T else {})})
+              with urllib.request.urlopen(r, timeout=120) as x: return json.load(x)
+          s = call("POST", "/v1/auth/session"); T = s["access_token"]; u = s["user_id"]
+          print("::add-mask::" + T)
+          pid = call("POST", "/v1/projects", {"user_id": u, "title": "copy_kf_join_probe"})["project_id"]
+          data = open(video, "rb").read()
+          st = call("POST", "/v1/uploads/multipart/start", {"project_id": pid, "user_id": u, "original_name": "src.mp4",
+                    "content_type": "video/mp4", "size_bytes": len(data)})
+          parts = []
+          for n in range(1, st["part_count"] + 1):
+              sg = call("POST", f"/v1/uploads/multipart/{st['upload_id']}/parts/{n}/presign", {"project_id": pid, "user_id": u})
+              req = urllib.request.Request(sg["upload_url"], data=data[(n-1)*st["part_size"]: n*st["part_size"]], method="PUT")
+              req.add_header("Content-Type", "")
+              with urllib.request.urlopen(req, timeout=300) as r: parts.append({"part_number": n, "etag": r.headers["ETag"]})
+          uri = call("POST", f"/v1/uploads/multipart/{st['upload_id']}/complete", {"project_id": pid, "user_id": u, "parts": parts})["source_uri"]
+          clip = lambda cid, a, b: {"clip_id": cid, "source_asset_id": "src1", "source_order": 0, "start": a, "end": b,
+                                    "text": "", "caption_text": "", "words": [], "selected": True}
+          key = lambda kid, t, sc: {"keyframe_id": kid, "target": "video", "source_asset_id": "src1", "source_time": t,
+                                    "scale": sc, "origin": "user"}
+          # clips: source 0-2.5 and 4.0-7.5 -> timeline 0-2.5 and 2.5-6.0 (join at 2.5 s)
+          # zoom: 100 % at source 1.0 (timeline 1.0) -> 130 % at source 5.5 (timeline 4.0): crosses the join
+          draft = {"schema_version": "cutsell.draft.v1", "project_id": pid, "strategy": "mixed",
+                   "selected": [clip("c1", 0.0, 2.5), clip("c2", 4.0, 7.5)], "alternates": [], "discarded": [],
+                   "captions_enabled": False, "keyframes": [key("k1", 1.0, 1.0), key("k2", 5.5, 1.3)]}
+          job = call("POST", "/v1/exports/jobs", {"project_id": pid, "user_id": u, "draft": draft,
+                     "sources": [{"source_asset_id": "src1", "uri": uri, "original_name": "src.mp4"}]})
+          t0 = time.time()
+          while True:
+              j = call("GET", f"/v1/jobs/{job['job_id']}")
+              if j["state"] in ("finished", "failed", "canceled") or time.time() - t0 > 900: break
+              time.sleep(5)
+          print("export:", j["state"], j.get("error"), f"{int(time.time()-t0)} s")
+          res = j.get("result") or {}
+          link = next((v for k, v in res.items() if isinstance(v, str) and v.startswith("https://") and (".mp4" in v or "url" in k)), None)
+          if not link:
+              print("result keys:", list(res)); raise SystemExit(1)
+          out = os.path.join(os.environ["RUNNER_TEMP"], "out.mp4")
+          urllib.request.urlretrieve(link, out)
+          w, h = 270, 480
+          raw = subprocess.run(["ffmpeg", "-v", "error", "-i", out, "-vf", f"fps=10,scale={w}:{h},format=gray",
+                                "-f", "rawvideo", "-"], capture_output=True).stdout
+          rows = []
+          for i in range(len(raw) // (w * h)):
+              line = raw[i*w*h + (h//2)*w: i*w*h + (h//2+1)*w]
+              rows.append(sum(1 for v in line if v > 200) / w)
+          base = sorted(rows[:6])[3]
+          zoom = [r / base for r in rows]
+          print("zoom every 0.1 s:", " ".join(f"{z:.2f}" for z in zoom))
+          near = zoom[20:31]
+          print("around the join (2.0-3.0 s):", " ".join(f"{z:.2f}" for z in near))
+          steps = [b - a for a, b in zip(zoom, zoom[1:])]
+          jump = max(abs(s) for s in steps[:58])
+          print(f"max zoom {max(zoom):.2f}; biggest step 0.1 s apart: {jump:.3f}")
+          ok = max(zoom) > 1.2 and jump < 0.08 and all(s > -0.03 for s in steps[8:40])
+          print("RESULT:", "PASS (smooth through the join)" if ok else "FAIL")
+          PY
