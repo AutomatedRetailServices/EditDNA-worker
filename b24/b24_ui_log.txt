@@ -1,0 +1,18 @@
+B24UI    31.2 PASS light: Perfil opens
+B24UI   112.1 PASS light → Dark chosen
+B24UI   112.3 FAILURES: none
+B24UI    15.8 PASS en: Script on the camera rail
+B24UI    24.9 PASS en: no script yet → the editor opens
+B24UI    36.1 PASS en: the script shows over the camera
+B24UI    36.2 PASS en: Script is on
+B24UI    37.5 PASS en: faster → speed 4 · Speed 4
+B24UI    41.9 PASS en: Script off hides it
+B24UI    43.3 PASS en: Script on shows it again (script kept)
+B24UI    56.2 PASS es: Script on the camera rail
+B24UI    60.3 PASS es: no script yet → the editor opens
+B24UI    71.7 PASS es: the script shows over the camera
+B24UI    71.8 FAIL es: Script is on
+B24UI    73.4 FAIL es: faster → speed 4 · Velocidad 5
+B24UI    77.7 PASS es: Script off hides it
+B24UI    79.2 PASS es: Script on shows it again (script kept)
+B24UI    80.2 FAILURES: es: Script is on | es: faster → speed 4
