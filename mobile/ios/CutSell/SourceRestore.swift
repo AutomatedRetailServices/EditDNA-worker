@@ -1,7 +1,7 @@
 import Foundation
 import Photos
 
-/// 22 Oct: the server removes a cut's light copy 30 days after its last use (the cut itself stays). Opening such a cut
+/// 22 Oct: the server removes a cut's light copy 3 days after its last use (the cut itself stays). Opening such a cut
 /// makes the copy again on this iPhone from the original in Photos and uploads it to the same place
 /// ("Restoring video…"); then the cut plays and exports as before. Without the original, it says so.
 @MainActor

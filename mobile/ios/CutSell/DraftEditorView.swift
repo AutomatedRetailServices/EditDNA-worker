@@ -69,7 +69,7 @@ struct DraftEditorView: View {
             let model = DraftEditorViewModel(project: project, session: session)
             holder.model = model
             await model.load()
-            // 22 Oct: a copy the server removed (30 days unused) is made again from the original in Photos.
+            // 22 Oct: a copy the server removed (3 days unused) is made again from the original in Photos.
             await SourceRestore.shared.restoreIfNeeded(model: model)
         }
         .overlay { RestoreBanner(projectID: project.projectID) }
