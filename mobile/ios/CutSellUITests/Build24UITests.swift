@@ -92,7 +92,7 @@ final class Build24UITests: XCTestCase {
         }
     }
 
-    private func launchApp(fresh: Bool, extra: [String] = []) {
+    private func launchApp(fresh: Bool, extra: [String] = [], env extraEnv: [String: String] = [:]) {
         app = XCUIApplication()
         // The whole app (four tabs + start-up steps), with the probe's session.
         app.launchArguments = ["-CutSellScreen", "app_probe"] + extra
@@ -100,6 +100,7 @@ final class Build24UITests: XCTestCase {
         for key in ["CUTSELL_PROBE_TOKEN", "CUTSELL_PROBE_USER", "CUTSELL_PROBE_API", "CUTSELL_PLAN_FIXTURE"] {
             if let value = env[key] { app.launchEnvironment[key] = value }
         }
+        for (key, value) in extraEnv { app.launchEnvironment[key] = value }
         app.launch()
         _ = element("hubUpload").waitForExistence(timeout: 60)
     }
@@ -535,6 +536,42 @@ final class Build24UITests: XCTestCase {
             element("tab_\(tab)").tap(); pause(2)
             check(app.staticTexts[word].exists || app.buttons[word].exists, "\(tab) in Spanish", word)
             shot("es_\(name)")
+        }
+        done()
+    }
+
+    /// The 4 welcome screens (first visit) and Perfil → Help → How to use CutSell / Replay intro, EN and ES.
+    func testIntroGuide() throws {
+        for lang in ["en", "es"] {
+            launchApp(fresh: true, extra: ["-CutSellProjectsMock"], env: ["CUTSELL_INTRO": "1", "CUTSELL_LANGUAGE": lang])
+            check(element("introView").waitForExistence(timeout: 20), "\(lang): intro shows on the first visit")
+            for page in 1...4 {
+                pause(1.2)
+                shot("\(lang)_intro_\(page)")
+                if page == 4 { check(!element("intro_skip").exists, "\(lang): no Skip on the last screen") }
+                element("intro_next").tap()
+            }
+            pause(1.5)
+            check(!element("introView").exists && element("hubUpload").exists, "\(lang): intro ends on Create")
+            element("tab_you").tap(); pause(1.2)
+            let help = element("youRow_help")
+            for _ in 0..<3 where !help.isHittable { app.swipeUp(velocity: .slow); pause(0.4) }
+            help.tap(); pause(1.2)
+            element("help_guide").tap(); pause(1.2)
+            check(element("guidePage").exists, "\(lang): How to use CutSell opens the guide")
+            shot("\(lang)_guide")
+            element("guide_voiceover").tap(); pause(0.8)
+            check(element("guide_steps_voiceover").exists, "\(lang): a guide opens its steps")
+            shot("\(lang)_guide_voiceover")
+            app.swipeUp(velocity: .slow); pause(0.6)
+            element("guide_keyframes").tap(); pause(0.8)
+            shot("\(lang)_guide_keyframes")
+            element("youBack").tap(); pause(1)
+            element("help_intro").tap(); pause(1.5)
+            check(element("introView").waitForExistence(timeout: 5), "\(lang): Replay intro shows the 4 screens again")
+            element("intro_skip").tap(); pause(1.5)
+            check(!element("introView").exists && element("hubUpload").exists, "\(lang): Skip ends on Create")
+            app.terminate()
         }
         done()
     }

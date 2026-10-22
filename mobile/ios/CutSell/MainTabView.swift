@@ -30,6 +30,7 @@ struct MainTabView: View {
     @ObservedObject private var exports = ExportTracker.shared
     @ObservedObject private var queue = ProcessingQueue.shared
     @ObservedObject private var planWeek = PlanWeekStore.shared
+    @ObservedObject private var intro = IntroState.shared
     /// A ready cut opened from the "Your cut is ready" banner.
     @State private var openReady: ReadyRoute?
 
@@ -102,6 +103,16 @@ struct MainTabView: View {
             }
         }
         .animation(.easeOut(duration: 0.25), value: tracker.readyBanner)
+        .overlay {
+            // The 4 welcome screens: first visit, or Perfil → Help & Support → Replay intro. They end on Create.
+            if intro.showing {
+                IntroView { intro.finish(); select(.create) }
+                    .transition(.opacity)
+                    .zIndex(10)
+            }
+        }
+        .animation(.easeOut(duration: 0.25), value: intro.showing)
+        .onAppear { intro.showIfFirstTime() }
         .animation(.easeOut(duration: 0.25), value: exports.readyBanner)
         .fullScreenCover(item: $openReady) { route in
             NavigationStack {

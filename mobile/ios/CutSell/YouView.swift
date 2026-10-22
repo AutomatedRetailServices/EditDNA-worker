@@ -11,7 +11,7 @@ import UserNotifications
 // (586:67), Plan & Usage (586:64) -- each page shows only what CutSell really has (no invented plans or devices).
 
 enum YouPage: String, Identifiable, Hashable {
-    case account, plan, privacy, preferences, language, appearance, connections, help
+    case account, plan, privacy, preferences, language, appearance, connections, help, guide
     var id: String { rawValue }
 }
 
@@ -267,7 +267,8 @@ struct YouPagesView: View {
                 case .language: LanguagePage(back: back)
                 case .appearance: AppearancePage(back: back)
                 case .connections: ConnectionsPage(back: back)
-                case .help: HelpPage(back: back)
+                case .help: HelpPage(back: back, open: { stack.append($0) })
+                case .guide: GuidePage(back: back)
                 }
             }
             .id(current)
@@ -578,6 +579,8 @@ struct ConnectionsPage: View {
 
 struct HelpPage: View {
     let back: () -> Void
+    let open: (YouPage) -> Void
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appState: AppState
     @State private var showingDiagnostics = false
     @State private var legal: LegalDocument?
@@ -597,8 +600,12 @@ struct HelpPage: View {
                        divider: false) { clearCache() }
             }
             YouSection(label: "LEARN") {
-                YouRow(title: "How to use CutSell", detail: "Step-by-step guides for every feature")
-                YouRow(title: "Replay intro", detail: "See the 4 welcome screens again", divider: false)
+                YouRow(title: "How to use CutSell", detail: "Step-by-step guides for every feature", id: "help_guide") { open(.guide) }
+                YouRow(title: "Replay intro", detail: "See the 4 welcome screens again", divider: false, id: "help_intro") {
+                    // Figma 945:147: the intro replays over Create.
+                    IntroState.shared.replay()
+                    dismiss()
+                }
             }
             YouNoteCard(title: "You control what is shared", lines: [
                 "No video, audio or transcript is sent unless you choose it in the report.",
