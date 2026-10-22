@@ -50,6 +50,7 @@ final class AppPrefs: ObservableObject {
     /// The app's colour scheme: Automatic follows the iPhone, Dark / Light force one. The editor, the camera,
     /// processing and the intro are always dark (they keep `.appColorScheme()`).
     var colorScheme: ColorScheme? {
+        guard LightPalette.enabled else { return .dark }        // CutSell is dark only for now
         switch appearance {
         case .automatic: return nil
         case .dark: return .dark
@@ -468,7 +469,10 @@ struct PreferencesPage: View {
         YouScreen(title: "Preferences", subtitle: "Make CutSell work the way you do", back: back) {
             YouSection(label: "GENERAL") {
                 YouRow(title: "App language", value: language.choice == .automatic ? "System Default" : language.choice.title, id: "prefLanguage") { open(.language) }
-                YouRow(title: "Appearance", value: YouStyle.title(prefs.appearance), id: "prefAppearance") { open(.appearance) }
+                // Day mode is off for now (22 Oct): no Appearance row; the page and the light palette stay in the code.
+                if LightPalette.enabled {
+                    YouRow(title: "Appearance", value: YouStyle.title(prefs.appearance), id: "prefAppearance") { open(.appearance) }
+                }
                 YouToggleRow(title: "Haptic feedback", isOn: $prefs.haptics, divider: false, id: "prefHaptics")
             }
             YouSection(label: "CAMERA & EXPORT") {

@@ -161,7 +161,7 @@ struct PlanView: View {
             .frame(maxWidth: .infinity, minHeight: 132, maxHeight: 132, alignment: .topLeading)
             .background(Color(hex: 0x0F1726), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(highlighted ? (scheme == .light ? AnyShapeStyle(CS.brandStroke) : AnyShapeStyle(Color(hex: 0x19E5FF)))
+                .stroke(highlighted ? (LightPalette.enabled && scheme == .light ? AnyShapeStyle(CS.brandStroke) : AnyShapeStyle(Color(hex: 0x19E5FF)))
                                     : AnyShapeStyle(Color(hex: 0x33405C)), lineWidth: highlighted ? 1.5 : 1))
             .dayCardShadow()
         }

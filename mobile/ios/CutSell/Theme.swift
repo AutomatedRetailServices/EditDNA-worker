@@ -135,6 +135,10 @@ extension Color {
 /// light counterpart by role, decided from its lightness and saturation, with hand-set values for the main
 /// tokens.
 enum LightPalette {
+    /// Day mode switch. Off (22 Oct): every screen draws the dark CutSell look, whatever the iPhone uses.
+    /// Turn on to bring back You › Preferences › Appearance and the light palette below.
+    static let enabled = false
+
     nonisolated(unsafe) private static var cache: [UInt64: UIColor] = [:]
     private static let lock = NSLock()
 
@@ -168,7 +172,7 @@ enum LightPalette {
         if let hit = cache[key] { return hit }
         let dark = uiColor(hex, opacity)
         let light = uiColor(tokens[hex] ?? mapped(hex), opacity)
-        let color = UIColor { $0.userInterfaceStyle == .light ? light : dark }
+        let color = UIColor { enabled && $0.userInterfaceStyle == .light ? light : dark }
         cache[key] = color
         return color
     }
@@ -234,7 +238,7 @@ extension Color {
                         blue: CGFloat(dark & 0xFF) / 255, alpha: CGFloat(opacity))
         let l = UIColor(red: CGFloat((light >> 16) & 0xFF) / 255, green: CGFloat((light >> 8) & 0xFF) / 255,
                         blue: CGFloat(light & 0xFF) / 255, alpha: CGFloat(opacity))
-        self.init(uiColor: UIColor { $0.userInterfaceStyle == .light ? l : d })
+        self.init(uiColor: UIColor { LightPalette.enabled && $0.userInterfaceStyle == .light ? l : d })
     }
 
     /// Exactly this color in both looks (brand gradients, video tiles).
@@ -252,7 +256,8 @@ extension View {
 private struct DayCardShadow: ViewModifier {
     @Environment(\.colorScheme) private var scheme
     func body(content: Content) -> some View {
-        content.shadow(color: scheme == .light ? Color(fixed: 0x0D1433, opacity: 0.08) : .clear, radius: 5, x: 0, y: 2)
+        content.shadow(color: LightPalette.enabled && scheme == .light ? Color(fixed: 0x0D1433, opacity: 0.08) : .clear,
+                       radius: 5, x: 0, y: 2)
     }
 }
 
@@ -282,7 +287,7 @@ struct BrandLogo: View {
 
     var body: some View {
         Group {
-            if scheme == .light {
+            if LightPalette.enabled && scheme == .light {
                 // Figma 1147:4422-4424: the bag icon + "CutSell" dark + ".ai" with the gradient.
                 HStack(spacing: 2 * width / 132) {
                     Image("BrandLogo").resizable().interpolation(.high)

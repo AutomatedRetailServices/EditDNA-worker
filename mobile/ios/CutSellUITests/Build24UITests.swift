@@ -679,6 +679,26 @@ final class Build24UITests: XCTestCase {
         done()
     }
 
+    /// Dark only (22 Oct): with the iPhone in light or dark, every screen and the editor draw the dark look,
+    /// and Preferences has no Appearance row. The workflow's `appearance` input sets the simulator.
+    func testDarkOnly() throws {
+        let mode = ProcessInfo.processInfo.environment["CUTSELL_SIM_APPEARANCE"] ?? "sim"
+        launchApp(fresh: true, extra: ["-CutSellProjectsMock", "-CutSellCatalogMock", "-cutsell.pref.appearance", "light"])
+        pause(2); shot("\(mode)_create")
+        element("tab_edits").tap(); pause(2); shot("\(mode)_edits")
+        element("tab_plan").tap(); pause(2); shot("\(mode)_plan")
+        element("tab_you").tap(); pause(1.5); shot("\(mode)_you")
+        element("youRow_preferences").tap(); pause(1)
+        check(element("prefLanguage").exists && !element("prefAppearance").exists, "\(mode): Preferences has no Appearance")
+        shot("\(mode)_preferences")
+        app.terminate()
+        app = XCUIApplication()
+        app.launchArguments = ["-CutSellScreen", "editor_v4_base", "-cutsell.pref.appearance", "light"]
+        app.launch()
+        pause(4); shot("\(mode)_editor")
+        done()
+    }
+
     /// Overview and every You page, one screenshot each (lang = "en" / "es").
     private func youTour(_ lang: String) {
         element("tab_you").tap(); pause(1)

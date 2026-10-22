@@ -11,6 +11,9 @@ on:
       tests:
         description: "Tests to run (space separated)"
         default: "testLeaveAndCloseAtEachStage testBulkSheetAndProcessingTab"
+      appearance:
+        description: "Simulator appearance: dark or light (CutSell must look dark either way)"
+        default: "dark"
       plan_fixture:
         description: "testPlanRealData: base64 JSON of her plan (computed read-only on the server)"
         default: ""
@@ -111,7 +114,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/b24"
           xcrun simctl boot "$SIM_UDID" || true
           xcrun simctl bootstatus "$SIM_UDID" -b
-          xcrun simctl ui "$SIM_UDID" appearance dark || true
+          xcrun simctl ui "$SIM_UDID" appearance "${{ inputs.appearance || 'dark' }}" || true
           xcrun simctl privacy "$SIM_UDID" grant photos ai.cutsell.app || true
           for i in 1 2 3 4; do xcrun simctl addmedia "$SIM_UDID" "$RUNNER_TEMP/c$i.mp4"; sleep 2; done
           sudo dnctl pipe 1 config bw 8Mbit/s
@@ -122,7 +125,7 @@ jobs:
             start=$(date '+%Y-%m-%d %H:%M:%S')
             set +e
             TEST_RUNNER_CUTSELL_PROBE_TOKEN="$PROBE_TOKEN" TEST_RUNNER_CUTSELL_PROBE_USER="$PROBE_USER" \
-            TEST_RUNNER_CUTSELL_PROBE_API="https://cutsell-api.onrender.com" TEST_RUNNER_B24_OUT="$RUNNER_TEMP/b24" \
+            TEST_RUNNER_CUTSELL_PROBE_API="https://cutsell-api.onrender.com" TEST_RUNNER_B24_OUT="$RUNNER_TEMP/b24" TEST_RUNNER_CUTSELL_SIM_APPEARANCE="${{ inputs.appearance || 'dark' }}" \
             TEST_RUNNER_CUTSELL_PLAN_FIXTURE="${{ inputs.plan_fixture }}" \
               xcodebuild test-without-building -project CutSell.xcodeproj -scheme CutSellUITests -sdk iphonesimulator \
                 -destination "id=$SIM_UDID" -derivedDataPath build -only-testing:CutSellUITests/Build24UITests/$t \
