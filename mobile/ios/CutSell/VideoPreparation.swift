@@ -83,6 +83,7 @@ actor VideoPreparation {
         CutSellDiagnostics.log("prepare_finished", ["mb_before": String(size / 1_048_576),
                                                     "mb_after": String(preparedSize / 1_048_576), "used": "smaller",
                                                     "seconds": String(format: "%.1f", Date().timeIntervalSince(started))])
+        OriginalLinks.carry(from: fileURL, to: destination)
         return PreparedVideo(url: destination, contentType: "video/mp4", wasTranscoded: true)
     }
 

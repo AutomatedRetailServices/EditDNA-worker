@@ -163,6 +163,7 @@ enum GalleryExport {
         case "m4v": contentType = "video/x-m4v"
         default: contentType = "video/quicktime"
         }
+        OriginalLinks.note(file: destination, photosID: asset.localIdentifier)
         return LocalVideo(url: destination, name: name ?? resource.originalFilename, duration: asset.duration, contentType: contentType)
     }
 }
@@ -196,7 +197,10 @@ extension GalleryExport {
         case "m4v": contentType = "video/x-m4v"
         default: contentType = "video/quicktime"
         }
-        return LocalVideo(url: try persistentMediaURL(extension: ext), name: original.originalFilename, duration: asset.duration,
+        let originalURL = try persistentMediaURL(extension: ext)
+        OriginalLinks.note(file: originalURL, photosID: asset.localIdentifier)
+        OriginalLinks.note(file: preview, photosID: asset.localIdentifier)
+        return LocalVideo(url: originalURL, name: original.originalFilename, duration: asset.duration,
                           contentType: contentType, cloudAssetID: asset.localIdentifier, previewURL: preview, expectedBytes: bytes)
     }
 

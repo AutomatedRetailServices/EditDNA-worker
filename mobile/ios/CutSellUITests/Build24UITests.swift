@@ -293,6 +293,63 @@ final class Build24UITests: XCTestCase {
         log("FAILURES: \(failures.isEmpty ? "none" : failures.joined(separator: " | "))")
     }
 
+    /// 22 Oct: Export on this iPhone from the original in Photos (Figma 950:8730): settings, Export to Photos,
+    /// saved; then Perfil › Preferences › Storage.
+    func testDeviceExport() throws {
+        launchApp(fresh: true)
+        guard pickAndCreate(mode: "single", count: 1) else { return }
+        let review = element("readyReviewButton")
+        check(review.waitForExistence(timeout: 600), "the cut is ready")
+        review.tap()
+        check(element("timelineV4").waitForExistence(timeout: 120), "editor open")
+        pause(3)
+        shot("export_header_quality")
+        element("exportQuality").tap(); pause(0.8)
+        shot("export_quality_menu")
+        log("quality menu: \(app.buttons.allElementsBoundByIndex.map(\.label).filter { $0.contains("HD") || $0.contains("1080") })")
+        app.tap(); pause(0.6)
+        if app.buttons["1080p HD"].exists { app.buttons["1080p HD"].tap(); pause(0.5) }
+        element("editorExport").tap()
+        check(element("exportSettings").waitForExistence(timeout: 15), "export settings open")
+        pause(2)
+        log("detected: \(element("exportDetected").label) · hint: \(element("exportResolutionHint").label) · estimate: \(element("exportEstimate").label)")
+        check(!element("exportResolution_k4").isEnabled, "4K greyed out for a 1080p original")
+        shot("export_settings")
+        let started = Date()
+        element("exportToPhotos").tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let finished = wait(900) {
+            for label in ["Allow", "Allow Access", "OK", "Allow Full Access"] where springboard.buttons[label].exists {
+                springboard.buttons[label].tap()
+            }
+            return self.element("exportSaved").exists || self.element("exportServerFallback").exists || self.element("exportNoSpace").exists
+        }
+        if element("exportPercent").exists { log("percent: \(element("exportPercent").label)") }
+        check(finished && element("exportSaved").exists, "exported on the iPhone and saved to Photos",
+              String(format: "%.0f s", Date().timeIntervalSince(started)))
+        shot("export_done")
+        if element("exportDone").exists { element("exportDone").tap(); pause(1) }
+        log("FAILURES: \(failures.isEmpty ? "none" : failures.joined(separator: " | "))")
+    }
+
+    func testStorageAndScreens() throws {
+        launchApp(fresh: true, extra: ["-CutSellProjectsMock", "-CutSellCatalogMock"])
+        pause(2)
+        element("tab_you").tap(); pause(1.2)
+        element("youRow_preferences").tap(); pause(1)
+        let row = element("prefStorage")
+        for _ in 0..<3 where !row.isHittable { app.swipeUp(velocity: .slow); pause(0.4) }
+        shot("preferences_storage_row")
+        row.tap(); pause(1.5)
+        check(element("youStorage").waitForExistence(timeout: 5), "Storage page")
+        log("total: \(element("storageTotal").label)")
+        shot("storage")
+        element("storageFree").tap(); pause(2.5)
+        check(element("storageFreed").exists, "space freed", element("storageFreed").label)
+        shot("storage_freed")
+        done()
+    }
+
     /// Edits · Products (Figma 1135:2686 / 2876 / 3059) with the in-memory catalog (-CutSellCatalogMock): the
     /// Products list, a product, renaming it, assigning the videos that need a product (new brand + product), and
     /// moving 3 videos to another product.

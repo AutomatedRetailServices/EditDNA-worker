@@ -22,6 +22,11 @@ struct EditorV4View: View {
     @State private var sheet: EditorSheet?
     @State private var panel: EditorPanel = .none
     @State private var fullScreen = false
+    /// 22 Oct: export on this iPhone from the original (Figma 950:8730 / 950:8790).
+    @StateObject private var deviceExport = DeviceExport()
+    @State private var exportSettings = ExportSettings()
+    @State private var showExport = false
+    @State private var exportDefaultSet = false
     @State private var renaming = false
     @State private var newTitle = ""
     @State private var displayTitle: String?
@@ -423,6 +428,22 @@ struct EditorV4View: View {
         view
             .sheet(item: $sheet) { which in sheetView(which) }
             .fullScreenCover(isPresented: $fullScreen) { fullScreenPlayer }
+            .fullScreenCover(isPresented: $showExport) {
+                ExportSettingsView(model: model, exporter: deviceExport, settings: $exportSettings, projectID: project.projectID,
+                                   session: appState.session) {
+                    // The server export (1080p): the old sheet with its progress.
+                    sheet = .export
+                    if !model.isExporting { Task { await model.export() } }
+                }
+            }
+            .task(id: model.selectedClips.count) {
+                // 4K Ultra HD is chosen by default when the original is 4K; 1080p HD otherwise.
+                await deviceExport.detect(model: model)
+                if !exportDefaultSet {
+                    exportSettings.resolution = deviceExport.info.shortSide >= 2152 ? .k4 : .p1080
+                    exportDefaultSet = !model.selectedClips.isEmpty
+                }
+            }
             .alert(L10n.tr("Rename cut"), isPresented: $renaming) {
                 TextField(L10n.tr("Name"), text: $newTitle)
                 Button(L10n.tr("Save")) { Task { await rename() } }
@@ -656,12 +677,11 @@ struct EditorV4View: View {
             .padding(.leading, 4)
             .accessibilityIdentifier("editorTitle")
             Spacer(minLength: 6)
-            ExportQualityMenu()
-            // Export starts the moment it is tapped; the sheet shows its real progress.
+            ExportQualityMenu(settings: $exportSettings, info: deviceExport.info)
+            // 22 Oct: the export settings open; the video is made on this iPhone from the original.
             Button {
                 playback.pause()
-                sheet = .export
-                if !model.isExporting { Task { await model.export() } }
+                showExport = true
             } label: {
                 Text(L10n.tr("Export"))
                     .font(.system(size: 14, weight: .semibold))
@@ -1913,25 +1933,36 @@ struct ToolbarV4: View {
     }
 }
 
-/// Export quality (Figma: "4K Ultra HD ▾" in the logo gradient). Honest: the export makes 1080p
-/// today, so 2K and 4K are listed as coming soon instead of pretending.
+/// Export quality (Figma: "4K Ultra HD ▾" in the logo gradient). 22 Oct: the export is made on this iPhone
+/// from the original: 4K Ultra HD when the original is 4K (chosen by default), 1080p HD always. Never upscaled:
+/// an original of 1080p or less shows 4K greyed out with "Your video was recorded in 1080p".
 struct ExportQualityMenu: View {
+    @Binding var settings: ExportSettings
+    let info: ExportSourceInfo
     private static let gradient = LinearGradient(
         colors: [CS.cyan, Color(hex: 0x1769FF), Color(hex: 0x7C3AED), Color(hex: 0xFF21D7)],
         startPoint: .leading, endPoint: .trailing
     )
+    private var can4K: Bool { info.shortSide >= 2152 }
+    private var on4K: Bool { settings.resolution == .k4 && can4K }
 
     var body: some View {
         Menu {
-            Button {} label: { Label(L10n.tr("1080p Full HD"), systemImage: "checkmark") }
-            Button(L10n.tr("2K · coming soon")) {}.disabled(true)
-            Button(L10n.tr("4K Ultra HD · coming soon")) {}.disabled(true)
+            Button { settings.resolution = .k4 } label: {
+                if on4K { Label(L10n.tr("4K Ultra HD"), systemImage: "checkmark") } else { Text(L10n.tr("4K Ultra HD")) }
+            }
+            .disabled(!can4K)
+            if !can4K { Text(L10n.tr("Your video was recorded in \(ExportSourceInfo.standardShortSide(info.shortSide))p")) }
+            Button { settings.resolution = .p1080 } label: {
+                if !on4K { Label(L10n.tr("1080p HD"), systemImage: "checkmark") } else { Text(L10n.tr("1080p HD")) }
+            }
         } label: {
             HStack(spacing: 6) {
-                Text(L10n.tr("1080p HD"))
+                Text(L10n.tr(on4K ? "4K Ultra HD" : "1080p HD"))
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(Self.gradient)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                 Image("Ed4Chevron").resizable().frame(width: 10, height: 10)
             }
             .padding(.leading, 12).padding(.trailing, 10)
@@ -1939,7 +1970,7 @@ struct ExportQualityMenu: View {
             .background(CS.surfaceCard, in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(CS.borderDefault, lineWidth: 1))
         }
-        .accessibilityLabel(L10n.tr("Export quality: 1080p"))
+        .accessibilityLabel(L10n.tr(on4K ? "Export quality: 4K" : "Export quality: 1080p"))
         .accessibilityIdentifier("exportQuality")
     }
 }

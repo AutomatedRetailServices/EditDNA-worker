@@ -5,6 +5,8 @@ struct FinishedExportActionsView: View {
     let remoteURL: URL
     var projectID: String? = nil
     var session: CutSellSession? = nil
+    /// 22 Oct: an export made on this iPhone is already a file (and already in Photos).
+    var alreadySaved = false
     @ObservedObject private var poster = TikTokPoster.shared
     @State private var notice: String?
 
@@ -85,6 +87,11 @@ struct FinishedExportActionsView: View {
     @MainActor
     private func download() async {
         guard localURL == nil, !isDownloading else { return }
+        if remoteURL.isFileURL {
+            localURL = remoteURL
+            saved = alreadySaved
+            return
+        }
         isDownloading = true
         defer { isDownloading = false }
         do {

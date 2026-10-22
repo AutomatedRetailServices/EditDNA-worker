@@ -50,6 +50,7 @@ actor SourceVideoCache {
 
     /// Keeps the file this iPhone just uploaded (no download later). A hard link when possible.
     func store(fileURL: URL, uri: String) {
+        OriginalLinks.link(uri: uri, file: fileURL)
         let target = Self.file(forURI: uri)
         guard !FileManager.default.fileExists(atPath: target.path) else { return }
         if (try? FileManager.default.linkItem(at: fileURL, to: target)) == nil {
@@ -60,6 +61,7 @@ actor SourceVideoCache {
 
     /// Build 23 (iCloud light): the original replaces the small preview copy once it is here.
     func replace(fileURL: URL, uri: String) {
+        OriginalLinks.link(uri: uri, file: fileURL)
         let target = Self.file(forURI: uri)
         try? FileManager.default.removeItem(at: target)
         if (try? FileManager.default.linkItem(at: fileURL, to: target)) == nil {

@@ -110,7 +110,7 @@ enum LightCopyWriter {
     }
 
     /// Copies one track's samples into a writer input until the track ends.
-    private final class Pump: @unchecked Sendable {
+    final class Pump: @unchecked Sendable {
         let input: AVAssetWriterInput
         let output: AVAssetReaderOutput
         let queue: DispatchQueue

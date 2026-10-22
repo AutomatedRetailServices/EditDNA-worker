@@ -11,7 +11,7 @@ import UserNotifications
 // (586:67), Plan & Usage (586:64) -- each page shows only what CutSell really has (no invented plans or devices).
 
 enum YouPage: String, Identifiable, Hashable {
-    case account, plan, privacy, preferences, language, appearance, connections, help, guide
+    case account, plan, privacy, preferences, language, appearance, connections, help, guide, storage
     var id: String { rawValue }
 }
 
@@ -276,6 +276,7 @@ struct YouPagesView: View {
                 case .connections: ConnectionsPage(back: back)
                 case .help: HelpPage(back: back, open: { stack.append($0) })
                 case .guide: GuidePage(back: back)
+                case .storage: StoragePage(back: back)
                 }
             }
             .id(current)
@@ -480,7 +481,8 @@ struct PreferencesPage: View {
                              note: "Uses the resolution, frame rate and HDR saved inside CutSell when supported by this iPhone.",
                              isOn: $prefs.cameraDefaults, id: "prefCamera")
                 YouToggleRow(title: "Auto-save exports to Photos", isOn: $prefs.autoSaveExports, divider: false, id: "prefAutoSave")
-                YouRow(title: "Default export quality", value: "1080p HD", chevron: false, divider: false)
+                YouRow(title: "Default export quality", value: "4K Ultra HD / 1080p HD", chevron: false)
+                YouRow(title: "Storage", value: storageValue, divider: false, id: "prefStorage") { open(.storage) }
             }
             YouSection(label: "NOTIFICATIONS") {
                 YouToggleRow(title: "Processing complete", isOn: $prefs.notifyProcessing, id: "prefProcessing")
@@ -492,6 +494,133 @@ struct PreferencesPage: View {
             }
         }
         .accessibilityIdentifier("youPreferences")
+        .task { storageValue = StorageUsage.format(await StorageUsage.measure().reduce(0) { $0 + $1.bytes }) }
+    }
+
+    @State private var storageValue = ""
+}
+
+// MARK: Storage (22 Oct): what CutSell keeps on this iPhone, and a button to free it
+
+enum StorageUsage {
+    struct Part: Identifiable {
+        let id: String
+        let title: String
+        let bytes: Int64
+        /// Safe to remove (comes back when needed).
+        let freeable: Bool
+    }
+
+    private static var support: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("CutSell", isDirectory: true)
+    }
+
+    static func measure() async -> [Part] {
+        await Task.detached(priority: .utility) {
+            let tmp = FileManager.default.temporaryDirectory
+            let exports = (try? FileManager.default.contentsOfDirectory(at: tmp, includingPropertiesForKeys: [.fileSizeKey]))?
+                .filter { $0.lastPathComponent.hasPrefix("CutSell-") || $0.lastPathComponent.hasPrefix("cutsell-src-") } ?? []
+            return [
+                Part(id: "sources", title: "Videos you uploaded", bytes: size(LocalCaches.folder("Sources")), freeable: true),
+                Part(id: "previews", title: "Previews", bytes: size(LocalCaches.folder("Preview720")) + size(LocalCaches.folder("BrollPicks")),
+                     freeable: true),
+                Part(id: "uploads", title: "Copies being uploaded",
+                     bytes: size(support.appendingPathComponent("Imports")) + size(support.appendingPathComponent("PreparedUploads")),
+                     freeable: false),
+                Part(id: "sounds", title: "Voices and sounds", bytes: size(support.appendingPathComponent("Clean")) + size(support.appendingPathComponent("VoiceOvers")),
+                     freeable: false),
+                Part(id: "exports", title: "Exports", bytes: exports.reduce(0) { $0 + fileSize($1) }, freeable: true),
+            ]
+        }.value
+    }
+
+    /// Removes CutSell's copies that come back on their own (uploaded videos, previews, finished exports).
+    static func free() async -> Int64 {
+        let before = await measure().filter(\.freeable).reduce(0) { $0 + $1.bytes }
+        await Task.detached(priority: .utility) {
+            for name in ["Sources", "Preview720", "BrollPicks"] {
+                let folder = LocalCaches.folder(name)
+                for file in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [] {
+                    try? FileManager.default.removeItem(at: file)
+                }
+            }
+            let tmp = FileManager.default.temporaryDirectory
+            for file in (try? FileManager.default.contentsOfDirectory(at: tmp, includingPropertiesForKeys: nil)) ?? []
+            where file.lastPathComponent.hasPrefix("CutSell-") || file.lastPathComponent.hasPrefix("cutsell-src-") {
+                try? FileManager.default.removeItem(at: file)
+            }
+        }.value
+        let after = await measure().filter(\.freeable).reduce(0) { $0 + $1.bytes }
+        CutSellDiagnostics.log("storage_freed", ["mb": String(max(0, before - after) / 1_000_000)])
+        return max(0, before - after)
+    }
+
+    static func size(_ folder: URL) -> Int64 {
+        guard let walker = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.fileSizeKey]) else { return 0 }
+        var total: Int64 = 0
+        for case let url as URL in walker { total += fileSize(url) }
+        return total
+    }
+
+    static func fileSize(_ url: URL) -> Int64 { Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
+
+    static func format(_ bytes: Int64) -> String {
+        bytes >= 1_000_000_000 ? String(format: "%.1f GB", Double(bytes) / 1e9) : "\(bytes / 1_000_000) MB"
+    }
+}
+
+struct StoragePage: View {
+    let back: () -> Void
+    @State private var parts: [StorageUsage.Part] = []
+    @State private var freeing = false
+    @State private var freed: Int64?
+
+    private var total: Int64 { parts.reduce(0) { $0 + $1.bytes } }
+
+    var body: some View {
+        YouScreen(title: "Storage", subtitle: "On this iPhone", back: back) {
+            VStack(spacing: 6) {
+                Text(verbatim: StorageUsage.format(total)).font(.system(size: 34, weight: .bold)).foregroundStyle(YouStyle.primary)
+                    .accessibilityIdentifier("storageTotal")
+                Text(L10n.tr("On this iPhone")).font(.system(size: 13)).foregroundStyle(YouStyle.muted)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 28)
+            YouSection(label: "ON THIS IPHONE") {
+                ForEach(Array(parts.enumerated()), id: \.element.id) { index, part in
+                    YouRow(title: part.title, value: StorageUsage.format(part.bytes), chevron: false, divider: index < parts.count - 1,
+                           id: "storage_\(part.id)")
+                }
+            }
+            Button {
+                Task {
+                    freeing = true
+                    freed = await StorageUsage.free()
+                    parts = await StorageUsage.measure()
+                    freeing = false
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    if freeing { ProgressView().tint(.white) }
+                    Text(L10n.tr("Free up space")).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white)
+                }
+                .frame(maxWidth: .infinity).frame(height: 52)
+                .background(Color(hex: 0x1769FF), in: RoundedRectangle(cornerRadius: 16))
+            }
+            .buttonStyle(.plain)
+            .disabled(freeing)
+            .padding(.top, 20)
+            .accessibilityIdentifier("storageFree")
+            if let freed {
+                Text(L10n.tr("Freed \(StorageUsage.format(freed))")).font(.system(size: 13)).foregroundStyle(YouStyle.muted)
+                    .frame(maxWidth: .infinity).padding(.top, 8).accessibilityIdentifier("storageFreed")
+            }
+            YouNoteCard(title: "Storage", lines: [
+                "Your originals stay in Photos. Freeing space only removes CutSell's copies; they come back when needed.",
+            ])
+        }
+        .task { parts = await StorageUsage.measure() }
+        .accessibilityIdentifier("youStorage")
     }
 }
 
