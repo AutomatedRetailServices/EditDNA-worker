@@ -232,8 +232,8 @@ struct YouView: View {
                     else { Text(verbatim: "↗").font(.system(size: 13, weight: .bold)).foregroundStyle(CS.cyan) }
                 }
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(LocalizedStringKey(title)).font(.system(size: 15, weight: .semibold)).foregroundStyle(YouStyle.primary)
-                    Text(LocalizedStringKey(detail)).font(.system(size: 11)).foregroundStyle(YouStyle.muted)
+                    Text(L10n.tr(title)).font(.system(size: 15, weight: .semibold)).foregroundStyle(YouStyle.primary)
+                    Text(L10n.tr(detail)).font(.system(size: 11)).foregroundStyle(YouStyle.muted)
                 }
                 Spacer()
                 Text(verbatim: "›").font(.system(size: 22)).foregroundStyle(YouStyle.muted)
@@ -299,10 +299,10 @@ struct YouScreen<Content: View>: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel(L10n.tr("Back"))
                     .accessibilityIdentifier("youBack")
-                    Text(LocalizedStringKey(title)).font(.system(size: 22, weight: .semibold)).foregroundStyle(YouStyle.primary)
+                    Text(L10n.tr(title)).font(.system(size: 22, weight: .semibold)).foregroundStyle(YouStyle.primary)
                 }
                 .padding(.leading, -16)
-                Text(LocalizedStringKey(subtitle)).font(.system(size: 13)).foregroundStyle(YouStyle.secondary).padding(.top, 11)
+                Text(L10n.tr(subtitle)).font(.system(size: 13)).foregroundStyle(YouStyle.secondary).padding(.top, 11)
                 content()
             }
             .padding(.horizontal, 24)
@@ -317,7 +317,7 @@ struct YouSection<Content: View>: View {
     @ViewBuilder var content: () -> Content
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(LocalizedStringKey(label)).font(.system(size: 12, weight: .semibold)).foregroundStyle(CS.cyan)
+            Text(L10n.tr(label)).font(.system(size: 12, weight: .semibold)).foregroundStyle(CS.cyan)
             VStack(spacing: 0) { content() }
                 .padding(.horizontal, 15)
                 .youCard(radius: 18)
