@@ -1,8 +1,0 @@
-B24UI    19.0 PASS You · Overview v2
-B24UI    64.3 PASS System Default · English · Español
-B24UI    79.2 FAIL Español: re-drawn in Spanish, back on App Language
-B24UI    79.5 PASS Español is chosen
-B24UI   126.5 FAIL create in Spanish · Subir videos
-B24UI   130.0 PASS edits in Spanish · Ediciones
-B24UI   133.0 PASS plan in Spanish · Plan
-B24UI   133.1 FAILURES: Español: re-drawn in Spanish, back on App Language | create in Spanish
