@@ -1,40 +1,43 @@
-B24UI    16.3 PASS editor open on a real cut
-B24UI    23.9 start curves= key_btn=add ai=8 user=0 sounds= voices= muted_clips=0 user_scales= user_rot= auto_zoom=true overlays= sel=none pending=none vv=1.00 t=3.00 zoom=1.000 rot=0.0 playing=false session=Playback/MoviePlayback
-B24UI   110.3 PASS export before finished
-B24UI   124.4 PASS sheet opens
-B24UI   125.0 PASS no X on the sheet (Figma)
-B24UI   127.4 PASS close: slide down from the handle before recording → editor, no change
-B24UI   135.5 PASS close: swipe down before recording
-B24UI   148.9 PASS close: tap outside before recording
-B24UI   164.5 PASS sliding down cancels the 3·2·1 countdown (nothing recorded)
-B24UI   178.1 PASS closing mid-recording asks Discard recording?
-B24UI   180.5 PASS Keep recording: still recording
-B24UI   184.9 PASS closing with an unsaved take asks Discard recording?
-B24UI   186.8 PASS Discard: back to the editor, nothing saved
-B24UI   192.1 PASS a) step 1: Recording voice-over sheet
-B24UI   192.4 PASS a) Enhance voice switch
-B24UI   194.7 PASS a) countdown 3·2·1 over the video
-B24UI   196.7 PASS a) recording (live wave)
-B24UI   205.2 PASS a) step 2: Play / Retake / Save
-B24UI   206.1 PASS a) Play · Retake · Save
-B24UI   212.0 PASS a) Retake back to step 1
-B24UI   236.1 PASS a) Save puts the voice on the timeline · curves= key_btn=add ai=8 user=0 sounds= voices=4.00+5.69cv1.00 muted_clips=0 user_scales= user_rot= auto_zoom=true overlays= sel=none pending=none vv=1.00 t=4.00 zoom=1.000 rot=0.0 playing=false session=Playback/MoviePlayback
-B24UI   237.1 saved ["4.00+5.69cv1.00"]
-B24UI   241.6 PASS c) voice-over panel
-B24UI   241.8 PASS c) lowerVideoSound
-B24UI   242.1 PASS c) cleanUpToggle
-B24UI   242.3 PASS c) recordAgain
-B24UI   242.6 PASS c) panelClose
-B24UI   242.8 PASS c) voiceDelete
-B24UI   245.1 PASS c) Lower video sound on · 4.00+5.69dcv1.00
-B24UI   250.8 PASS b) moved by dragging · 4.00+5.69dcv1.00 → 6.00+5.69dcv1.00
-B24UI   255.6 PASS b) edge trimmed (start edge dragged in) · 6.00+5.69dcv1.00 → 6.43+5.26dcv1.00
-B24UI   269.3 PASS b) Split cuts the voice in two · 6.43+2.57dcv1.00,9.00+2.69dcv1.00
-B24UI   272.5 PASS b) a piece deleted · 6.43+2.57dcv1.00
-B24UI   275.8 PASS b) Undo brings it back · 6.43+2.57dcv1.00,9.00+2.69dcv1.00
-B24UI   291.6 PASS c) Record again replaces that voice (still 2) · 6.43+2.57dcv1.00,9.00+2.69dcv1.00
-B24UI   291.8 before export ["6.43+2.57dcv1.00", "9.00+2.69dcv1.00"]
-B24UI   295.1 export with ["6.43+2.57dcv1.00", "9.00+2.69dcv1.00"]
-B24UI   341.5 PASS export after finished
-B24UI   349.2 end curves= key_btn=add ai=8 user=0 sounds= voices=6.43+3.60dcv1.00,9.00+2.69dcv1.00 muted_clips=0 user_scales= user_rot= auto_zoom=true overlays= sel=voice pending=none vv=1.00 t=9.00 zoom=1.000 rot=0.0 playing=false session=Playback/MoviePlayback
-B24UI   349.2 FAILURES: none
+B24UI    14.3 PASS editor open on a real cut
+B24UI    20.7 FAIL editor tools in Spanish
+B24UI    26.1 FAIL voice-over sheet in Spanish
+B24UI   205.2 PASS editor open on a real cut
+B24UI   215.4 start curves= key_btn=add ai=12 user=0 sounds= voices= muted_clips=0 user_scales= user_rot= auto_zoom=true overlays= sel=none pending=none vv=1.00 t=3.00 zoom=1.000 rot=0.0 playing=false session=Playback/MoviePlayback
+B24UI   247.3 PASS export before finished
+B24UI   259.9 PASS sheet opens
+B24UI   260.5 PASS no X on the sheet (Figma)
+B24UI   262.3 PASS close: slide down from the handle before recording → editor, no change
+B24UI   269.1 PASS close: swipe down before recording
+B24UI   274.8 PASS close: tap outside before recording
+B24UI   285.5 PASS sliding down cancels the 3·2·1 countdown (nothing recorded)
+B24UI   298.4 PASS closing mid-recording asks Discard recording?
+B24UI   300.7 PASS Keep recording: still recording
+B24UI   304.8 PASS closing with an unsaved take asks Discard recording?
+B24UI   307.3 PASS Discard: back to the editor, nothing saved
+B24UI   311.7 PASS a) step 1: Recording voice-over sheet
+B24UI   311.9 PASS a) Enhance voice switch
+B24UI   315.0 PASS a) countdown 3·2·1 over the video
+B24UI   317.8 PASS a) recording (live wave)
+B24UI   326.1 PASS a) step 2: Play / Retake / Save
+B24UI   326.5 PASS a) Play · Retake · Save
+B24UI   331.7 PASS a) Retake back to step 1
+B24UI   355.2 PASS a) Save puts the voice on the timeline · curves= key_btn=add ai=12 user=0 sounds= voices=4.00+5.46cv1.00 muted_clips=0 user_scales= user_rot= auto_zoom=true overlays= sel=none pending=none vv=1.00 t=4.00 zoom=1.000 rot=0.0 playing=false session=Playback/MoviePlayback
+B24UI   355.9 saved ["4.00+5.46cv1.00"]
+B24UI   359.0 PASS c) voice-over panel
+B24UI   359.2 PASS c) lowerVideoSound
+B24UI   359.3 PASS c) cleanUpToggle
+B24UI   359.5 PASS c) recordAgain
+B24UI   359.7 PASS c) panelClose
+B24UI   359.8 PASS c) voiceDelete
+B24UI   361.6 PASS c) Lower video sound on · 4.00+5.46dcv1.00
+B24UI   365.8 PASS b) moved by dragging · 4.00+5.46dcv1.00 → 6.00+5.46dcv1.00
+B24UI   369.6 PASS b) edge trimmed (start edge dragged in) · 6.00+5.46dcv1.00 → 6.43+5.02dcv1.00
+B24UI   380.9 PASS b) Split cuts the voice in two · 6.43+2.07dcv1.00,8.50+2.96dcv1.00
+B24UI   383.7 PASS b) a piece deleted · 6.43+2.07dcv1.00
+B24UI   387.4 PASS b) Undo brings it back · 6.43+2.07dcv1.00,8.50+2.96dcv1.00
+B24UI   404.0 PASS c) Record again replaces that voice (still 2) · 6.43+2.07dcv1.00,8.50+2.96dcv1.00
+B24UI   404.1 before export ["6.43+2.07dcv1.00", "8.50+2.96dcv1.00"]
+B24UI   407.6 export with ["6.43+2.07dcv1.00", "8.50+2.96dcv1.00"]
+B24UI   442.9 PASS export after finished
+B24UI   450.1 end curves= key_btn=add ai=12 user=0 sounds= voices=6.43+3.67dcv1.00,8.50+2.96dcv1.00 muted_clips=0 user_scales= user_rot= auto_zoom=true overlays= sel=voice pending=none vv=1.00 t=8.50 zoom=1.000 rot=0.0 playing=false session=Playback/MoviePlayback
+B24UI   450.1 FAILURES: none
