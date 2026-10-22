@@ -1,0 +1,9 @@
+bulk overlap_audio=true
+asset_export_started index=1 of=3 seconds_long=45
+audio_first=yes
+asset_resource photos_edit=no used=original
+asset_export_done mb=131 seconds=1.0
+prepare_started codec=avc1 heavy=1 height=1920 mb=131 width=1080
+prepare_progress percent=0
+prepare_progress percent=10
+prepare_progress percent=20
