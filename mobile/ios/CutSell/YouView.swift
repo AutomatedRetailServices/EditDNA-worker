@@ -336,6 +336,8 @@ struct YouRow: View {
     var divider = true
     var badge: String? = nil
     var bold = false
+    /// Figma Connections: 17 pt like the bold rows, regular weight.
+    var weightRegular = false
     var id: String? = nil
     var action: (() -> Void)? = nil
 
@@ -344,7 +346,7 @@ struct YouRow: View {
             Button { action?() } label: {
                 HStack(alignment: .center, spacing: 10) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(L10n.tr(title)).font(.system(size: bold ? 17 : 14, weight: bold ? .semibold : .regular)).foregroundStyle(titleColor)
+                        Text(L10n.tr(title)).font(.system(size: bold ? 17 : 14, weight: bold && !weightRegular ? .semibold : .regular)).foregroundStyle(titleColor)
                         if let detail { Text(L10n.tr(detail)).font(.system(size: 11)).foregroundStyle(YouStyle.muted) }
                     }
                     Spacer(minLength: 8)
@@ -365,7 +367,7 @@ struct YouRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(action == nil)
+            .allowsHitTesting(action != nil)          // a row without an action looks the same, it just does nothing
             .accessibilityIdentifier(id ?? "youRow")
             if divider { Rectangle().fill(YouStyle.border).frame(height: 1) }
         }
@@ -558,9 +560,9 @@ struct ConnectionsPage: View {
     var body: some View {
         YouScreen(title: "Connections", subtitle: "Link your accounts to post from CutSell", back: back) {
             VStack(spacing: 0) {
-                YouRow(title: "TikTok", detail: "Post and track your videos", chevron: false, badge: "SOON", bold: true)
+                YouRow(title: "TikTok", detail: "Post and track your videos", chevron: false, badge: "SOON", bold: true, weightRegular: true)
                 YouRow(title: "Instagram Reels", detail: "Later", chevron: false, badge: "SOON", bold: true)
-                YouRow(title: "YouTube Shorts", detail: "Later", chevron: false, divider: false, badge: "SOON", bold: true)
+                YouRow(title: "YouTube Shorts", detail: "Later", chevron: false, divider: false, badge: "SOON", bold: true, weightRegular: true)
             }
             .padding(.horizontal, 17)
             .youCard(radius: 18)
@@ -597,10 +599,6 @@ struct HelpPage: View {
             YouSection(label: "LEARN") {
                 YouRow(title: "How to use CutSell", detail: "Step-by-step guides for every feature")
                 YouRow(title: "Replay intro", detail: "See the 4 welcome screens again", divider: false)
-            }
-            YouSection(label: "LEGAL") {
-                YouRow(title: "Privacy Policy") { legal = .privacy }
-                YouRow(title: "Terms of Use", divider: false) { legal = .terms }
             }
             YouNoteCard(title: "You control what is shared", lines: [
                 "No video, audio or transcript is sent unless you choose it in the report.",
