@@ -531,7 +531,7 @@ final class Build24UITests: XCTestCase {
         shot("es_you_language")
         element("youBack").tap(); pause(1.5)
         youTour("es")
-        for (tab, word, name) in [("create", "Subir videos", "crear"), ("edits", "Editar", "editar"), ("plan", "Plan", "plan")] {
+        for (tab, word, name) in [("create", "Subir videos", "crear"), ("edits", "Mis videos", "misvideos"), ("plan", "Plan", "plan")] {
             element("tab_\(tab)").tap(); pause(2)
             check(app.staticTexts[word].exists || app.buttons[word].exists, "\(tab) in Spanish", word)
             shot("es_\(name)")

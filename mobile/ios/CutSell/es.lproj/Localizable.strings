@@ -330,7 +330,7 @@
 "Edit %lld draft%lld in bulk" = "Editar %1$lld borrador%2$lld juntos";
 "Editing keeps going on our servers even if you close the app. We’ll notify you as each cut is ready." = "La edición sigue en nuestros servidores aunque cierres la app. Te avisamos cuando cada corte esté listo.";
 "Editing time saved" = "Tiempo de edición ahorrado";
-"Edits" = "Editar";
+"Edits" = "Mis videos";
 "Edits processed" = "Ediciones procesadas";
 "Email" = "Correo";
 "Enhance voice" = "Mejorar voz";
@@ -406,7 +406,7 @@
 "Getting your video ready" = "Preparando tu video";
 "Getting your video ready…" = "Preparando tu video…";
 "Glass" = "Vidrio";
-"Go to Edits" = "Ir a Editar";
+"Go to Edits" = "Ir a Mis videos";
 "Good" = "Bien";
 "Green" = "Verde";
 "Grid" = "Cuadrícula";
@@ -430,7 +430,7 @@
 "Import audio file" = "Importar archivo de audio";
 "Import photo or video overlay" = "Importar foto o video para superponer";
 "Importing…" = "Importando…";
-"In Edits, in order" = "En Editar, en orden";
+"In Edits, in order" = "En Mis videos, en orden";
 "In order" = "En orden";
 "In progress" = "En proceso";
 "Interrupted Cut" = "Corte interrumpido";
@@ -595,7 +595,7 @@
 "Open CutSell to review and export it." = "Abre CutSell para revisarlo y exportarlo.";
 "Open CutSell to save or share it." = "Abre CutSell para guardarlo o compartirlo.";
 "Open Settings" = "Abrir Ajustes";
-"Open the cut in Edits to save or share it" = "Abre el corte en Editar para guardarlo o compartirlo";
+"Open the cut in Edits to save or share it" = "Abre el corte en Mis videos para guardarlo o compartirlo";
 "Opening TikTok…" = "Abriendo TikTok…";
 "Opening your cut…" = "Abriendo tu corte…";
 "Options for %@" = "Opciones de %1$@";
@@ -780,8 +780,8 @@
 "Search" = "Buscar";
 "Search brand or product" = "Buscar marca o producto";
 "Search edits" = "Buscar ediciones";
-"See all in Edits" = "Ver todo en Editar";
-"See all in Edits ›" = "Ver todo en Editar ›";
+"See all in Edits" = "Ver todo en Mis videos";
+"See all in Edits ›" = "Ver todo en Mis videos ›";
 "See the 4 welcome screens again" = "Mira de nuevo las 4 pantallas de bienvenida";
 "Select" = "Seleccionar";
 "Select More Photos…" = "Elegir más fotos…";
@@ -1086,7 +1086,7 @@
 "YOU JUST SAVED" = "ACABAS DE AHORRAR";
 "Yellow" = "Amarillo";
 "Yes, posted" = "Sí, publicado";
-"You" = "Tú";
+"You" = "Perfil";
 "You can change this later in Settings." = "Puedes cambiarlo luego en Ajustes.";
 "You can change this later in iOS Settings." = "Puedes cambiarlo luego en Ajustes de iOS.";
 "You can change this later in the editor." = "Puedes cambiarlo luego en el editor.";
