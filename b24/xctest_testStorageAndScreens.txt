@@ -1,0 +1,8 @@
+B24UI    23.9 PASS Storage page
+B24UI    24.3 total: 0 MB
+B24UI    28.4 PASS space freed · Freed 0 MB
+B24UI    28.6 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testStorageAndScreens]' passed (28.757 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-22 23:53:56.254.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-22 23:53:56.255.
+Test Suite 'Selected tests' passed at 2026-10-22 23:53:56.256.

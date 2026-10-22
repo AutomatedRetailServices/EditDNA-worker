@@ -1,0 +1,28 @@
+asset_export_started index=1 of=1 seconds_long=45
+audio_first=yes
+asset_resource photos_edit=no used=original
+asset_export_done mb=44 seconds=1.2
+prepare_skipped codec=avc1 height=1920 mb=44 width=1080
+audio_extracted kb=244 seconds=1.8 video_seconds=45
+audio_extract
+audio_uploaded kb=244 seconds=1.5 source_order=0
+audio_upload
+processing_started sources=1
+job_submitted job_id=79b62093-03f5-4861-888f-9f4705f520ba
+audio_first_started clips=1 job_id=79b62093-03f5-4861-888f-9f4705f520ba
+video_background_started clips=1 mb=44
+upload_resumed etags_on_iphone=0 resumed_part_count=0 source_order=0 total_part_count=6
+upload_parts done=0 mb=44 part_mb=8 parts=6 source_order=0
+server_step seconds=0 step=submitted
+upload_background_unavailable part=1
+server_step progress=42 seconds=5.7 step=processing
+upload_part_done of=6 part=1 source_order=0
+server_step progress=100 seconds=23.6 step=ready
+cut_ready_seen project_id=prj_2e8499a3d211404eb260bf88749cdb48
+editor_opened local_video=yes seconds=3.4
+audio_session_ready category=Playback mode=MoviePlayback output=Speaker
+video_volume=1.00
+upload_part_done of=6 part=4 source_order=0
+upload_part_done of=6 part=2 source_order=0
+upload_part_done of=6 part=5 source_order=0
+upload_part_done of=6 part=3 source_order=0
