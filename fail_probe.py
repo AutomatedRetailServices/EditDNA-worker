@@ -13,7 +13,7 @@ image = (
     .pip_install_from_requirements("requirements.cutsell.worker.cpu.txt")
     .add_local_dir("cutsell_worker", remote_path="/root/cutsell_worker", ignore=["**/__pycache__/**", "**/*.pyc"])
 )
-JOBS = ["ae9bc9dc", "e64e2472", "e5bdd500"]
+JOBS = ["ae9bc9dc", "e64e2472"]
 
 
 def _stats(path):
@@ -53,8 +53,20 @@ def check(prefix):
                 try:
                     p = download_source(audio, str(Path(d) / "voice.m4a"))
                     row["audio_first"] = _stats(p)
+                    from cutsell_worker.simple_engine import asr
+                    mp3 = asr.extract_audio(p, str(Path(d) / "voice.mp3"))
+                    for hint in (None, "es", "en"):
+                        try:
+                            h = asr.transcribe_words(mp3, language_hint=hint)
+                            row[f"asr_{hint}"] = {"language": h.get("language"), "duration": h.get("duration"),
+                                                  "n_words": len(h["words"]),
+                                                  "n_valid": len([w for w in h["words"] if float(w["e"]) > float(w["s"])]),
+                                                  "first": [w["w"] for w in h["words"][:12]]}
+                        except Exception as e:
+                            row[f"asr_{hint}"] = f"{e.__class__.__name__}: {str(e)[:200]}"
                 except Exception as e:
                     row["audio_first_error"] = f"{e.__class__.__name__}: {str(e)[:200]}"
+            row["uri_kind"] = (s.get("uri") or "")[:5]
             try:
                 p = download_source(s["uri"], str(Path(d) / ("video" + (Path(s.get("original_name") or "v.mov").suffix or ".mov"))))
                 row["video"] = _stats(p)
