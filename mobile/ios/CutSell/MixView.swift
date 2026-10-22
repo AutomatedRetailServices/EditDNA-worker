@@ -452,7 +452,10 @@ struct MixSetupView: View {
             CreateCameraView(onBack: { recordingFor = nil }, onUpload: { recordingFor = nil; picking = ref.id }, onRecorded: { video in
                 recordingFor = nil
                 Task { await append([video], to: ref.id) }
-            })
+            }, scriptContext: TeleprompterContext(
+                productID: productID,
+                productLabel: product.map { "\($0.brand.name) · \($0.product.name)" },
+                mixSection: sections.first { $0.id == ref.id }?.name))
         }
         .alert(L10n.tr("Rename section"), isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField(L10n.tr("Name"), text: $newName).accessibilityIdentifier("mixRenameField")

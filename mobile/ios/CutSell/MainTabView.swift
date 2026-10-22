@@ -31,6 +31,7 @@ struct MainTabView: View {
     @ObservedObject private var queue = ProcessingQueue.shared
     @ObservedObject private var planWeek = PlanWeekStore.shared
     @ObservedObject private var intro = IntroState.shared
+    @ObservedObject private var router = AppRouter.shared
     /// A ready cut opened from the "Your cut is ready" banner.
     @State private var openReady: ReadyRoute?
 
@@ -113,6 +114,12 @@ struct MainTabView: View {
         }
         .animation(.easeOut(duration: 0.25), value: intro.showing)
         .onAppear { intro.showIfFirstTime() }
+        // "Try … now" in a guide: go to the tab; the screen there opens the feature.
+        .onChange(of: router.pending) { _, destination in
+            guard let destination else { return }
+            tab = router.tab
+            if destination == .edits || destination == .plan { router.pending = nil }
+        }
         .animation(.easeOut(duration: 0.25), value: exports.readyBanner)
         .fullScreenCover(item: $openReady) { route in
             NavigationStack {

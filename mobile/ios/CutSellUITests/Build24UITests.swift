@@ -540,7 +540,10 @@ final class Build24UITests: XCTestCase {
         done()
     }
 
-    /// The 4 welcome screens (first visit) and Perfil → Help → How to use CutSell / Replay intro, EN and ES.
+
+
+
+    /// Intro (Figma 1145:2773-2858) on the first visit, then Perfil → Help → How to use CutSell (1145:2898 / 2958).
     func testIntroGuide() throws {
         for lang in ["en", "es"] {
             launchApp(fresh: true, extra: ["-CutSellProjectsMock"], env: ["CUTSELL_INTRO": "1", "CUTSELL_LANGUAGE": lang])
@@ -552,21 +555,39 @@ final class Build24UITests: XCTestCase {
                 element("intro_next").tap()
             }
             pause(1.5)
-            check(!element("introView").exists && element("hubUpload").exists, "\(lang): intro ends on Create")
+            check(!element("introView").exists && element("hubUpload").exists, "\(lang): Get started ends on Create")
             element("tab_you").tap(); pause(1.2)
             let help = element("youRow_help")
             for _ in 0..<3 where !help.isHittable { app.swipeUp(velocity: .slow); pause(0.4) }
             help.tap(); pause(1.2)
             element("help_guide").tap(); pause(1.2)
-            check(element("guidePage").exists, "\(lang): How to use CutSell opens the guide")
-            shot("\(lang)_guide")
-            element("guide_voiceover").tap(); pause(0.8)
-            check(element("guide_steps_voiceover").exists, "\(lang): a guide opens its steps")
-            shot("\(lang)_guide_voiceover")
-            app.swipeUp(velocity: .slow); pause(0.6)
-            element("guide_keyframes").tap(); pause(0.8)
-            shot("\(lang)_guide_keyframes")
-            element("youBack").tap(); pause(1)
+            check(element("guidePage").exists, "\(lang): How to use CutSell opens the list")
+            shot("\(lang)_guide_list")
+            element("guide_mix").tap(); pause(1)
+            check(element("guideDetail_mix").exists && element("guideStep_5").exists, "\(lang): Mix guide, 5 steps")
+            shot("\(lang)_guide_mix")
+            for id in ["upload", "editor", "keyframes", "voiceover", "teleprompter", "products", "planweek", "tiktok"] {
+                element("guideDetailBack").tap(); pause(0.8)
+                let row = element("guide_\(id)")
+                for _ in 0..<3 where !row.isHittable { app.swipeUp(velocity: .slow); pause(0.3) }
+                row.tap(); pause(0.9)
+                shot("\(lang)_guide_\(id)")
+            }
+            element("guideDetailBack").tap(); pause(0.8)
+            app.swipeDown(velocity: .fast); pause(0.4)
+            let search = element("guideSearch")
+            search.tap(); search.typeText(lang == "es" ? "voz" : "voice"); pause(0.8)
+            check(element("guide_voiceover").exists && !element("guide_mix").exists, "\(lang): search finds Voice over")
+            shot("\(lang)_guide_search")
+            // Try Products now → My videos › Products
+            search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 6)); pause(0.5)
+            element("guide_products").tap(); pause(0.8)
+            element("guideTry").tap(); pause(2.5)
+            check(element("editsFilterProducts").exists && element("editsFilterProducts").isSelected,
+                  "\(lang): Try Products now opens My videos › Products")
+            element("tab_you").tap(); pause(1.2)
+            for _ in 0..<3 where !help.isHittable { app.swipeUp(velocity: .slow); pause(0.4) }
+            help.tap(); pause(1.2)
             element("help_intro").tap(); pause(1.5)
             check(element("introView").waitForExistence(timeout: 5), "\(lang): Replay intro shows the 4 screens again")
             element("intro_skip").tap(); pause(1.5)
@@ -576,59 +597,83 @@ final class Build24UITests: XCTestCase {
         done()
     }
 
-    /// Day mode (Perfil → Preferences → Appearance → Light): the main screens and every Perfil page.
-    func testLightMode() throws {
-        launchApp(fresh: true, extra: ["-CutSellProjectsMock", "-cutsell.pref.appearance", "light"])
-        pause(2)
-        shot("light_create")
-        element("tab_edits").tap(); pause(2); shot("light_edits")
-        element("tab_plan").tap(); pause(2); shot("light_plan")
-        element("tab_you").tap(); pause(1.5)
-        check(element("youOverview").waitForExistence(timeout: 10), "light: Perfil opens")
-        youTour("light")
-        // Back to Dark from Appearance: the app changes at once.
-        element("youRow_preferences").tap(); pause(1)
-        element("prefAppearance").tap(); pause(1)
-        element("appearance_dark").tap(); pause(1.5)
-        check(element("appearance_dark").isSelected, "light → Dark chosen")
-        shot("light_to_dark")
-        done()
-    }
-
-    /// Teleprompter on the camera (Script on the side rail), EN and ES.
+    /// Teleprompter (Figma 1145:2988 sheet, 1151:2824 over the camera), EN and ES.
     func testTeleprompter() throws {
         for lang in ["en", "es"] {
             app = XCUIApplication()
-            app.launchArguments = ["-CutSellScreen", "camera", "-cutsell.prompter.script", "", "-cutsell.prompter.on", "NO"]
+            app.launchArguments = ["-CutSellScreen", "camera", "-cutsell.prompter.scripts", "", "-cutsell.prompter.on", "NO",
+                                   "-cutsell.prompter.speed2", "1.0", "-cutsell.prompter.size2", "28", "-cutsell.prompter.frame", ""]
             app.launchEnvironment["CUTSELL_LANGUAGE"] = lang
             app.launch()
             check(element("cameraScript").waitForExistence(timeout: 20), "\(lang): Script on the camera rail")
             shot("\(lang)_prompter_rail")
             element("cameraScript").tap(); pause(1.2)
             let editor = element("prompterEditorText")
-            check(editor.waitForExistence(timeout: 5), "\(lang): no script yet → the editor opens")
+            check(editor.waitForExistence(timeout: 5), "\(lang): no script yet → the script sheet opens")
             editor.tap()
             editor.typeText(lang == "es"
-                ? "¡Hola! Hoy te muestro mi nuevo perfume. Huele a vainilla y dura todo el día. Lo uso para el trabajo y para salir. Si te gusta, el link está aquí abajo."
-                : "Hi! Today I'm showing you my new perfume. It smells like vanilla and lasts all day. I wear it to work and to go out. If you like it, the link is right below.")
-            pause(0.6)
-            shot("\(lang)_prompter_editor")
-            element("prompterDone").tap(); pause(1.2)
+                ? "Deja de perder tiempo con correas viejas. Estas correas Rhino se traban de un jalón. Llevé mi kayak sin que se moviera nada. Vienen en paquete de 4 y hoy están en oferta. Toca el carrito naranja antes de que se acaben."
+                : "Stop wasting time with old straps. These Rhino retractable straps lock in one pull. I hauled my whole kayak with zero slipping. They come in a 4-pack, and right now they're on sale. Tap the orange cart before they're gone.")
+            app.swipeDown(velocity: .slow)   // keyboard away (interactive)
+            pause(0.8)
+            element("prompterSpeedPlus").tap(); pause(0.3)
+            check(element("prompterSpeedValue").label == "1.1×", "\(lang): speed + → 1.1×", element("prompterSpeedValue").label)
+            element("prompterSpeedMinus").tap(); pause(0.3)
+            shot("\(lang)_prompter_sheet")
+            element("prompterRecord").tap(); pause(1.5)
             check(element("prompterOverlay").waitForExistence(timeout: 5), "\(lang): the script shows over the camera")
-            check(element("cameraScript").value as? String == "On", "\(lang): Script is on")
+            check(["On", "Activado", "Sí"].contains(element("cameraScript").value as? String ?? ""), "\(lang): Script is on",
+                  element("cameraScript").value as? String ?? "")
+            pause(3.5)                                     // 3·2·1 (no camera in the simulator: nothing records)
             shot("\(lang)_prompter_on")
-            element("prompterFaster").tap(); pause(0.4)
-            check(element("prompterSpeed").label.hasSuffix("4"), "\(lang): faster → speed 4", element("prompterSpeed").label)
-            element("prompterSize").tap(); pause(0.6)
-            shot("\(lang)_prompter_large")
-            element("prompterText").swipeUp(velocity: .slow); pause(0.6)
-            shot("\(lang)_prompter_dragged")
+            element("prompterText").tap(); pause(0.6)
+            check(element("prompterAutoScroll").exists && element("prompterEdit").exists && element("prompterSettings").exists,
+                  "\(lang): tap shows ✎ · Auto-scroll · ⚙ and the frame")
+            shot("\(lang)_prompter_controls")
+            pause(2.6)
+            check(!element("prompterAutoScroll").exists, "\(lang): controls hide after 2 s")
+            element("cameraScriptSpeed").tap(); pause(0.4)
+            check(element("cameraScriptSpeed").label.contains("1.2"), "\(lang): Speed on the rail → 1.25×",
+                  element("cameraScriptSpeed").label)
+            element("prompterText").tap(); pause(0.5)
+            element("prompterSettings").tap(); pause(1)
+            shot("\(lang)_prompter_settings")
+            element("prompterColor_yellow").tap(); pause(0.4)
+            app.swipeDown(velocity: .fast); pause(1)
             element("cameraScript").tap(); pause(0.8)
             check(!element("prompterOverlay").exists, "\(lang): Script off hides it")
             element("cameraScript").tap(); pause(0.8)
             check(element("prompterOverlay").exists, "\(lang): Script on shows it again (script kept)")
             app.terminate()
         }
+        done()
+    }
+
+    /// Day mode (Figma 1146:2 Create, 1146:91 My videos › Products, 1146:178 Plan) and every Perfil page.
+    func testLightMode() throws {
+        launchApp(fresh: true, extra: ["-CutSellProjectsMock", "-CutSellCatalogMock", "-cutsell.pref.appearance", "light"])
+        pause(2)
+        shot("light_create")
+        element("tab_edits").tap(); pause(2); shot("light_edits")
+        element("editsFilterProducts").tap(); pause(2); shot("light_products")
+        element("tab_plan").tap(); pause(2); shot("light_plan")
+        element("tab_you").tap(); pause(1.5)
+        check(element("youOverview").waitForExistence(timeout: 10), "light: Perfil opens")
+        youTour("light")
+        let help = element("youRow_help")
+        for _ in 0..<3 where !help.isHittable { app.swipeUp(velocity: .slow); pause(0.4) }
+        help.tap(); pause(1.2)
+        element("help_guide").tap(); pause(1.2); shot("light_guide_list")
+        element("guide_mix").tap(); pause(1); shot("light_guide_mix")
+        element("guideDetailBack").tap(); pause(0.6)
+        element("guideBack").tap(); pause(0.8)
+        element("youBack").tap(); pause(1)
+        // Back to Dark from Appearance: the app changes at once.
+        element("youRow_preferences").tap(); pause(1)
+        element("prefAppearance").tap(); pause(1)
+        element("appearance_dark").tap(); pause(1.5)
+        check(element("appearance_dark").isSelected, "light → Dark chosen")
+        shot("light_to_dark")
         done()
     }
 

@@ -34,6 +34,8 @@ struct CreateCameraView: View {
     var isActive = true
     /// Design screenshots only: show the camera screen without a real camera.
     var previewMode = false
+    /// Teleprompter: the product (and Mix section) this recording is for.
+    var scriptContext: TeleprompterContext? = nil
 
     @StateObject private var camera = CameraController()
     @State private var gate: Gate = .checking
@@ -45,6 +47,7 @@ struct CreateCameraView: View {
     @State private var recordingFailed = false
     @ObservedObject private var prompter = TeleprompterStore.shared
     @State private var editingScript = false
+    @State private var countingDown = false
 
     var body: some View {
         ZStack {
@@ -90,8 +93,14 @@ struct CreateCameraView: View {
             if torchOn { camera.setTorch(false) }
             camera.stopSession()
         }
-        .sheet(isPresented: $editingScript) { TeleprompterEditor() }
+        .sheet(isPresented: $editingScript) {
+            TeleprompterSheet(onRecord: { startRecordingWithScript() })
+        }
         .animation(.easeOut(duration: 0.2), value: prompter.isOn)
+        .onAppear {
+            prompter.context = scriptContext ?? TeleprompterContext()
+            if prompter.openSheetNext { prompter.openSheetNext = false; editingScript = true }
+        }
         .fullScreenCover(isPresented: $recordingFailed) {
             CreateProblemView(
                 problem: .couldNotAdd,
@@ -147,6 +156,8 @@ struct CreateCameraView: View {
                     // Hidden while recording (Figma 645:23 / 626:361); back between clips.
                     if !camera.isRecording {
                         controlsColumn
+                    } else if prompter.isOn && prompter.hasScript {
+                        recordingColumn.padding(.top, 220)
                     }
                 }
                 .padding(.top, camera.isRecording || elapsed > 0 ? 6 : 20)
@@ -178,19 +189,18 @@ struct CreateCameraView: View {
                 }
                 .padding(.bottom, 26)
             }
-            // Teleprompter (Script on the side rail): at the top, next to the lens; scrolls while recording.
+            // Teleprompter (Figma 1151:2824): free text near the lens over a fading shadow; moves while recording.
             if prompter.isOn && prompter.hasScript {
-                VStack(spacing: 0) {
-                    TeleprompterOverlay(running: camera.isRecording, onEdit: {
-                        if !camera.isRecording { editingScript = true }
-                    })
-                    .frame(height: 232)
-                    .padding(.leading, 14)
-                    .padding(.trailing, camera.isRecording ? 14 : 84)
-                    .padding(.top, camera.isRecording || elapsed > 0 ? 100 : 58)
-                    Spacer()
-                }
+                TeleprompterOverlay(running: camera.isRecording, onEdit: {
+                    if !camera.isRecording { editingScript = true }
+                })
                 .transition(.opacity)
+            }
+            if countingDown {
+                ScriptCountdown {
+                    countingDown = false
+                    beginRecording()
+                }
             }
         }
     }
@@ -222,6 +232,7 @@ struct CreateCameraView: View {
                         .frame(width: 36, height: 36)
                     Text(L10n.tr("Mirror"))
                         .font(CS.sf(13, .semibold))
+                        .lineLimit(1).minimumScaleFactor(0.75)
                         .foregroundStyle(camera.mirrorOn ? CS.cyan : .white)
                 }
                 .frame(width: 62)
@@ -229,24 +240,67 @@ struct CreateCameraView: View {
             .buttonStyle(.plain)
             .accessibilityValue(camera.mirrorOn ? "On" : "Off")
             .accessibilityIdentifier("cameraMirror")
-            Button {
-                // No script yet: write it first. With a script: show / hide it.
-                if prompter.hasScript { prompter.isOn.toggle() } else { editingScript = true }
-            } label: {
+            scriptRailButtons
+        }
+        .frame(width: 62)
+        .padding(.trailing, 8)
+    }
+
+    /// Figma 1151:2853-2859: Script (≡ on the gradient when on, cyan label) and Speed (1.0× chip).
+    @ViewBuilder
+    private var scriptRailButtons: some View {
+        let on = prompter.isOn && prompter.hasScript
+        Button {
+            // No script yet: write it first. With a script: show / hide it.
+            if prompter.hasScript { prompter.isOn.toggle() } else { editingScript = true }
+        } label: {
+            VStack(spacing: 6) {
+                Text(verbatim: "≡").font(CS.inter(16, .bold)).foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+                    .background {
+                        if on { RoundedRectangle(cornerRadius: 10, style: .continuous).fill(CS.brandStroke) }
+                        else { RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.black.opacity(0.5))
+                                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.white.opacity(0.25), lineWidth: 1)) }
+                    }
+                Text(L10n.tr("Script")).font(CS.inter(12, .semibold))
+                    .foregroundStyle(on ? Color(fixed: 0x19E6FF) : .white)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+            }
+            .frame(width: 62)
+        }
+        .buttonStyle(.plain)
+        .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in editingScript = true })
+        .accessibilityValue(on ? "On" : "Off")
+        .accessibilityIdentifier("cameraScript")
+        if on {
+            Button { prompter.nextSpeed() } label: {
                 VStack(spacing: 4) {
-                    Image(systemName: "text.alignleft")
-                        .font(.system(size: 26, weight: .semibold))
-                        .foregroundStyle(prompter.isOn && prompter.hasScript ? CS.cyan : .white)
-                        .frame(width: 36, height: 36)
-                    Text(L10n.tr("Script"))
-                        .font(CS.sf(13, .semibold))
-                        .foregroundStyle(prompter.isOn && prompter.hasScript ? CS.cyan : .white)
+                    Text(verbatim: prompter.speedText).font(CS.inter(12, .bold)).foregroundStyle(.white)
+                        .frame(width: 54, height: 28)
+                        .background(Color.black.opacity(0.5), in: Capsule())
+                        .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
+                    Text(L10n.tr("Speed")).font(CS.inter(11, .semibold)).foregroundStyle(.white)
+                        .lineLimit(1).minimumScaleFactor(0.8)
                 }
                 .frame(width: 62)
             }
             .buttonStyle(.plain)
-            .accessibilityValue(prompter.isOn && prompter.hasScript ? "On" : "Off")
-            .accessibilityIdentifier("cameraScript")
+            .accessibilityIdentifier("cameraScriptSpeed")
+        }
+    }
+
+    /// While recording with the script on (1151:2835): Flip dimmed, Flash, Grid, Script, Speed.
+    private var recordingColumn: some View {
+        VStack(spacing: 16) {
+            controlButton(title: "Flip", image: "IconFlip", size: CGSize(width: 42, height: 34)) {}
+                .disabled(true).opacity(0.35)
+            controlButton(title: "Flash", image: torchOn ? "IconFlashOn" : "IconFlash", size: CGSize(width: 34, height: 38)) {
+                torchOn.toggle()
+                camera.setTorch(torchOn)
+            }
+            .disabled(!camera.hasTorch && !previewMode)
+            controlButton(title: "Grid", image: "IconGrid", size: CGSize(width: 38, height: 38)) { showGrid.toggle() }
+            scriptRailButtons
         }
         .frame(width: 62)
         .padding(.trailing, 8)
@@ -259,6 +313,8 @@ struct CreateCameraView: View {
                 Text(L10n.tr(title))
                     .font(CS.sf(13, .semibold))
                     .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
             .frame(width: 62)
         }
@@ -360,6 +416,23 @@ struct CreateCameraView: View {
             camera.stopRecording()
             return
         }
+        if countingDown { return }
+        // Teleprompter on with "Start after 3·2·1": count first, then record (the text moves from there).
+        if prompter.isOn && prompter.hasScript && prompter.countdown {
+            countingDown = true
+            return
+        }
+        beginRecording()
+    }
+
+    /// "Record with script" in the sheet.
+    private func startRecordingWithScript() {
+        guard !camera.isRecording, !countingDown else { return }
+        if prompter.countdown { countingDown = true } else { beginRecording() }
+    }
+
+    private func beginRecording() {
+        guard !camera.isRecording else { return }
         elapsed = 0
         camera.record { result in
             stopTimer()

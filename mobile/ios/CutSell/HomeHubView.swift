@@ -115,6 +115,7 @@ struct HomeHubView: View {
             .padding(.vertical, 7)
             .background(CS.surfaceControl, in: Capsule())
             .overlay(Capsule().stroke(CS.borderDefault, lineWidth: 1))
+            .dayCardShadow()
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("planMeter")
@@ -129,7 +130,7 @@ struct HomeHubView: View {
                     .resizable()
                     .frame(width: 26, height: 26)
                     .frame(width: 52, height: 52)
-                    .background(Color(hex: 0x050814, opacity: 0.28), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .background(Color(fixed: 0x050814, opacity: 0.28), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 Spacer().frame(height: 12)
                 Text(L10n.tr("Upload videos"))
                     .font(CS.inter(24, .heavy))
@@ -146,10 +147,10 @@ struct HomeHubView: View {
                         Button { onUpload(mode) } label: {
                             Text(L10n.tr(mode.title))
                                 .font(CS.inter(12, .semibold))
-                                .foregroundStyle(Color.ink)
+                                .foregroundStyle(.white)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
-                                .background(Color(hex: 0x050814, opacity: 0.3), in: Capsule())
+                                .background(Color(fixed: 0x050814, opacity: 0.3), in: Capsule())
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("hubMode_\(mode.rawValue)")
@@ -192,6 +193,7 @@ struct HomeHubView: View {
             .padding(16)
             .background(CS.surfaceCard, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(CS.borderDefault, lineWidth: 1))
+            .dayCardShadow()
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("hubMix")
@@ -221,6 +223,7 @@ struct HomeHubView: View {
             .padding(16)
             .background(CS.surfaceCard, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(CS.borderDefault, lineWidth: 1))
+            .dayCardShadow()
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(id)
@@ -232,7 +235,8 @@ struct HomeHubView: View {
         let isReady = project.state == "draft_ready"
         let isProcessing = Project.processingStates.contains(project.state)
         return RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .fill(LinearGradient(colors: [Color(hex: Self.tileColors[index % 3]), CS.surfaceCard],
+            // Video tiles stay dark in day mode too (Figma 1146:60-66).
+            .fill(LinearGradient(colors: [Color(fixed: Self.tileColors[index % 3]), Color(fixed: 0x0C1730)],
                                  startPoint: .topLeading, endPoint: .bottomTrailing))
             .frame(height: 92)
             .overlay {
@@ -253,7 +257,7 @@ struct HomeHubView: View {
             .overlay(alignment: .bottomLeading) {
                 Text(CutNaming.readable(project: project))
                     .font(CS.inter(11, .semibold))
-                    .foregroundStyle(Color.ink)
+                    .foregroundStyle(.white)
                     .lineLimit(2)
                     .padding(8)
             }

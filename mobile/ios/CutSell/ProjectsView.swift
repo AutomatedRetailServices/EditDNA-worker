@@ -31,6 +31,7 @@ struct ProjectsView: View {
     @State private var projectPendingDelete: Project?
     @State private var errorMessage: String?
     @State private var selectedTab: EditsTab = .all
+    @ObservedObject private var router = AppRouter.shared
     @State private var showingSearch = false
     @State private var searchText = ""
     @ObservedObject private var queue = ProcessingQueue.shared
@@ -122,7 +123,7 @@ struct ProjectsView: View {
                         header
                         Text(L10n.tr("Edits"))
                             .font(CS.inter(34, .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(Color.ink)
                             .padding(.top, 12)
                         Text(L10n.tr(selectedTab == .processing ? "Cuts being edited now. You can leave the app."
                              : selectedTab == .products ? "Your cuts, organized by brand and product."
@@ -134,7 +135,7 @@ struct ProjectsView: View {
                         if showingSearch {
                             TextField("", text: $searchText, prompt: Text(L10n.tr("Search edits")).foregroundStyle(CS.textMuted))
                                 .font(CS.inter(15))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(Color.ink)
                                 .padding(.horizontal, 14)
                                 .frame(height: 42)
                                 .background(CS.fieldBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -227,6 +228,9 @@ struct ProjectsView: View {
             .onReceive(NotificationCenter.default.publisher(for: .mixProgress)) { _ in
                 Task { try? await appState.refreshProjects() }
             }
+            // A guide's "Try Products now".
+            .onAppear { if router.pending == .products { router.pending = nil; selectedTab = .products } }
+            .onChange(of: router.pending) { _, d in if d == .products { router.pending = nil; selectedTab = .products } }
             // Mix · Results: "Make videos" opens Processing; a finished Mix opens its videos.
             .onChange(of: queue.requestedMix) { _, mix in
                 guard let mix else { return }
@@ -376,10 +380,10 @@ struct ProjectsView: View {
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(Color.ink)
+                    .foregroundStyle(.white)
                     .frame(width: 34, height: 34)
-                    .background(Color(hex: 0x050A17), in: Circle())
-                    .overlay(Circle().stroke(CS.circleButtonBorder, lineWidth: 1))
+                    .background(Color(dark: 0x050A17, light: 0x0B1020), in: Circle())
+                    .overlay(Circle().stroke(Color(dark: 0x144080, light: 0x0B1020), lineWidth: 1))
             }
             .accessibilityLabel(L10n.tr("More"))
         }
@@ -525,7 +529,7 @@ struct EditTile: View {
             .overlay(alignment: .bottomLeading) {
                 Text(CutNaming.readable(project: project))
                     .font(CS.inter(11, .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(thumbnails.image(for: project.projectID) == nil ? Color.ink : Color.white)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                     .padding(.horizontal, 9)

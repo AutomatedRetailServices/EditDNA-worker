@@ -14,8 +14,15 @@ struct PlanView: View {
     @State private var showingMix = false
     @ObservedObject private var week = PlanWeekStore.shared
     @State private var path: [PlanRoute] = []
+    @ObservedObject private var router = AppRouter.shared
 
     enum PlanRoute: Hashable { case goal, week, day(String) }
+
+    private func openFromGuide() {
+        guard router.pending == .planWeek else { return }
+        router.pending = nil
+        path = week.hasWeek ? [.week] : [.goal]
+    }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -34,6 +41,9 @@ struct PlanView: View {
         }
         .tint(CS.cyan)
         .task { await week.refresh(session: appState.session) }
+        // A guide's "Try Plan my week now".
+        .onAppear { openFromGuide() }
+        .onChange(of: router.pending) { _, _ in openFromGuide() }
         // A reminder was tapped: that day opens, ready to share.
         .onChange(of: week.requestedDay) { _, day in
             guard let day else { return }
@@ -131,7 +141,7 @@ struct PlanView: View {
                            action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 0) {
-                Text(icon).font(CS.inter(18, .bold)).foregroundStyle(.white)
+                Text(icon).font(CS.inter(18, .bold)).foregroundStyle(highlighted ? Color.white : Color.ink)
                     .frame(width: 40, height: 40)
                     .background {
                         if highlighted {
@@ -140,7 +150,7 @@ struct PlanView: View {
                             RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(hex: 0x1F2638))
                         }
                     }
-                Text(L10n.tr(title)).font(CS.inter(16, .bold)).foregroundStyle(.white).padding(.top, 12)
+                Text(L10n.tr(title)).font(CS.inter(16, .bold)).foregroundStyle(Color.ink).padding(.top, 12)
                 Text(L10n.tr(subtitle)).font(CS.inter(11)).foregroundStyle(Color(hex: 0x99A3BD))
                     .fixedSize(horizontal: false, vertical: true).padding(.top, 4)
                 Spacer(minLength: 0)
@@ -165,12 +175,12 @@ struct PlanView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 8) {
-                    Text(L10n.tr(tag == .mix ? "MIX" : "BULK")).font(CS.inter(9, .bold)).foregroundStyle(.white)
+                    Text(L10n.tr(tag == .mix ? "MIX" : "BULK")).font(CS.inter(9, .bold)).foregroundStyle(tag == .mix ? Color.white : Color.ink)
                         .frame(width: tag == .mix ? 35 : 42, height: 18)
                         .background {
                             if tag == .mix { Capsule().fill(CS.brandFull) } else { Capsule().fill(Color(hex: 0x1F2638)) }
                         }
-                    Text(L10n.tr(title)).font(CS.inter(14, .semibold)).foregroundStyle(.white).lineLimit(1)
+                    Text(L10n.tr(title)).font(CS.inter(14, .semibold)).foregroundStyle(Color.ink).lineLimit(1)
                 }
                 Text(L10n.tr(detail)).font(CS.inter(11)).foregroundStyle(Color(hex: 0x99A3BD)).lineLimit(1).padding(.top, 6)
                 HStack(spacing: 0) {

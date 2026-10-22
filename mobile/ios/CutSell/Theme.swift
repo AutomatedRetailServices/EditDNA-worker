@@ -40,8 +40,10 @@ enum CS {
     static let success = Color(hex: 0x25E6A2)
     static let error = Color(hex: 0xFF4D67)
 
-    static let cyan = Color(hex: 0x19E6FF)
-    static let selection = Color(hex: 0x0DD1FF)
+    /// Cyan text, links and highlights: #1769FF in day mode (never cyan on white).
+    static let cyan = Color(dark: 0x19E6FF, light: 0x1769FF)
+    static let selection = Color(dark: 0x0DD1FF, light: 0x1769FF)
+    static let link = cyan
     static let selectedCardBorder = Color(hex: 0x1AA6FF)
     static let checkbox = Color(hex: 0x1677FF)
     static let ready = Color(hex: 0x0DFF9E)
@@ -77,6 +79,16 @@ enum CS {
             .init(color: Color(hex: 0x1769FF), location: 0.38),
             .init(color: Color(hex: 0x7C3AED), location: 0.72),
             .init(color: Color(hex: 0xFF21D7), location: 1),
+        ],
+        startPoint: .leading, endPoint: .trailing
+    )
+    /// The intro / guide gradient (Figma: #19E5FF → #1769FF 35 % → #7D3BED 70 % → #FF21D6), same in both looks.
+    static let brandStroke = LinearGradient(
+        stops: [
+            .init(color: Color(fixed: 0x19E5FF), location: 0),
+            .init(color: Color(fixed: 0x1769FF), location: 0.35),
+            .init(color: Color(fixed: 0x7D3BED), location: 0.70),
+            .init(color: Color(fixed: 0xFF21D6), location: 1),
         ],
         startPoint: .leading, endPoint: .trailing
     )
@@ -126,22 +138,28 @@ enum LightPalette {
     nonisolated(unsafe) private static var cache: [UInt64: UIColor] = [:]
     private static let lock = NSLock()
 
+    /// Day-mode rules (Figma 1146:2 / 1146:91 / 1146:178): page #F5F7FB, white cards, text #0B1020, secondary
+    /// #5B6275, borders #E2E6EF. Brand colors and the gradient stay as they are; cyan used as text or a link is
+    /// `CS.cyan` / `CS.link`, which turn #1769FF in day mode (never cyan on white).
+    static let page: UInt32 = 0xF5F7FB, card: UInt32 = 0xFFFFFF, ink: UInt32 = 0x0B1020,
+               secondary: UInt32 = 0x5B6275, muted: UInt32 = 0x8A91A3, border: UInt32 = 0xE2E6EF, accent: UInt32 = 0x1769FF
+
     /// Hand-set light values for the foundation tokens (dark hex → light hex).
     private static let tokens: [UInt32: UInt32] = [
         // backgrounds
-        0x070910: 0xF4F6FB, 0x04060E: 0xF7F8FC, 0x090B1A: 0xF2F4FA, 0x020308: 0xEEF1F8, 0x050814: 0xF4F6FB,
-        0x03050B: 0xFFFFFF, 0x060B18: 0xFFFFFF, 0x03060F: 0xFFFFFF, 0x060E1D: 0xFFFFFF,
-        // cards and controls
-        0x040812: 0xFFFFFF, 0x0C1730: 0xFFFFFF, 0x0A1326: 0xF0F3F9, 0x10182A: 0xF0F3F9,
+        0x070910: page, 0x04060E: page, 0x090B1A: page, 0x020308: page, 0x050814: page, 0x03050D: page, 0x050B1C: page,
+        0x030409: page,
+        // sheets, cards and controls
+        0x03050B: card, 0x060B18: card, 0x03060F: card, 0x060E1D: card, 0x040812: card, 0x0C1730: card, 0x0F1726: card,
+        0x0D121F: card, 0x050A17: card,
+        0x0A1326: card, 0x10182A: 0xF0F3F8, 0x1F2638: 0xEEF1F7, 0x1A2236: 0xEEF1F7, 0x121A2B: 0xF0F3F8,
         // borders
-        0x14336B: 0xD5DEEE, 0x1A335E: 0xD5DEEE, 0x1A386B: 0xDFE5F0, 0x14478C: 0xC9D5EA, 0x1F4794: 0xC4D1EA,
-        0x144080: 0xC9D5EA, 0x19345F: 0xD5DEEE, 0x143866: 0xD5DEEE, 0x26334D: 0xD5DEEE,
+        0x14336B: border, 0x1A335E: border, 0x1A386B: border, 0x14478C: border, 0x1F4794: border, 0x144080: border,
+        0x19345F: border, 0x143866: border, 0x26334D: border, 0x33405C: border,
         // text
-        0xF7FAFF: 0x0B1430, 0xF0F7FF: 0x0B1430, 0xFFFFFF: 0x0B1430,
-        0xA3B8E0: 0x4A5B7D, 0xAFC4E8: 0x4A5B7D, 0x8FA9D6: 0x60708F, 0x9EB2E0: 0x52648A, 0xB0C4E8: 0x52648A,
-        0x6F86AE: 0x7A88A3,
-        // brand colors used as text get a little deeper so they read on white
-        0x19E6FF: 0x00A7D6, 0x0DD1FF: 0x0095D6, 0x0DE5FF: 0x00A7D6, 0x0DFF9E: 0x00B86E, 0x25E6A2: 0x00A86B,
+        0xF7FAFF: ink, 0xF0F7FF: ink, 0xFFFFFF: ink,
+        0xA3B8E0: secondary, 0xAFC4E8: secondary, 0x99A3BD: secondary, 0x9EB2E0: secondary, 0xB0C4E8: secondary,
+        0x8FA9D6: muted, 0x6F86AE: muted, 0x5C7AA8: muted,
     ]
 
     static func dynamic(_ hex: UInt32, _ opacity: Double) -> UIColor {
@@ -160,8 +178,8 @@ enum LightPalette {
                 blue: CGFloat(hex & 0xFF) / 255, alpha: CGFloat(opacity))
     }
 
-    /// By role: very dark → page/card white-blue, dark-saturated (borders, tints) → light border, light/greyish
-    /// (text) → dark ink, vivid mid colors (brand, states) → kept, a little deeper when they are light.
+    /// By role: very dark → page/card, dark-saturated (borders, tints) → light border, light/greyish (text) →
+    /// dark ink, vivid colors (brand, states) → kept.
     static func mapped(_ hex: UInt32) -> UInt32 {
         let r = Double((hex >> 16) & 0xFF) / 255, g = Double((hex >> 8) & 0xFF) / 255, b = Double(hex & 0xFF) / 255
         let maxC = max(r, g, b), minC = min(r, g, b)
@@ -183,9 +201,7 @@ enum LightPalette {
             nl = 1.0 - l * 0.6
         } else if s < 0.55 || l > 0.8 {     // text and light greys → ink
             nl = max(0.07, 0.07 + (1 - l) * 1.3); ns = min(s, 0.45)
-        } else if l > 0.5 {                 // vivid light brand colors
-            nl = l * 0.82
-        }
+        }                                   // vivid brand / state colors: unchanged (the gradient stays as it is)
         return hslToHex(h, ns, min(max(nl, 0), 1))
     }
 
@@ -208,9 +224,36 @@ enum LightPalette {
 }
 
 extension Color {
-    /// White in the dark look, dark ink in day mode: text and icons drawn on the page or a card.
+    /// White in the dark look, dark ink (#0B1020) in day mode: text and icons drawn on the page or a card.
     /// (White on a gradient, photo or video stays `.white`.)
     static let ink = Color(hex: 0xFFFFFF)
+
+    /// One color in the dark look, another in day mode.
+    init(dark: UInt32, light: UInt32, opacity: Double = 1) {
+        let d = UIColor(red: CGFloat((dark >> 16) & 0xFF) / 255, green: CGFloat((dark >> 8) & 0xFF) / 255,
+                        blue: CGFloat(dark & 0xFF) / 255, alpha: CGFloat(opacity))
+        let l = UIColor(red: CGFloat((light >> 16) & 0xFF) / 255, green: CGFloat((light >> 8) & 0xFF) / 255,
+                        blue: CGFloat(light & 0xFF) / 255, alpha: CGFloat(opacity))
+        self.init(uiColor: UIColor { $0.userInterfaceStyle == .light ? l : d })
+    }
+
+    /// Exactly this color in both looks (brand gradients, video tiles).
+    init(fixed hex: UInt32, opacity: Double = 1) {
+        self.init(.sRGB, red: Double((hex >> 16) & 0xFF) / 255, green: Double((hex >> 8) & 0xFF) / 255,
+                  blue: Double(hex & 0xFF) / 255, opacity: opacity)
+    }
+}
+
+extension View {
+    /// Day mode: white cards get the soft Figma shadow (0 2 10, #0D1433 at 8 %). Nothing in the dark look.
+    func dayCardShadow() -> some View { modifier(DayCardShadow()) }
+}
+
+private struct DayCardShadow: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
+    func body(content: Content) -> some View {
+        content.shadow(color: scheme == .light ? Color(fixed: 0x0D1433, opacity: 0.08) : .clear, radius: 5, x: 0, y: 2)
+    }
 }
 
 /// Registers the app's own Inter weights (the bold weight already ships with the caption fonts).
@@ -235,14 +278,35 @@ enum AppFontLoader {
 /// The official CutSell.ai logo (Figma "Brand/Logo/Official", 132 × 44).
 struct BrandLogo: View {
     var width: CGFloat = 132
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        Image("BrandLogo")
-            .resizable()
-            .interpolation(.high)
-            .scaledToFit()
-            .frame(width: width, height: width / 3)
-            .accessibilityLabel(L10n.tr("CutSell.ai"))
+        Group {
+            if scheme == .light {
+                // Figma 1147:4422-4424: the bag icon + "CutSell" dark + ".ai" with the gradient.
+                HStack(spacing: 2 * width / 132) {
+                    Image("BrandLogo").resizable().interpolation(.high)
+                        .frame(width: width, height: width / 3)
+                        .frame(width: 34 * width / 132, height: width / 3, alignment: .leading)
+                        .clipped()
+                    Text(verbatim: "CutSell")
+                        .font(CS.inter(21 * width / 132, .bold))
+                        .tracking(-0.63 * width / 132)
+                        .foregroundStyle(Color(fixed: 0x0B1020))
+                    + Text(verbatim: ".ai").font(CS.inter(21 * width / 132, .bold))
+                        .foregroundStyle(CS.brandStroke)
+                }
+                .frame(width: width, height: width / 3, alignment: .leading)
+            } else {
+                Image("BrandLogo")
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(width: width, height: width / 3)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(L10n.tr("CutSell.ai"))
     }
 }
 
@@ -407,8 +471,9 @@ struct CircleIconButton<Icon: View>: View {
         Button(action: action) {
             icon()
                 .frame(width: size, height: size)
-                .background(Color(hex: 0x050A17), in: Circle())
-                .overlay(Circle().stroke(CS.circleButtonBorder, lineWidth: 1))
+                // Day mode (Figma 1146:91): dark round buttons with white icons.
+                .background(Color(dark: 0x050A17, light: 0x0B1020), in: Circle())
+                .overlay(Circle().stroke(Color(dark: 0x144080, light: 0x0B1020), lineWidth: 1))
         }
         .buttonStyle(.plain)
     }

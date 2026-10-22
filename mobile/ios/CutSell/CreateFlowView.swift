@@ -12,6 +12,7 @@ struct CreateFlowView: View {
     @ObservedObject private var queue = ProcessingQueue.shared
     @State private var showingCamera = false
     @State private var showingMix = false
+    @ObservedObject private var router = AppRouter.shared
     @State private var afterCamera: AfterCamera?
     @State private var showingGallery = false
     @State private var galleryMode: CreateMode = .single
@@ -56,6 +57,7 @@ struct CreateFlowView: View {
                 onOpenProject: { path.append($0) },
                 selectTab: selectTab
             )
+            .onChange(of: router.pending) { _, destination in openFromGuide(destination) }
             .toolbar(.hidden, for: .navigationBar)
             .overlay(alignment: .bottom) {
                 if let count = bulkSheetCount {
@@ -205,6 +207,22 @@ struct CreateFlowView: View {
                         }
                     )
                 }
+            }
+        }
+    }
+
+    /// A guide's "Try … now" (Upload / Mix / Record / Teleprompter).
+    private func openFromGuide(_ destination: AppRouter.Destination?) {
+        guard let destination, [.upload, .mix, .record, .script].contains(destination) else { return }
+        router.pending = nil
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 700_000_000)      // Perfil closes first
+            switch destination {
+            case .upload: galleryMode = .single; showingGallery = true
+            case .mix: showingMix = true
+            case .record: showingCamera = true
+            case .script: TeleprompterStore.shared.openSheetNext = true; showingCamera = true
+            default: break
             }
         }
     }
