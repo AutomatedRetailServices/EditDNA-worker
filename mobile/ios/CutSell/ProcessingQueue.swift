@@ -123,7 +123,7 @@ final class ProcessingQueue: ObservableObject {
                 listed.insert(id)
                 if let cut = tracker.cut(id) {
                     if cut.isReady { continue }
-                    if cut.isFailed { state = .failed("The cut needs another try") }
+                    if cut.isFailed { state = .failed(Self.failure(cut)) }
                     else if case .failed = state {} else {
                         state = cut.jobState == "queued" ? .queued : .processing(max(0, CutTracker.serverStage(cut).percent))
                     }
@@ -136,13 +136,19 @@ final class ProcessingQueue: ObservableObject {
             var state = State.processing(0)
             if let cut = tracker.cut(project.projectID) {
                 if cut.isReady { continue }
-                state = cut.isFailed ? .failed("The cut needs another try")
+                state = cut.isFailed ? .failed(Self.failure(cut))
                     : cut.jobState == "queued" ? .queued : .processing(max(0, CutTracker.serverStage(cut).percent))
             }
             rows.append(Row(id: project.projectID, itemID: nil, projectID: project.projectID, name: project.title,
                             duration: 0, thumbnail: ThumbnailStore.shared.image(for: project.projectID), state: state))
         }
         return rows
+    }
+
+    /// 22 Oct: a video where nobody can be heard says so (and can go to Mix) instead of "needs another try".
+    static let noSpeech = "We couldn't hear anyone talking in this video"
+    static func failure(_ cut: CutTracker.Cut) -> String {
+        cut.error == "no_speech" ? noSpeech : "The cut needs another try"
     }
 
     struct Row: Identifiable {
@@ -183,9 +189,11 @@ struct QueueRowView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 HStack {
-                    Text(Self.clock(row.duration))
+                    Text(isNoSpeech ? L10n.tr(ProcessingQueue.noSpeech) : Self.clock(row.duration))
                         .font(CS.inter(11, .medium))
                         .foregroundStyle(CS.textSecondaryF)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                        .accessibilityIdentifier(isNoSpeech ? "queueRowNoSpeech" : "queueRowDuration")
                     Spacer(minLength: 6)
                     Text(L10n.tr(statusText))
                         .font(CS.inter(10, .semibold))
@@ -229,8 +237,27 @@ struct QueueRowView: View {
         }
     }
 
+    private var isNoSpeech: Bool { if case .failed(let why) = row.state { return why == ProcessingQueue.noSpeech }; return false }
+
     @ViewBuilder private var trailing: some View {
         switch row.state {
+        case .failed where isNoSpeech:
+            // Nobody talks in it: Retry would fail again; it can still be a clip of a Mix.
+            Button { AppRouter.shared.pending = .mix } label: {
+                Text(L10n.tr("Use in Mix"))
+                    .font(CS.inter(10, .semibold))
+                    .foregroundStyle(CS.cyan)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .padding(.horizontal, 8)
+                    .frame(minWidth: 48)
+                    .frame(height: 28)
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(CS.cyan, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .frame(minWidth: 48)
+            .frame(height: 60)
+            .accessibilityIdentifier("queueRowUseInMix")
         case .failed:
             Button(action: onRetry) {
                 // "Reintentar" is longer than "Retry": the button grows instead of breaking the word.
@@ -267,7 +294,7 @@ struct QueueRowView: View {
         case .queued: return "QUEUED"
         case .uploading(let p): return "UPLOADING \(p)%"
         case .processing(let p): return "PROCESSING \(p)%"
-        case .failed: return "FAILED"
+        case .failed(let why): return why == ProcessingQueue.noSpeech ? "NO VOICE" : "FAILED"
         }
     }
 

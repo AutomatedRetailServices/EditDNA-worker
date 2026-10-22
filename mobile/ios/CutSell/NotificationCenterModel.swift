@@ -80,7 +80,8 @@ final class NotificationCenterModel: ObservableObject {
         case "render_finished":
             content.body = "Your finished CutSell video is ready."
         case "processing_failed":
-            content.body = "This cut needs another try."
+            content.body = item.payload["error"]?.stringValue == "no_speech"
+                ? "We couldn't hear anyone talking in this video" : "This cut needs another try."
         case "render_failed":
             content.body = "The export failed, but your draft is safe."
         default:

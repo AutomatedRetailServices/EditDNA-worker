@@ -645,6 +645,7 @@
 "Mute overlay" = "Silenciar la superposición";
 "Mute overlay audio" = "Silenciar el audio de la superposición";
 "Muted" = "Silenciado";
+"NO VOICE" = "SIN VOZ";
 "NOT in mix" = "NO está en la mezcla";
 "NOTIFICATIONS" = "NOTIFICACIONES";
 "Name" = "Nombre";
@@ -1226,6 +1227,7 @@
 "Use Bulk or Mix to turn a few clips into dozens of videos." = "Usa Varios o Mix para convertir unos clips en decenas de videos.";
 "Use CutSell camera defaults" = "Usar los ajustes de cámara de CutSell";
 "Use Lower video, Clean up or Retake, and set the voice volume." = "Usa Bajar video, Limpiar o Repetir, y ajusta el volumen de la voz.";
+"Use in Mix" = "Usar en Mix";
 "Use in Plan" = "Usar en el Plan";
 "Use it" = "Usarlo";
 "Use only music you own or have rights to." = "Usa solo música tuya o con derechos.";
@@ -1290,6 +1292,7 @@
 "Wait until it finishes uploading, then split it." = "Espera a que termine de subir y luego divídelo.";
 "Waiting for CutSell" = "Esperando a CutSell";
 "Watching and choosing best takes" = "Mirando y eligiendo las mejores tomas";
+"We couldn't hear anyone talking in this video" = "No escuchamos a nadie hablando en este video";
 "We couldn’t tell from the video" = "No pudimos saberlo por el video";
 "We mix the clips so each video starts and ends differently." = "Mezclamos los clips para que cada video empiece y termine distinto.";
 "We save the video, copy your caption and open TikTok. Pick the video, paste the caption and post." = "Guardamos el video, copiamos tu caption y abrimos TikTok. Elige el video, pega el caption y publica.";
