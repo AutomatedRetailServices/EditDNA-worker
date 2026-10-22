@@ -33,6 +33,35 @@ from .simple_engine.engine import OV as _JUNCTION_OVERLAP
 from .usage_limits import check_processing_allowance
 
 
+# 22 Oct (IMG_9661): Deepgram's language detection heard a quiet Spanish clip as Japanese (one word) and Slovak.
+# CutSell creators speak Spanish or English: when the detected language is neither, the clip is heard again in Spanish
+# and in English and the version with more words is kept. Clips detected as es / en (every Gold video) never change.
+CREATOR_LANGUAGES = ("es", "en")
+# Fewer words than this per minute of video = nobody is talking to the camera (5:22 with 9 stray words).
+MIN_WORDS_PER_MINUTE = 15.0
+
+
+def _heard_in_her_language(heard: dict, audio_path: str, transcribe, language_hint) -> dict:
+    language = str(heard.get("language") or "").lower()[:2]
+    if language_hint or language in CREATOR_LANGUAGES:
+        return heard
+    best = heard
+    for code in CREATOR_LANGUAGES:
+        try:
+            again = transcribe(audio_path, language_hint=code)
+        except Exception:
+            continue
+        if len(again.get("words") or []) > len(best.get("words") or []):
+            best = {**again, "language": code, "language_detected": language or None}
+    return best
+
+
+def _nobody_talking(words: list, duration: float) -> bool:
+    if duration < 20:
+        return False          # a short clip: any words count
+    return len(words) / (duration / 60.0) < MIN_WORDS_PER_MINUTE
+
+
 class NoSpeechError(ValueError):
     """Nobody can be heard in the video (22 Oct). The app says so in plain words ("We couldn't hear anyone talking in
     this video") and offers the video for Mix, instead of "This cut needs another try"."""
@@ -187,8 +216,9 @@ def process_with_simple_engine(
             notify("transcribing", base)
             audio_path = _asr.extract_audio(path, str(Path(directory) / f"{source.source_order:03d}.mp3"))
             heard = transcribe(audio_path, language_hint=request.language_hint)
+            heard = _heard_in_her_language(heard, audio_path, transcribe, request.language_hint)
             words = [w for w in heard.get("words", []) if float(w["e"]) > float(w["s"])]
-            if not words:
+            if not words or _nobody_talking(words, duration):
                 raise NoSpeechError(f"no speech found in source {source.source_asset_id}")
 
             notify("analyzing", base + int(30 / total))

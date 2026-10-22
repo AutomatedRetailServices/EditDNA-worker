@@ -95,3 +95,25 @@ def test_a_video_with_nobody_talking_fails_as_no_speech():
     import inspect
     from cutsell_worker import worker_job
     assert '"no_speech"' in inspect.getsource(worker_job)  # the app reads this code
+
+
+def test_a_clip_heard_in_another_language_is_heard_again_in_spanish_and_english():
+    from cutsell_worker.simple_engine_adapter import _heard_in_her_language
+    asked = []
+
+    def transcribe(path, language_hint=None):
+        asked.append(language_hint)
+        words = {"es": [{"w": "Hola", "s": 0, "e": 0.4}, {"w": "mira", "s": 0.5, "e": 0.9}], "en": []}[language_hint]
+        return {"language": language_hint, "words": words}
+
+    out = _heard_in_her_language({"language": "ja", "words": [{"w": "こ", "s": 0, "e": 0.2}]}, "a.mp3", transcribe, None)
+    assert asked == ["es", "en"] and out["language"] == "es" and len(out["words"]) == 2 and out["language_detected"] == "ja"
+    asked.clear()
+    same = {"language": "es", "words": []}
+    assert _heard_in_her_language(same, "a.mp3", transcribe, None) is same and asked == []   # es / en: never asked again
+
+
+def test_nine_stray_words_in_five_minutes_is_nobody_talking():
+    from cutsell_worker.simple_engine_adapter import _nobody_talking
+    w = [{"w": "x", "s": 0, "e": 0.3}] * 9
+    assert _nobody_talking(w, 322.0) and not _nobody_talking(w, 3.0) and not _nobody_talking(w * 20, 60.0)
