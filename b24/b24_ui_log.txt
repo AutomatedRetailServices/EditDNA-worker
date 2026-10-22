@@ -1,2 +1,2 @@
-B24UI    31.7 PASS light: Preferences has no Appearance
-B24UI    46.3 FAILURES: none
+B24UI    48.8 PASS dark: Preferences has no Appearance
+B24UI    61.4 FAILURES: none
