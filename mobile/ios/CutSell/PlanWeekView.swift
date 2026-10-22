@@ -1156,7 +1156,7 @@ struct PlanDayView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     PlanBackButton(title: "This week") { dismiss() }.padding(.top, 8)
-                    Text(day == store.state?.today ? "Today · \(PlanDay.short(day))" : PlanDay.short(day))
+                    Text(L10n.tr(day == store.state?.today ? "Today · \(PlanDay.short(day))" : PlanDay.short(day)))
                         .font(CS.inter(28, .bold)).foregroundStyle(.white).padding(.top, 18)
                         .accessibilityIdentifier("dayTitle")
                     let left = slots.filter { $0.postedAt == nil }.count

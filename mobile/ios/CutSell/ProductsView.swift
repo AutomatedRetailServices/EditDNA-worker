@@ -463,8 +463,8 @@ struct ProductDetailView: View {
                         .accessibilityIdentifier("productSelect")
                         if route.mixID != nil {
                             Button { Task { await exportAll() } } label: {
-                                Text(exporter.running ? "Exporting \(exporter.done + 1) of \(exporter.total)…"
-                                     : "Export all \(selecting && !selected.isEmpty ? selected.count : readyMixVideos.count)")
+                                Text(L10n.tr(exporter.running ? "Exporting \(exporter.done + 1) of \(exporter.total)…"
+                                     : "Export all \(selecting && !selected.isEmpty ? selected.count : readyMixVideos.count)"))
                                     .font(CS.sf(15, .semibold)).foregroundStyle(.white)
                                     .frame(maxWidth: .infinity).frame(height: 50)
                                     .background(Capsule().fill(MixStyle.cta))

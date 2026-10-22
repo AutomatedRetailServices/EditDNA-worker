@@ -124,9 +124,9 @@ struct ProjectsView: View {
                             .font(CS.inter(34, .semibold))
                             .foregroundStyle(.white)
                             .padding(.top, 12)
-                        Text(selectedTab == .processing ? "Cuts being edited now. You can leave the app."
+                        Text(L10n.tr(selectedTab == .processing ? "Cuts being edited now. You can leave the app."
                              : selectedTab == .products ? "Your cuts, organized by brand and product."
-                             : "Your saved cuts, ready to review or share.")
+                             : "Your saved cuts, ready to review or share."))
                             .font(CS.inter(14))
                             .foregroundStyle(CS.textSecondary)
                             .padding(.top, 2)
@@ -150,7 +150,7 @@ struct ProjectsView: View {
                                     EditsFilterChip(title: chipTitle(tab), isSelected: selectedTab == tab) {
                                         selectedTab = tab
                                     }
-                                    .frame(width: tab.chipWidth)
+                                    .frame(minWidth: tab.chipWidth)  // longer words (Spanish) widen the chip
                                     .accessibilityIdentifier("editsFilter\(tab.rawValue)")
                                 }
                             }
@@ -633,6 +633,7 @@ struct EditsFilterChip: View {
                 .foregroundStyle(Color(hex: 0xF0F7FF))
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
+                .padding(.horizontal, 12)
                 .frame(maxWidth: .infinity)
                 .frame(height: 38)
                 .background {
