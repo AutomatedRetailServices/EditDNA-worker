@@ -1,0 +1,19 @@
+name: CutSell fetch intro avatar (probe)
+on:
+  push:
+    branches: [probe/avatar-fetch]
+permissions:
+  contents: write
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          mkdir -p asset
+          curl -fsSL -o asset/avatar.png "https://d8j0ntlcm91z4.cloudfront.net/user_33CGSto4syLjTeoifx2ykK2TIKD/hf_20261022_155244_fb985ad5-d574-42ff-b87e-61a463f69628.png"
+          file asset/avatar.png; ls -la asset
+          git config user.name "cutsell-probe"; git config user.email "probe@users.noreply.github.com"
+          git add asset/avatar.png
+          git commit -m "intro avatar (owner-provided)"
+          git push origin HEAD:probe/avatar-fetch
