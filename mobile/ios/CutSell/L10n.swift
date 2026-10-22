@@ -219,14 +219,6 @@ final class L10nBundle: Bundle, @unchecked Sendable {
         return super.localizedString(forKey: key, value: value, table: tableName)
     }
 
-    /// SwiftUI (iOS 15+) resolves `Text("…")` through the attributed lookup.
-    override func localizedAttributedString(forKey key: String, value: String?, table tableName: String?) -> NSAttributedString {
-        if tableName == nil || tableName == "Localizable", let spanish = L10nState.format(forKey: key) {
-            return NSAttributedString(string: spanish)
-        }
-        return super.localizedAttributedString(forKey: key, value: value, table: tableName)
-    }
-
     /// Lookups that pick a .lproj folder (es.lproj/Localizable.strings) follow the app's language.
     override var preferredLocalizations: [String] {
         L10nState.code == "es" ? ["es"] : ["en"]
