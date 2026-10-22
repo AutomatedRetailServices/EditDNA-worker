@@ -38,7 +38,7 @@ struct DesignScreenshotRoot: View {
             .environmentObject(notificationCenter)
             .environmentObject(L10n.shared)
             .environment(\.locale, L10n.locale)
-            .preferredColorScheme(.dark)
+            .appColorScheme()
             .onAppear {
                 appState.isBootstrapping = false
                 if screen == "edits" || screen == "hub" { appState.projects = Self.sampleProjects }

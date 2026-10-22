@@ -90,7 +90,7 @@ struct AIConsentSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(L10n.tr("Before your first cut")).font(CS.inter(22, .bold)).foregroundStyle(.white)
+            Text(L10n.tr("Before your first cut")).font(CS.inter(22, .bold)).foregroundStyle(Color.ink)
             Text(L10n.tr("To make your cut, CutSell uses these two AI services:"))
                 .font(CS.inter(15)).foregroundStyle(CS.textSecondaryF)
             VStack(alignment: .leading, spacing: 10) {
@@ -117,7 +117,7 @@ struct AIConsentSheet: View {
         .background(Color(hex: 0x0A1326).ignoresSafeArea())
         .presentationDetents([.large])
         .interactiveDismissDisabled()
-        .preferredColorScheme(.dark)
+        .appColorScheme()
         .sheet(item: $legal) { LegalView(document: $0) }
         .accessibilityIdentifier("aiConsentSheet")
     }
@@ -125,7 +125,7 @@ struct AIConsentSheet: View {
     private func row(_ name: String, _ text: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Circle().fill(CS.cyan).frame(width: 6, height: 6).padding(.top, 7)
-            (Text(L10n.tr(name)).bold().foregroundColor(.white) + Text(L10n.tr(" — \(text)")).foregroundColor(CS.textSecondaryF))
+            (Text(L10n.tr(name)).bold().foregroundColor(Color.ink) + Text(L10n.tr(" — \(text)")).foregroundColor(CS.textSecondaryF))
                 .font(CS.inter(14)).fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -167,7 +167,7 @@ struct LegalView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(L10n.tr("Done")) { dismiss() } } }
         }
-        .preferredColorScheme(.dark)
+        .appColorScheme()
         .accessibilityIdentifier("legal_\(document.rawValue)")
     }
 
@@ -176,7 +176,7 @@ struct LegalView: View {
         if line.hasPrefix("# ") {
             EmptyView()
         } else if line.hasPrefix("## ") {
-            Text(line.dropFirst(3)).font(CS.inter(17, .semibold)).foregroundStyle(.white).padding(.top, 8)
+            Text(line.dropFirst(3)).font(CS.inter(17, .semibold)).foregroundStyle(Color.ink).padding(.top, 8)
         } else if line.hasPrefix("- ") {
             Text(.init("•  " + line.dropFirst(2))).font(CS.inter(14)).foregroundStyle(CS.textSecondaryF)
         } else if !line.trimmingCharacters(in: .whitespaces).isEmpty {

@@ -139,7 +139,7 @@ struct MainTabView: View {
         }
         // A "Time to post" reminder was tapped: Plan opens that day.
         .onChange(of: planWeek.requestedDay) { _, day in if day != nil { tab = .plan } }
-        .preferredColorScheme(.dark)
+        .appColorScheme()
     }
 
     private func select(_ next: MainTab) {
@@ -158,7 +158,7 @@ struct ReadyBanner: View {
         HStack(spacing: 12) {
             Image("ProcessingLogo").resizable().frame(width: 34, height: 34).blendMode(.screen)
             VStack(alignment: .leading, spacing: 2) {
-                Text(L10n.tr(title)).font(CS.inter(15, .semibold)).foregroundStyle(.white)
+                Text(L10n.tr(title)).font(CS.inter(15, .semibold)).foregroundStyle(Color.ink)
                 Text(L10n.tr(subtitle)).font(CS.inter(12)).foregroundStyle(CS.textSecondaryF)
             }
             Spacer()

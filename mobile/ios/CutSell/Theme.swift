@@ -22,7 +22,7 @@ enum CS {
     static let chipBorder = Color(hex: 0x1F4794)
     static let circleButtonBorder = Color(hex: 0x144080)
 
-    static let textPrimary = Color.white
+    static let textPrimary = Color.ink
     static let textSecondary = Color(hex: 0xA3B8E0)
     static let textMuted = Color(hex: 0x8FA9D6)
     static let textCaption = Color(hex: 0x9EB2E0)
@@ -111,16 +111,106 @@ enum CS {
 }
 
 extension Color {
-    /// 0xRRGGBB, as written in Figma.
+    /// 0xRRGGBB, as written in Figma (the dark CutSell look). In Light appearance the same color is drawn from
+    /// `LightPalette` (surfaces turn light, text turns dark, brand colors stay); screens forced dark (editor,
+    /// camera, processing) always get the Figma value.
     init(hex: UInt32, opacity: Double = 1) {
-        self.init(
-            .sRGB,
-            red: Double((hex >> 16) & 0xFF) / 255,
-            green: Double((hex >> 8) & 0xFF) / 255,
-            blue: Double(hex & 0xFF) / 255,
-            opacity: opacity
-        )
+        self.init(uiColor: LightPalette.dynamic(hex, opacity))
     }
+}
+
+/// Day mode (Perfil → Preferences → Appearance → Light). There is no light Figma: every dark Figma color has a
+/// light counterpart by role, decided from its lightness and saturation, with hand-set values for the main
+/// tokens.
+enum LightPalette {
+    nonisolated(unsafe) private static var cache: [UInt64: UIColor] = [:]
+    private static let lock = NSLock()
+
+    /// Hand-set light values for the foundation tokens (dark hex → light hex).
+    private static let tokens: [UInt32: UInt32] = [
+        // backgrounds
+        0x070910: 0xF4F6FB, 0x04060E: 0xF7F8FC, 0x090B1A: 0xF2F4FA, 0x020308: 0xEEF1F8, 0x050814: 0xF4F6FB,
+        0x03050B: 0xFFFFFF, 0x060B18: 0xFFFFFF, 0x03060F: 0xFFFFFF, 0x060E1D: 0xFFFFFF,
+        // cards and controls
+        0x040812: 0xFFFFFF, 0x0C1730: 0xFFFFFF, 0x0A1326: 0xF0F3F9, 0x10182A: 0xF0F3F9,
+        // borders
+        0x14336B: 0xD5DEEE, 0x1A335E: 0xD5DEEE, 0x1A386B: 0xDFE5F0, 0x14478C: 0xC9D5EA, 0x1F4794: 0xC4D1EA,
+        0x144080: 0xC9D5EA, 0x19345F: 0xD5DEEE, 0x143866: 0xD5DEEE, 0x26334D: 0xD5DEEE,
+        // text
+        0xF7FAFF: 0x0B1430, 0xF0F7FF: 0x0B1430, 0xFFFFFF: 0x0B1430,
+        0xA3B8E0: 0x4A5B7D, 0xAFC4E8: 0x4A5B7D, 0x8FA9D6: 0x60708F, 0x9EB2E0: 0x52648A, 0xB0C4E8: 0x52648A,
+        0x6F86AE: 0x7A88A3,
+        // brand colors used as text get a little deeper so they read on white
+        0x19E6FF: 0x00A7D6, 0x0DD1FF: 0x0095D6, 0x0DE5FF: 0x00A7D6, 0x0DFF9E: 0x00B86E, 0x25E6A2: 0x00A86B,
+    ]
+
+    static func dynamic(_ hex: UInt32, _ opacity: Double) -> UIColor {
+        let key = UInt64(hex) << 16 | UInt64(min(max(opacity, 0), 1) * 1000)
+        lock.lock(); defer { lock.unlock() }
+        if let hit = cache[key] { return hit }
+        let dark = uiColor(hex, opacity)
+        let light = uiColor(tokens[hex] ?? mapped(hex), opacity)
+        let color = UIColor { $0.userInterfaceStyle == .light ? light : dark }
+        cache[key] = color
+        return color
+    }
+
+    private static func uiColor(_ hex: UInt32, _ opacity: Double) -> UIColor {
+        UIColor(red: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
+                blue: CGFloat(hex & 0xFF) / 255, alpha: CGFloat(opacity))
+    }
+
+    /// By role: very dark → page/card white-blue, dark-saturated (borders, tints) → light border, light/greyish
+    /// (text) → dark ink, vivid mid colors (brand, states) → kept, a little deeper when they are light.
+    static func mapped(_ hex: UInt32) -> UInt32 {
+        let r = Double((hex >> 16) & 0xFF) / 255, g = Double((hex >> 8) & 0xFF) / 255, b = Double(hex & 0xFF) / 255
+        let maxC = max(r, g, b), minC = min(r, g, b)
+        let l = (maxC + minC) / 2
+        let d = maxC - minC
+        let s = d == 0 ? 0 : d / (1 - abs(2 * l - 1))
+        var h = 0.0
+        if d > 0 {
+            if maxC == r { h = ((g - b) / d).truncatingRemainder(dividingBy: 6) }
+            else if maxC == g { h = (b - r) / d + 2 } else { h = (r - g) / d + 4 }
+            h /= 6; if h < 0 { h += 1 }
+        }
+        var nl = l, ns = s
+        if l < 0.13 {                       // page, cards, panels
+            nl = 0.955 + l * 0.35; ns = min(s, 0.45)
+        } else if l < 0.42 && s > 0.15 {    // borders, dark tints
+            nl = 0.86 - (l - 0.13) * 0.2; ns = min(s, 0.5)
+        } else if l < 0.42 {                // dark greys
+            nl = 1.0 - l * 0.6
+        } else if s < 0.55 || l > 0.8 {     // text and light greys → ink
+            nl = max(0.07, 0.07 + (1 - l) * 1.3); ns = min(s, 0.45)
+        } else if l > 0.5 {                 // vivid light brand colors
+            nl = l * 0.82
+        }
+        return hslToHex(h, ns, min(max(nl, 0), 1))
+    }
+
+    private static func hslToHex(_ h: Double, _ s: Double, _ l: Double) -> UInt32 {
+        let c = (1 - abs(2 * l - 1)) * s
+        let x = c * (1 - abs((h * 6).truncatingRemainder(dividingBy: 2) - 1))
+        let m = l - c / 2
+        let (r1, g1, b1): (Double, Double, Double)
+        switch Int(h * 6) {
+        case 0: (r1, g1, b1) = (c, x, 0)
+        case 1: (r1, g1, b1) = (x, c, 0)
+        case 2: (r1, g1, b1) = (0, c, x)
+        case 3: (r1, g1, b1) = (0, x, c)
+        case 4: (r1, g1, b1) = (x, 0, c)
+        default: (r1, g1, b1) = (c, 0, x)
+        }
+        func byte(_ v: Double) -> UInt32 { UInt32(max(0, min(255, ((v + m) * 255).rounded()))) }
+        return byte(r1) << 16 | byte(g1) << 8 | byte(b1)
+    }
+}
+
+extension Color {
+    /// White in the dark look, dark ink in day mode: text and icons drawn on the page or a card.
+    /// (White on a gradient, photo or video stays `.white`.)
+    static let ink = Color(hex: 0xFFFFFF)
 }
 
 /// Registers the app's own Inter weights (the bold weight already ships with the caption fonts).
@@ -409,4 +499,14 @@ struct ScreenBackground: View {
     var body: some View {
         CS.screenBackground.ignoresSafeArea()
     }
+}
+
+/// Follows Perfil → Preferences → Appearance (Automatic / Dark / Light).
+struct AppColorSchemeModifier: ViewModifier {
+    @ObservedObject private var prefs = AppPrefs.shared
+    func body(content: Content) -> some View { content.preferredColorScheme(prefs.colorScheme) }
+}
+
+extension View {
+    func appColorScheme() -> some View { modifier(AppColorSchemeModifier()) }
 }

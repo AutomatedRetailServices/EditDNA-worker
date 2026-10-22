@@ -312,7 +312,7 @@ struct BulkStartedSheet: View {
                 .frame(maxWidth: .infinity).padding(.top, 9)
             Text(L10n.tr("Your \(count) videos are being edited"))
                 .font(CS.inter(22, .bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(Color.ink)
                 .padding(.top, 21)
             Text(L10n.tr("You can close this screen or the app. Editing keeps going, one video at a time."))
                 .font(CS.inter(14))
@@ -347,7 +347,7 @@ struct BulkStartedSheet: View {
             Button(action: onStay) {
                 Text(L10n.tr("Stay here"))
                     .font(CS.inter(15, .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.ink)
                     .frame(maxWidth: .infinity)
                     .frame(height: 44)
             }
@@ -404,7 +404,7 @@ struct ReadyToast: View {
         HStack(spacing: 0) {
             Text(L10n.tr("✓  \(Self.short(name)) is ready"))
                 .font(CS.inter(13, .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(Color.ink)
                 .lineLimit(1)
             Spacer(minLength: 8)
             Button(L10n.tr("View"), action: onView)

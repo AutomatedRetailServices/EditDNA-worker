@@ -298,7 +298,7 @@ struct ProjectsView: View {
     private var processingList: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
-                Text(L10n.tr("In order")).font(CS.inter(16, .semibold)).foregroundStyle(.white)
+                Text(L10n.tr("In order")).font(CS.inter(16, .semibold)).foregroundStyle(Color.ink)
                 Spacer()
                 Text(L10n.tr("Each one moves to Ready when it’s done")).font(CS.inter(11, .medium)).foregroundStyle(Color(hex: 0x99A3BD))
             }
@@ -376,7 +376,7 @@ struct ProjectsView: View {
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.ink)
                     .frame(width: 34, height: 34)
                     .background(Color(hex: 0x050A17), in: Circle())
                     .overlay(Circle().stroke(CS.circleButtonBorder, lineWidth: 1))
@@ -393,7 +393,7 @@ struct ProjectsView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(L10n.tr(pending.title.isEmpty ? "Interrupted Cut" : pending.title))
                     .font(CS.inter(14, .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.ink)
                 Text(L10n.tr("\(pending.videos.count) clip\(pending.videos.count == 1 ? "" : "s") • Resume upload"))
                     .font(CS.inter(12))
                     .foregroundStyle(CS.textSecondary)
@@ -416,7 +416,7 @@ struct ProjectsView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(L10n.tr(emptyTitle))
                     .font(CS.inter(19, .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.ink)
                 Text(L10n.tr(emptyMessage))
                     .font(CS.inter(13))
                     .foregroundStyle(Color(hex: 0x99B2E0))
@@ -583,7 +583,7 @@ struct UploadNotFinishedView: View {
                     .foregroundStyle(CS.alert)
                 Text(L10n.tr("This video didn’t finish uploading"))
                     .font(CS.inter(22, .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.ink)
                     .multilineTextAlignment(.center)
                 Text(pending != nil
                      ? "Your video is saved on this iPhone. Resume the upload and CutSell will make the cut."

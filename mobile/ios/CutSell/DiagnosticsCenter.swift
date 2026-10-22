@@ -348,7 +348,7 @@ struct DiagnosticsView: View {
                 events = Array(DiagnosticsEventLog.shared.recent.reversed())
             }
         }
-        .preferredColorScheme(.dark)
+        .appColorScheme()
         .accessibilityIdentifier("diagnosticsScreen")
     }
 

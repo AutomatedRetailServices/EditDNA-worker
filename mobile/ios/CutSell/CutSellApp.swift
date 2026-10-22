@@ -131,7 +131,7 @@ struct RootView: View {
                 MainTabView(initialTab: L10n.takeReopenTab() ?? .create)
             }
         }
-        .preferredColorScheme(.dark)
+        .appColorScheme()
         .alert(
             L10n.tr("Signed in"),
             isPresented: Binding(

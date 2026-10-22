@@ -47,9 +47,15 @@ final class AppPrefs: ObservableObject {
         set { appearanceRaw = newValue.rawValue }
     }
 
-    /// The app's colour scheme. The light palette (point 10) is not built yet, so every choice draws the dark
-    /// CutSell look for now; the editor is always dark.
-    var colorScheme: ColorScheme { .dark }
+    /// The app's colour scheme: Automatic follows the iPhone, Dark / Light force one. The editor, the camera,
+    /// processing and the intro are always dark (they keep `.appColorScheme()`).
+    var colorScheme: ColorScheme? {
+        switch appearance {
+        case .automatic: return nil
+        case .dark: return .dark
+        case .light: return .light
+        }
+    }
 
     nonisolated static var remindersOn: Bool { UserDefaults.standard.object(forKey: "cutsell.pref.notifyReminders") as? Bool ?? true }
     nonisolated static var processingAlertsOn: Bool { UserDefaults.standard.object(forKey: "cutsell.pref.notifyProcessing") as? Bool ?? true }
@@ -275,7 +281,7 @@ struct YouPagesView: View {
             .transition(.move(edge: .trailing))
         }
         .animation(.easeOut(duration: 0.2), value: stack)
-        .preferredColorScheme(.dark)
+        .appColorScheme()
     }
 
     private func back() {

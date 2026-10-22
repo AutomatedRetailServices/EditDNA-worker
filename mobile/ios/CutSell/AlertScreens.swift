@@ -56,7 +56,7 @@ struct PermissionScreen: View {
                         Button(action: onClose) {
                             Image(systemName: "xmark")
                                 .font(.system(size: 17, weight: .semibold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(Color.ink)
                                 .frame(width: 44, height: 44)
                         }
                         .accessibilityLabel(L10n.tr("Close"))
@@ -65,7 +65,7 @@ struct PermissionScreen: View {
                 .padding(.top, 8)
                 Text(L10n.tr(kind.screenTitle))
                     .font(CS.inter(28, .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.ink)
                     .padding(.top, 14)
 
                 Spacer()
@@ -76,7 +76,7 @@ struct PermissionScreen: View {
                         .padding(.top, 34)
                     Text(L10n.tr(kind.heading))
                         .font(CS.inter(23, .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Color.ink)
                         .multilineTextAlignment(.center)
                         .padding(.top, 18)
                     Text(L10n.tr(kind.message))
@@ -151,7 +151,7 @@ struct ProblemScreen: View {
                     .padding(.top, 8)
                 Text(L10n.tr(screenTitle))
                     .font(CS.inter(28, .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.ink)
                     .padding(.top, 14)
 
                 Spacer()
@@ -162,7 +162,7 @@ struct ProblemScreen: View {
                         .foregroundStyle(tone == .error ? CS.alert : CS.cyan)
                     Text(L10n.tr(heading))
                         .font(CS.inter(25, .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Color.ink)
                         .multilineTextAlignment(.center)
                         .padding(.top, 22)
                     Text(L10n.tr(message))
@@ -212,14 +212,14 @@ struct LimitScreen: View {
                     Button(action: onClose) {
                         Image(systemName: "xmark")
                             .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(Color.ink)
                             .frame(width: 44, height: 44)
                     }
                     .accessibilityLabel(L10n.tr("Close"))
                     Spacer()
                     Text(L10n.tr(detail))
                         .font(CS.inter(14, .medium))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Color.ink)
                 }
                 .padding(.horizontal, 12)
                 Spacer()

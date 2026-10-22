@@ -608,7 +608,7 @@ struct PlanGoalView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     PlanBackButton(title: "Plan") { dismiss() }.padding(.top, 8)
-                    Text(L10n.tr("Plan my week")).font(CS.inter(28, .bold)).foregroundStyle(.white).padding(.top, 14)
+                    Text(L10n.tr("Plan my week")).font(CS.inter(28, .bold)).foregroundStyle(Color.ink).padding(.top, 14)
                     Text(L10n.tr("Pick how many videos and when. We spread them so every day has variety."))
                         .font(CS.inter(13)).foregroundStyle(PlanStyle.muted).fixedSize(horizontal: false, vertical: true).padding(.top, 6)
 
@@ -678,7 +678,7 @@ struct PlanGoalView: View {
                     .accessibilityIdentifier("goalStart")
 
                     HStack {
-                        Text(L10n.tr("Remind me at each time")).font(CS.inter(14, .semibold)).foregroundStyle(.white)
+                        Text(L10n.tr("Remind me at each time")).font(CS.inter(14, .semibold)).foregroundStyle(Color.ink)
                         Spacer()
                         Button { remind.toggle() } label: {
                             Image(remind ? "PlanToggleOn" : "PlanToggleOff").resizable().frame(width: 44, height: 26)
@@ -711,7 +711,7 @@ struct PlanGoalView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
-        .preferredColorScheme(.dark)
+        .appColorScheme()
         .task {
             await store.refresh(session: appState.session)
             guard !loaded else { return }
@@ -754,7 +754,7 @@ struct PlanGoalView: View {
     private var howMany: some View {
         HStack {
             Button { count = max(1, count - 1) } label: {
-                Text(L10n.tr("−")).font(CS.inter(20, .bold)).foregroundStyle(.white)
+                Text(L10n.tr("−")).font(CS.inter(20, .bold)).foregroundStyle(Color.ink)
                     .frame(width: 40, height: 40).background(Circle().fill(Color(hex: 0x1F2638)))
             }
             .buttonStyle(.plain)
@@ -889,7 +889,7 @@ struct StartDateSheet: View {
                 .accessibilityIdentifier("startSave")
         }
         .padding(16)
-        .preferredColorScheme(.dark)
+        .appColorScheme()
         .onAppear { value = PlanDay.date(day) ?? Date() }
     }
 }
@@ -905,7 +905,7 @@ struct TimePickerSheet: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            if let title { Text(L10n.tr(title)).font(CS.inter(15, .semibold)).foregroundStyle(.white) }
+            if let title { Text(L10n.tr(title)).font(CS.inter(15, .semibold)).foregroundStyle(Color.ink) }
             DatePicker("", selection: $value, displayedComponents: .hourAndMinute).datePickerStyle(.wheel).labelsHidden()
             Button(L10n.tr("Save")) {
                 let c = Calendar.current.dateComponents([.hour, .minute], from: value)
@@ -921,7 +921,7 @@ struct TimePickerSheet: View {
             }
         }
         .padding(.top, 20)
-        .preferredColorScheme(.dark)
+        .appColorScheme()
         .onAppear {
             let parts = time.split(separator: ":").compactMap { Int($0) }
             value = Calendar.current.date(bySettingHour: parts.first ?? 9, minute: parts.count > 1 ? parts[1] : 0, second: 0, of: Date()) ?? Date()
@@ -956,7 +956,7 @@ struct PlanWeekView: View {
                             .accessibilityIdentifier("weekSettings")
                     }
                     .padding(.top, 8)
-                    Text(L10n.tr("This week")).font(CS.inter(28, .bold)).foregroundStyle(.white).padding(.top, 18)
+                    Text(L10n.tr("This week")).font(CS.inter(28, .bold)).foregroundStyle(Color.ink).padding(.top, 18)
                     Text(L10n.tr(subtitle)).font(CS.inter(13)).foregroundStyle(PlanStyle.muted).padding(.top, 6)
                         .accessibilityIdentifier("weekSubtitle")
                     VStack(spacing: 8) {
@@ -994,7 +994,7 @@ struct PlanWeekView: View {
             .refreshable { await store.refresh(session: appState.session) }
         }
         .toolbar(.hidden, for: .navigationBar)
-        .preferredColorScheme(.dark)
+        .appColorScheme()
         .sheet(item: $moving) { slot in
             MoveSlotSheet(slot: slot).environmentObject(appState)
                 .presentationDetents([.height(420)])
@@ -1099,7 +1099,7 @@ struct MoveSlotSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(L10n.tr("Move \(slot.product ?? "this video")")).font(CS.inter(20, .bold)).foregroundStyle(.white).padding(.top, 24)
+            Text(L10n.tr("Move \(slot.product ?? "this video")")).font(CS.inter(20, .bold)).foregroundStyle(Color.ink).padding(.top, 24)
             DatePicker("Day", selection: $day, in: Date()..., displayedComponents: .date).accessibilityIdentifier("moveDay")
             DatePicker("Time", selection: $time, displayedComponents: .hourAndMinute).accessibilityIdentifier("moveTime")
             Button {
@@ -1120,7 +1120,7 @@ struct MoveSlotSheet: View {
             Spacer()
         }
         .padding(.horizontal, 23)
-        .preferredColorScheme(.dark)
+        .appColorScheme()
         .onAppear {
             day = PlanDay.date(slot.date) ?? Date()
             let parts = slot.time.split(separator: ":").compactMap { Int($0) }
@@ -1157,7 +1157,7 @@ struct PlanDayView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     PlanBackButton(title: "This week") { dismiss() }.padding(.top, 8)
                     Text(L10n.tr(day == store.state?.today ? "Today · \(PlanDay.short(day))" : PlanDay.short(day)))
-                        .font(CS.inter(28, .bold)).foregroundStyle(.white).padding(.top, 18)
+                        .font(CS.inter(28, .bold)).foregroundStyle(Color.ink).padding(.top, 18)
                         .accessibilityIdentifier("dayTitle")
                     let left = slots.filter { $0.postedAt == nil }.count
                     Text(L10n.tr(left == 0 ? "Everything is posted 🎉" : "\(left) video\(left == 1 ? "" : "s") to post"))
@@ -1167,7 +1167,7 @@ struct PlanDayView: View {
                         actions(slot).padding(.top, 14)
                         ForEach(slots.filter { $0.projectID != slot.projectID }) { other in
                             Text(L10n.tr("\(Int(other.time.prefix(2)) ?? 0 >= 17 ? "Tonight" : "Later") · \(PlanDay.clock(other.time))"))
-                                .font(CS.inter(14, .semibold)).foregroundStyle(.white).padding(.top, 22)
+                                .font(CS.inter(14, .semibold)).foregroundStyle(Color.ink).padding(.top, 22)
                             Button { current = other.projectID } label: { otherCard(other) }.buttonStyle(.plain)
                                 .padding(.top, 10)
                                 .accessibilityIdentifier("dayOther")
@@ -1183,7 +1183,7 @@ struct PlanDayView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
-        .preferredColorScheme(.dark)
+        .appColorScheme()
         .sheet(isPresented: Binding(get: { shareItems != nil }, set: { if !$0 { shareItems = nil } })) {
             ShareSheet(items: shareItems ?? []).ignoresSafeArea()
         }
@@ -1217,7 +1217,7 @@ struct PlanDayView: View {
                     Image(store.dot(for: slot)).resizable().frame(width: 8, height: 8)
                     Text(L10n.tr(slot.brand ?? "No product")).font(CS.inter(13, .semibold)).foregroundStyle(.white).lineLimit(1)
                 }
-                Text(L10n.tr(slot.product ?? "Video")).font(CS.inter(15, .bold)).foregroundStyle(.white).lineLimit(2).padding(.top, 3)
+                Text(L10n.tr(slot.product ?? "Video")).font(CS.inter(15, .bold)).foregroundStyle(Color.ink).lineLimit(2).padding(.top, 3)
                     .accessibilityIdentifier("dayProduct")
                 Text(PlanDay.clock(slot.time) + (reminderOn(slot) ? " · reminder on" : ""))
                     .font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan).padding(.top, 6)
@@ -1226,7 +1226,7 @@ struct PlanDayView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(L10n.tr(slot.captionSource == "user" ? "✦ YOUR CAPTION" : "✦ SUGGESTED CAPTION"))
                         .font(CS.inter(9, .bold)).foregroundStyle(CS.cyan)
-                    Text(L10n.tr(slot.caption ?? "Writing your caption…")).font(CS.inter(11)).foregroundStyle(.white)
+                    Text(L10n.tr(slot.caption ?? "Writing your caption…")).font(CS.inter(11)).foregroundStyle(Color.ink)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("dayCaption")
                     Spacer(minLength: 0)

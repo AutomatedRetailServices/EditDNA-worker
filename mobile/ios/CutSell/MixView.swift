@@ -357,9 +357,9 @@ struct MixSetupView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     ZStack {
-                        Text(L10n.tr("Mix")).font(CS.inter(18, .bold)).foregroundStyle(.white)
+                        Text(L10n.tr("Mix")).font(CS.inter(18, .bold)).foregroundStyle(Color.ink)
                         HStack {
-                            Button(action: onClose) { Text(L10n.tr("✕")).font(CS.inter(20, .medium)).foregroundStyle(.white) }
+                            Button(action: onClose) { Text(L10n.tr("✕")).font(CS.inter(20, .medium)).foregroundStyle(Color.ink) }
                                 .accessibilityIdentifier("mixClose")
                             Spacer()
                         }
@@ -420,7 +420,7 @@ struct MixSetupView: View {
             }
         }
         .animation(.easeOut(duration: 0.25), value: showingHowMany)
-        .preferredColorScheme(.dark)
+        .appColorScheme()
         .task {
             await catalog.refresh(session: appState.session, projects: appState.projects)
             if productID == nil, let first = catalog.allProducts.first { productID = first.product.productID }
@@ -792,7 +792,7 @@ struct MixProductPicker: View {
             .accessibilityIdentifier("mixProductNew")
         }
         .padding(.horizontal, 23)
-        .preferredColorScheme(.dark)
+        .appColorScheme()
         .alert(L10n.tr("New brand or product"), isPresented: $addingNew) {
             TextField(L10n.tr("Brand (e.g. CeraVe)"), text: $newBrand)
             TextField(L10n.tr("Product (e.g. Hydrating Cleanser)"), text: $newProduct)

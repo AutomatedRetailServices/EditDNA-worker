@@ -244,7 +244,7 @@ struct ProductsList: View {
 
             ForEach(brands) { brand in
                 HStack(alignment: .firstTextBaseline) {
-                    Text(brand.name).font(CS.inter(17, .bold)).foregroundStyle(.white)
+                    Text(brand.name).font(CS.inter(17, .bold)).foregroundStyle(Color.ink)
                     Spacer()
                     Text(L10n.tr("\(brand.products.count) product\(brand.products.count == 1 ? "" : "s") · \(brand.videos) video\(brand.videos == 1 ? "" : "s")"))
                         .font(CS.inter(11, .medium)).foregroundStyle(Color(hex: 0x99A3BD))
@@ -321,7 +321,7 @@ struct ProductRow: View {
             .padding(.leading, 11)
             .padding(.top, 5)
             VStack(alignment: .leading, spacing: 0) {
-                Text(product.name).font(CS.inter(14, .semibold)).foregroundStyle(.white).lineLimit(1)
+                Text(product.name).font(CS.inter(14, .semibold)).foregroundStyle(Color.ink).lineLimit(1)
                 Text(L10n.tr("\(product.videos) video\(product.videos == 1 ? "" : "s")"))
                     .font(CS.inter(11)).foregroundStyle(Color(hex: 0x99A3BD)).padding(.top, 3)
                 HStack(spacing: 10) {
@@ -408,7 +408,7 @@ struct ProductDetailView: View {
                     }
                     .padding(.top, 8)
                     HStack(alignment: .firstTextBaseline) {
-                        Text(L10n.tr(detail?.name ?? " ")).font(CS.inter(26, .bold)).foregroundStyle(.white).lineLimit(2)
+                        Text(L10n.tr(detail?.name ?? " ")).font(CS.inter(26, .bold)).foregroundStyle(Color.ink).lineLimit(2)
                             .accessibilityIdentifier("productTitle")
                         Spacer(minLength: 8)
                         Button { newName = detail?.name ?? ""; renaming = true } label: {
@@ -754,7 +754,7 @@ struct AssignProductSheet: View {
         }
         .padding(.horizontal, 23)
         .background(Color(hex: 0x0D121F).ignoresSafeArea())
-        .preferredColorScheme(.dark)
+        .appColorScheme()
         .alert(L10n.tr("New brand or product"), isPresented: $addingNew) {
             TextField(L10n.tr("Brand (e.g. CeraVe)"), text: $newBrand).accessibilityIdentifier("assignNewBrand")
             TextField(L10n.tr("Product (e.g. Hydrating Cleanser)"), text: $newProduct).accessibilityIdentifier("assignNewProduct")

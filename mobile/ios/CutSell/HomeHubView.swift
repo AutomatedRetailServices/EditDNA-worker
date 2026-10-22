@@ -146,7 +146,7 @@ struct HomeHubView: View {
                         Button { onUpload(mode) } label: {
                             Text(L10n.tr(mode.title))
                                 .font(CS.inter(12, .semibold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(Color.ink)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
                                 .background(Color(hex: 0x050814, opacity: 0.3), in: Capsule())
@@ -253,7 +253,7 @@ struct HomeHubView: View {
             .overlay(alignment: .bottomLeading) {
                 Text(CutNaming.readable(project: project))
                     .font(CS.inter(11, .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.ink)
                     .lineLimit(2)
                     .padding(8)
             }

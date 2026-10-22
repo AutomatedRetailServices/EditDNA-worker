@@ -335,7 +335,7 @@ struct GalleryPickerView: View {
                 )
             }
         }
-        .preferredColorScheme(.dark)
+        .appColorScheme()
         .task {
             if let preview {
                 mode = preview.mode
@@ -375,12 +375,12 @@ struct GalleryPickerView: View {
             ZStack {
                 Text(L10n.tr("Recents"))
                     .font(CS.inter(22, .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.ink)
                 HStack {
                     Button(action: onCancel) {
                         Image(systemName: "xmark")
                             .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(Color.ink)
                             .frame(width: 44, height: 44)
                     }
                     .accessibilityLabel(L10n.tr("Close"))
@@ -437,7 +437,7 @@ struct GalleryPickerView: View {
     private var limitedBanner: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(L10n.tr("CutSell sees only the videos you picked."))
-                .font(CS.inter(13, .medium)).foregroundStyle(.white)
+                .font(CS.inter(13, .medium)).foregroundStyle(Color.ink)
             HStack(spacing: 18) {
                 Button(L10n.tr("Select more photos")) { presentLimitedPicker() }
                     .font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
@@ -577,7 +577,7 @@ struct GalleryTileChrome: View {
                 case .check:
                     circle { Image("IconCheck").resizable().frame(width: 14, height: 14) }
                 case .number(let value):
-                    circle { Text(L10n.tr("\(value)")).font(CS.inter(12, .semibold)).foregroundStyle(.white) }
+                    circle { Text(L10n.tr("\(value)")).font(CS.inter(12, .semibold)).foregroundStyle(Color.ink) }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)

@@ -64,7 +64,7 @@ struct PlanView: View {
                     .padding(.top, 18)
 
                     HStack(alignment: .firstTextBaseline) {
-                        Text(L10n.tr("In progress")).font(CS.inter(16, .semibold)).foregroundStyle(.white)
+                        Text(L10n.tr("In progress")).font(CS.inter(16, .semibold)).foregroundStyle(Color.ink)
                         Spacer()
                         Button(L10n.tr("See all in Edits ›")) { openEdits(focus: nil) }
                             .font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan)
@@ -209,15 +209,15 @@ struct PlanView: View {
         name.locale = L10n.locale
         name.dateFormat = "EEE"
         return VStack(alignment: .leading, spacing: 0) {
-            Text(L10n.tr("This week")).font(CS.inter(16, .semibold)).foregroundStyle(.white)
+            Text(L10n.tr("This week")).font(CS.inter(16, .semibold)).foregroundStyle(Color.ink)
             HStack(spacing: 6) {
                 ForEach(Array(days.enumerated()), id: \.offset) { _, day in
                     let isToday = calendar.isDate(day, inSameDayAs: today)
                     let key = PlanDay.iso.string(from: day)
                     Button { if week.hasWeek, slots.contains(where: { $0.date == key }) { path = [.week, .day(key)] } } label: {
                         VStack(spacing: 2) {
-                            Text(name.string(from: day).replacingOccurrences(of: ".", with: "").capitalizedFirst).font(CS.inter(11, .semibold)).foregroundStyle(.white)
-                            Text(L10n.tr("\(calendar.component(.day, from: day))")).font(CS.inter(14, .bold)).foregroundStyle(.white)
+                            Text(name.string(from: day).replacingOccurrences(of: ".", with: "").capitalizedFirst).font(CS.inter(11, .semibold)).foregroundStyle(Color.ink)
+                            Text(L10n.tr("\(calendar.component(.day, from: day))")).font(CS.inter(14, .bold)).foregroundStyle(Color.ink)
                             HStack(spacing: 2) {
                                 ForEach(slots.filter { $0.date == key }.prefix(4)) { slot in
                                     Image(week.dot(for: slot)).resizable().frame(width: 6, height: 6)
@@ -243,7 +243,7 @@ struct PlanView: View {
             .padding(.top, 11)
             Button { path = week.hasWeek ? [.week] : [.goal] } label: {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(L10n.tr(cardTitle(todays: todays))).font(CS.inter(14, .semibold)).foregroundStyle(.white)
+                    Text(L10n.tr(cardTitle(todays: todays))).font(CS.inter(14, .semibold)).foregroundStyle(Color.ink)
                         .accessibilityIdentifier("planWeekCardTitle")
                     Text(L10n.tr(cardBody(slots: slots))).font(CS.inter(11)).foregroundStyle(Color(hex: 0x99A3BD))
                         .fixedSize(horizontal: false, vertical: true)

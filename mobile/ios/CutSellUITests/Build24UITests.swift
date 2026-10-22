@@ -576,6 +576,25 @@ final class Build24UITests: XCTestCase {
         done()
     }
 
+    /// Day mode (Perfil → Preferences → Appearance → Light): the main screens and every Perfil page.
+    func testLightMode() throws {
+        launchApp(fresh: true, extra: ["-CutSellProjectsMock", "-cutsell.pref.appearance", "light"])
+        pause(2)
+        shot("light_create")
+        element("tab_edits").tap(); pause(2); shot("light_edits")
+        element("tab_plan").tap(); pause(2); shot("light_plan")
+        element("tab_you").tap(); pause(1.5)
+        check(element("youOverview").waitForExistence(timeout: 10), "light: Perfil opens")
+        youTour("light")
+        // Back to Dark from Appearance: the app changes at once.
+        element("youRow_preferences").tap(); pause(1)
+        element("prefAppearance").tap(); pause(1)
+        element("appearance_dark").tap(); pause(1.5)
+        check(element("appearance_dark").isSelected, "light → Dark chosen")
+        shot("light_to_dark")
+        done()
+    }
+
     /// Overview and every You page, one screenshot each (lang = "en" / "es").
     private func youTour(_ lang: String) {
         element("tab_you").tap(); pause(1)
