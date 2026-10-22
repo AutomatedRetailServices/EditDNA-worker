@@ -99,6 +99,22 @@ from cutsell_worker.visual_finishing_policy import (
     generate_visual_finishing_plan,
 )
 
+# 22 Oct: these need mediapipe's legacy `solutions` API (pinned mediapipe==0.10.21 in requirements.cutsell.worker.txt,
+# the legacy GPU worker). Newer mediapipe (>=0.10.30) removed it. Users are cut by the simple engine, which never runs
+# this measurement (modal_cutsell_worker.py: CUTSELL_ENGINE=simple).
+def _mediapipe_has_solutions() -> bool:
+    try:
+        import mediapipe
+    except Exception:
+        return True   # the test's own importorskip handles a missing mediapipe
+    return hasattr(mediapipe, "solutions")
+
+
+pytestmark_mediapipe = pytest.mark.skipif(not _mediapipe_has_solutions(),
+                                          reason="mediapipe without the legacy solutions API (needs 0.10.21)")
+
+
+
 _WIDTH, _HEIGHT, _FPS = 160, 120, 30
 
 
@@ -796,6 +812,7 @@ def test_composition_input_is_frozen(source_clip, tmp_path):
 # Real-chain proof (skipped in this sandbox -- no cv2/mediapipe).
 # ---------------------------------------------------------------------------
 
+@pytestmark_mediapipe
 def test_full_chain_with_zero_manual_measurement_injection(source_clip, tmp_path):
     """The one true "nothing hand-constructed at all" proof: measurement
     is produced by REAL `measure_visual_clip` on real ffmpeg media, with

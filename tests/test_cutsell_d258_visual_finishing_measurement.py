@@ -48,6 +48,22 @@ from cutsell_worker.visual_finishing_measurement import (
     torso_center_from_landmark_points,
 )
 
+# 22 Oct: these need mediapipe's legacy `solutions` API (pinned mediapipe==0.10.21 in requirements.cutsell.worker.txt,
+# the legacy GPU worker). Newer mediapipe (>=0.10.30) removed it. Users are cut by the simple engine, which never runs
+# this measurement (modal_cutsell_worker.py: CUTSELL_ENGINE=simple).
+def _mediapipe_has_solutions() -> bool:
+    try:
+        import mediapipe
+    except Exception:
+        return True   # the test's own importorskip handles a missing mediapipe
+    return hasattr(mediapipe, "solutions")
+
+
+pytestmark_mediapipe = pytest.mark.skipif(not _mediapipe_has_solutions(),
+                                          reason="mediapipe without the legacy solutions API (needs 0.10.21)")
+
+
+
 _HAS_FFMPEG = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 
 
@@ -647,6 +663,7 @@ pytestmark_integration = pytest.mark.skipif(
 
 
 @pytestmark_integration
+@pytestmark_mediapipe
 def test_integration_portrait_dimensions(media_dir):
     pytest.importorskip("cv2")
     pytest.importorskip("mediapipe")
@@ -659,6 +676,7 @@ def test_integration_portrait_dimensions(media_dir):
 
 
 @pytestmark_integration
+@pytestmark_mediapipe
 def test_integration_landscape_dimensions(media_dir):
     pytest.importorskip("cv2")
     pytest.importorskip("mediapipe")
@@ -669,6 +687,7 @@ def test_integration_landscape_dimensions(media_dir):
 
 
 @pytestmark_integration
+@pytestmark_mediapipe
 def test_integration_square_dimensions(media_dir):
     pytest.importorskip("cv2")
     pytest.importorskip("mediapipe")
@@ -679,6 +698,7 @@ def test_integration_square_dimensions(media_dir):
 
 
 @pytestmark_integration
+@pytestmark_mediapipe
 def test_integration_bright_vs_dark_luma(media_dir):
     pytest.importorskip("cv2")
     pytest.importorskip("mediapipe")
@@ -692,6 +712,7 @@ def test_integration_bright_vs_dark_luma(media_dir):
 
 
 @pytestmark_integration
+@pytestmark_mediapipe
 def test_integration_no_face_on_solid_color_synthetic_clip(media_dir):
     pytest.importorskip("cv2")
     pytest.importorskip("mediapipe")
@@ -707,6 +728,7 @@ def test_integration_no_face_on_solid_color_synthetic_clip(media_dir):
 
 
 @pytestmark_integration
+@pytestmark_mediapipe
 def test_integration_short_clip(media_dir):
     pytest.importorskip("cv2")
     pytest.importorskip("mediapipe")
@@ -717,6 +739,7 @@ def test_integration_short_clip(media_dir):
 
 
 @pytestmark_integration
+@pytestmark_mediapipe
 def test_integration_identical_adjacent_clips_join(media_dir):
     pytest.importorskip("cv2")
     pytest.importorskip("mediapipe")
@@ -732,6 +755,7 @@ def test_integration_identical_adjacent_clips_join(media_dir):
 
 
 @pytestmark_integration
+@pytestmark_mediapipe
 def test_integration_different_adjacent_clips_join(media_dir):
     pytest.importorskip("cv2")
     pytest.importorskip("mediapipe")
@@ -746,6 +770,7 @@ def test_integration_different_adjacent_clips_join(media_dir):
 
 
 @pytestmark_integration
+@pytestmark_mediapipe
 def test_integration_frame_quality_evidence_optional(media_dir):
     pytest.importorskip("cv2")
     pytest.importorskip("mediapipe")
