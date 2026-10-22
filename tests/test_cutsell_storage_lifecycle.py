@@ -1,4 +1,4 @@
-"""22 Oct: server storage kept to the minimum -- 30 days after the last use (report only), restore at the same key."""
+"""22 Oct: server storage kept to the minimum -- 3 days after the last use (report only), restore at the same key."""
 import datetime as dt
 import json
 from types import SimpleNamespace
@@ -41,13 +41,13 @@ def _ts(days_ago, now):
     return dt.datetime.fromtimestamp(now - days_ago * 86400, tz=dt.timezone.utc)
 
 
-def test_only_files_unused_for_30_days_are_reported_and_opening_a_cut_counts_as_use(monkeypatch):
+def test_only_files_unused_for_3_days_are_reported_and_opening_a_cut_counts_as_use(monkeypatch):
     now = 1_800_000_000.0
     p = upload_prefix()
     s3 = FakeS3({p + "a/old.mp4": (100, _ts(40, now)), p + "a/opened.mp4": (200, _ts(40, now)),
-                 p + "a/new.mp4": (300, _ts(3, now)), "engine-ab-tests/qa.mp4": (999, _ts(400, now))})
+                 p + "a/new.mp4": (300, _ts(1, now)), "engine-ab-tests/qa.mp4": (999, _ts(400, now))})
     r = FakeRedis()
-    sl.touch([f"s3://b/{p}a/opened.mp4"], r, now=now - 2 * 86400)
+    sl.touch([f"s3://b/{p}a/opened.mp4"], r, now=now - 2 * 86400)   # opened 2 days ago: the count started again
     out = sl.candidates(s3, "b", r, now=now)
     assert out["keys"] == [p + "a/old.mp4"] and out["old_bytes"] == 100
     assert out["bucket_files"] == 3                      # QA / benchmark material is never even listed

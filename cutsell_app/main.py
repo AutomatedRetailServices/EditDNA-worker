@@ -430,7 +430,7 @@ def video_ready(project_id: str, payload: VideoReadyRequest):
 def recover_draft(project_id: str, user_id: str):
     try:
         snapshot = _hydrate_snapshot_assets(get_draft_snapshot(user_id=user_id, project_id=project_id))
-        # 22 Oct: opening a cut counts as using its stored copy (kept 30 days after the last use), and the app is told
+        # 22 Oct: opening a cut counts as using its stored copy (kept 3 days after the last use; every opening starts the count again), and the app is told
         # when a copy was removed so it can restore it from the original on the iPhone ("Restoring video…").
         from cutsell_worker import storage_lifecycle
         sources = snapshot.get("sources") or []

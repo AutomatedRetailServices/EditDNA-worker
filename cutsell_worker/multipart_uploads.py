@@ -120,7 +120,7 @@ def start_multipart_upload(
         size_bytes=size_bytes,
     )
     if restore_uri:
-        # 22 Oct (Restoring video…): the copy removed after 30 days unused is uploaded again to the SAME place,
+        # 22 Oct (Restoring video…): the copy removed after 3 days unused is uploaded again to the SAME place,
         # only inside this user's own project, and only when it is really gone.
         from .storage_lifecycle import restore_target
         key = restore_target(uri=restore_uri, user_id=user_id, project_id=project_id, bucket=target["bucket"])

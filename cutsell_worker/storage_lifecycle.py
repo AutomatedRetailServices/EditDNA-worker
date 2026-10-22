@@ -2,7 +2,7 @@
 
 - Originals and finished exports are not kept on the server (exports are made on the iPhone; the server export is a
   fallback whose file is temporary).
-- The light 1080p copy and the voice file of a cut are removed 30 days after the cut was LAST USED (opened, exported,
+- The light 1080p copy and the voice file of a cut are removed 3 days after the cut was LAST USED (opened, exported,
   cut again). The cut itself (decisions, captions, keyframes: text in Redis) is kept forever.
 - When a cut whose copy was removed is opened, the iPhone makes the copy again from the original in Photos and uploads it
   to the same place ("Restoring video…"): `restore_target` below.
@@ -22,7 +22,7 @@ from typing import Any, Iterable
 from .uploads import scoped_upload_prefix, upload_prefix
 
 LAST_USED_KEY = "cutsell:storage:last_used"
-KEEP_DAYS = 30
+KEEP_DAYS = 3
 _LOG = logging.getLogger("cutsell.storage_lifecycle")
 
 
