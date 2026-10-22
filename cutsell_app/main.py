@@ -14,6 +14,7 @@ from cutsell_app.catalog_routes import router as catalog_router
 from cutsell_app.mix_routes import router as mix_router
 from cutsell_app.plan_routes import router as plan_router
 from cutsell_app.account_me_routes import router as account_me_router
+from cutsell_app.script_routes import router as script_split_router
 from cutsell_app.feedback_routes import router as feedback_router
 from cutsell_app.job_retry_routes import router as job_retry_router
 from cutsell_app.multipart_routes import router as multipart_router
@@ -78,6 +79,7 @@ app.include_router(account_me_router)
 app.include_router(notification_router)
 app.include_router(pending_review_router)
 app.include_router(clean_audio_router)
+app.include_router(script_split_router)
 
 
 class UploadPresignRequest(BaseModel):
