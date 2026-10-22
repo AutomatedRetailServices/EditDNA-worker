@@ -1,0 +1,26 @@
+B24UI     5.9 PASS en: Script on the camera rail
+B24UI     9.2 PASS en: no script yet → the script sheet opens
+B24UI    17.5 PASS en: speed + → 1.1× · 1.1×
+B24UI    21.9 PASS en: the script shows over the camera
+B24UI    22.0 PASS en: Script is on · On
+B24UI    27.1 PASS en: tap shows ✎ · Auto-scroll · ⚙ and the frame
+B24UI    30.0 PASS en: controls hide after 2 s
+B24UI    30.9 PASS en: Speed on the rail → 1.25× · 1.25×, Speed
+B24UI    37.9 PASS en: Script off hides it
+B24UI    39.1 PASS en: Script on shows it again (script kept)
+B24UI    44.2 PASS es: Script on the camera rail
+B24UI    47.7 PASS es: no script yet → the script sheet opens
+B24UI    56.0 PASS es: speed + → 1.1× · 1.1×
+B24UI    61.1 PASS es: the script shows over the camera
+B24UI    62.3 PASS es: Script is on · Activado
+B24UI    71.8 FAIL es: tap shows ✎ · Auto-scroll · ⚙ and the frame
+B24UI    75.2 PASS es: controls hide after 2 s
+B24UI    76.5 PASS es: Speed on the rail → 1.25× · 1.25×, Velocidad
+B24UI    84.8 PASS es: Script off hides it
+B24UI    86.2 PASS es: Script on shows it again (script kept)
+B24UI    87.2 FAILURES: es: tap shows ✎ · Auto-scroll · ⚙ and the frame
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:1155: error: -[CutSellUITests.Build24UITests testTeleprompter] : XCTAssertTrue failed - es: tap shows ✎ · Auto-scroll · ⚙ and the frame
+Test Case '-[CutSellUITests.Build24UITests testTeleprompter]' failed (87.682 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-22 15:36:25.937.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-22 15:36:25.938.
+Test Suite 'Selected tests' failed at 2026-10-22 15:36:25.939.

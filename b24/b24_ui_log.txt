@@ -1,0 +1,49 @@
+B24UI     9.7 PASS en: intro shows on the first visit
+B24UI    11.2 PASS en: Skip on screen 1
+B24UI    13.2 PASS en: Skip on screen 2
+B24UI    15.2 PASS en: Skip on screen 3
+B24UI    17.1 PASS en: Skip on screen 4
+B24UI    19.5 PASS en: Get started ends on Create
+B24UI    25.8 PASS en: How to use CutSell opens the list
+B24UI    27.7 PASS en: Mix guide, 5 steps
+B24UI    61.2 PASS en: search finds Voice over
+B24UI    67.8 PASS en: Try Products now opens My videos › Products
+B24UI    75.7 PASS en: Replay intro shows the 4 screens again
+B24UI    78.0 PASS en: Skip ends on Create
+B24UI    85.3 PASS es: intro shows on the first visit
+B24UI    86.7 PASS es: Skip on screen 1
+B24UI    88.6 PASS es: Skip on screen 2
+B24UI    90.4 PASS es: Skip on screen 3
+B24UI    92.2 PASS es: Skip on screen 4
+B24UI    94.4 PASS es: Get started ends on Create
+B24UI   100.3 PASS es: How to use CutSell opens the list
+B24UI   102.6 PASS es: Mix guide, 5 steps
+B24UI   135.8 PASS es: search finds Voice over
+B24UI   142.9 PASS es: Try Products now opens My videos › Products
+B24UI   150.6 PASS es: Replay intro shows the 4 screens again
+B24UI   152.9 PASS es: Skip ends on Create
+B24UI   153.9 FAILURES: none
+B24UI     5.9 PASS en: Script on the camera rail
+B24UI     9.2 PASS en: no script yet → the script sheet opens
+B24UI    17.5 PASS en: speed + → 1.1× · 1.1×
+B24UI    21.9 PASS en: the script shows over the camera
+B24UI    22.0 PASS en: Script is on · On
+B24UI    27.1 PASS en: tap shows ✎ · Auto-scroll · ⚙ and the frame
+B24UI    30.0 PASS en: controls hide after 2 s
+B24UI    30.9 PASS en: Speed on the rail → 1.25× · 1.25×, Speed
+B24UI    37.9 PASS en: Script off hides it
+B24UI    39.1 PASS en: Script on shows it again (script kept)
+B24UI    44.2 PASS es: Script on the camera rail
+B24UI    47.7 PASS es: no script yet → the script sheet opens
+B24UI    56.0 PASS es: speed + → 1.1× · 1.1×
+B24UI    61.1 PASS es: the script shows over the camera
+B24UI    62.3 PASS es: Script is on · Activado
+B24UI    71.8 FAIL es: tap shows ✎ · Auto-scroll · ⚙ and the frame
+B24UI    75.2 PASS es: controls hide after 2 s
+B24UI    76.5 PASS es: Speed on the rail → 1.25× · 1.25×, Velocidad
+B24UI    84.8 PASS es: Script off hides it
+B24UI    86.2 PASS es: Script on shows it again (script kept)
+B24UI    87.2 FAILURES: es: tap shows ✎ · Auto-scroll · ⚙ and the frame
+B24UI    24.8 PASS light: Perfil opens
+B24UI    70.9 PASS light → Dark chosen
+B24UI    71.1 FAILURES: none
