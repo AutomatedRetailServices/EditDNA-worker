@@ -1,0 +1,12 @@
+B24UI    33.6 PASS You · Overview v2
+B24UI    85.3 PASS System Default · English · Español
+B24UI    90.6 PASS Español: re-drawn in Spanish, back on App Language
+B24UI    90.8 PASS Español is chosen
+B24UI   146.1 PASS create in Spanish · Subir videos
+B24UI   149.0 PASS edits in Spanish · Ediciones
+B24UI   152.4 PASS plan in Spanish · Plan
+B24UI   152.7 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testLanguage]' passed (153.013 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-22 01:48:55.867.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-22 01:48:55.868.
+Test Suite 'Selected tests' passed at 2026-10-22 01:48:55.868.
