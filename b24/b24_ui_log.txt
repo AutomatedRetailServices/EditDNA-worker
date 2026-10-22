@@ -1,0 +1,15 @@
+B24UI    20.8 PASS en: intro shows on the first visit
+B24UI    30.2 PASS en: no Skip on the last screen
+B24UI    33.6 PASS en: intro ends on Create
+B24UI    43.6 PASS en: How to use CutSell opens the guide
+B24UI    45.5 PASS en: a guide opens its steps
+B24UI    55.7 PASS en: Replay intro shows the 4 screens again
+B24UI    65.2 PASS en: Skip ends on Create
+B24UI    76.6 PASS es: intro shows on the first visit
+B24UI    85.0 PASS es: no Skip on the last screen
+B24UI    87.7 PASS es: intro ends on Create
+B24UI    94.8 PASS es: How to use CutSell opens the guide
+B24UI    96.9 PASS es: a guide opens its steps
+B24UI   108.6 PASS es: Replay intro shows the 4 screens again
+B24UI   111.6 PASS es: Skip ends on Create
+B24UI   112.6 FAILURES: none
