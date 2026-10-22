@@ -1,0 +1,25 @@
+B24UI    19.8 PASS en: Script on the camera rail
+B24UI    24.2 PASS en: no script yet → the script sheet opens
+B24UI    36.2 PASS en: speed + → 1.1× · 1.1×
+B24UI    41.4 PASS en: the script shows over the camera
+B24UI    41.4 PASS en: Script is on · On
+B24UI    46.8 PASS en: tap shows ✎ · Auto-scroll · ⚙ and the frame
+B24UI    49.7 PASS en: controls hide after 2 s
+B24UI    50.6 PASS en: Speed on the rail → 1.25× · 1.25×, Speed
+B24UI    58.0 PASS en: Script off hides it
+B24UI    59.2 PASS en: Script on shows it again (script kept)
+B24UI    66.6 PASS es: Script on the camera rail
+B24UI    69.9 PASS es: no script yet → the script sheet opens
+B24UI    79.4 PASS es: speed + → 1.1× · 1.1×
+B24UI    84.2 PASS es: the script shows over the camera
+B24UI    84.3 PASS es: Script is on · Activado
+B24UI    89.5 PASS es: tap shows ✎ · Auto-scroll · ⚙ and the frame
+B24UI    92.5 PASS es: controls hide after 2 s
+B24UI    93.5 PASS es: Speed on the rail → 1.25× · 1.25×, Velocidad
+B24UI   100.9 PASS es: Script off hides it
+B24UI   102.2 PASS es: Script on shows it again (script kept)
+B24UI   103.3 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testTeleprompter]' passed (103.454 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-22 16:35:21.640.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-22 16:35:21.642.
+Test Suite 'Selected tests' passed at 2026-10-22 16:35:21.643.
