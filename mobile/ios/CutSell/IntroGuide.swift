@@ -62,17 +62,15 @@ struct IntroView: View {
                     BrandLogo()
                     HStack {
                         Spacer()
-                        if !isLast {
-                            Button(action: onFinish) {
-                                Text(L10n.tr("Skip"))
-                                    .font(CS.inter(15, .semibold))
-                                    .foregroundStyle(Color(fixed: 0x99A3BD))
-                                    .frame(minWidth: 44, minHeight: 44)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("intro_skip")
-                            .padding(.trailing, 9)
+                        Button(action: onFinish) {
+                            Text(L10n.tr("Skip"))
+                                .font(CS.inter(15, .semibold))
+                                .foregroundStyle(Color(fixed: 0x99A3BD))
+                                .frame(minWidth: 44, minHeight: 44)
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("intro_skip")
+                        .padding(.trailing, 9)
                     }
                 }
                 .frame(height: 44)
@@ -501,7 +499,7 @@ struct GuidePage: View {
     private func row(_ guide: Guide) -> some View {
         Button { withAnimation(.easeOut(duration: 0.2)) { open = guide } } label: {
             HStack(spacing: 10) {
-                Text(verbatim: guide.glyph).font(CS.inter(15, .bold)).foregroundStyle(guide.gradientIcon ? Color.white : Color.ink)
+                Text(verbatim: guide.glyph).font(.system(size: 15, weight: .bold)).foregroundStyle(guide.gradientIcon ? Color.white : Color.ink)
                     .frame(width: 36, height: 36)
                     .background {
                         if guide.gradientIcon {

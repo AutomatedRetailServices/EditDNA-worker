@@ -551,7 +551,7 @@ final class Build24UITests: XCTestCase {
             for page in 1...4 {
                 pause(1.2)
                 shot("\(lang)_intro_\(page)")
-                if page == 4 { check(!element("intro_skip").exists, "\(lang): no Skip on the last screen") }
+                check(element("intro_skip").exists, "\(lang): Skip on screen \(page)")
                 element("intro_next").tap()
             }
             pause(1.5)

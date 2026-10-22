@@ -279,7 +279,7 @@ struct ProductsList: View {
                 Image("ProductsNeedDot").resizable().frame(width: 10, height: 10)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(L10n.tr("\(count) video\(count == 1 ? "" : "s") need\(count == 1 ? "s" : "") a product"))
-                        .font(CS.inter(14, .semibold)).foregroundStyle(.white)
+                        .font(CS.inter(14, .semibold)).foregroundStyle(Color.ink)
                     Text(L10n.tr("We couldn’t tell from the video")).font(CS.inter(11)).foregroundStyle(Color(hex: 0x99A3BD))
                 }
                 Spacer()
@@ -287,8 +287,10 @@ struct ProductsList: View {
             }
             .padding(.leading, 15).padding(.trailing, 16)
             .frame(height: 52)
-            .background(Color(hex: 0x1F170D), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color(hex: 0x73521F), lineWidth: 1))
+            // Day mode (Figma 1146:91): a white card with the soft shadow.
+            .background(Color(dark: 0x1F170D, light: 0xFFFFFF), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color(dark: 0x73521F, light: 0xE2E6EF), lineWidth: 1))
+            .dayCardShadow()
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("productsAssignBanner")

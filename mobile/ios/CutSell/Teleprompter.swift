@@ -108,7 +108,11 @@ final class TeleprompterStore: ObservableObject {
     }
 
     var textColor: Color { Color(fixed: Self.colors.first { $0.id == colorID }?.hex ?? 0xFFFFFF) }
-    var speedText: String { String(format: "%.1f×", speed) }
+    /// "1.0×", "1.25×", "0.75×"
+    var speedText: String {
+        let hundredths = Int((speed * 100).rounded())
+        return hundredths % 10 == 0 ? String(format: "%.1f×", speed) : String(format: "%.2f×", speed)
+    }
 
     func nextSpeed() {
         speed = Self.speeds.first { $0 > speed + 0.01 } ?? Self.speeds[0]
