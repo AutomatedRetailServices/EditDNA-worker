@@ -88,6 +88,7 @@ def start_multipart_upload(
     part_size: int = DEFAULT_PART_SIZE,
     s3=None,
     redis_client=None,
+    restore_uri: str | None = None,
 ) -> dict[str, Any]:
     if int(part_size) < 5 * 1024 * 1024:
         raise ValueError("multipart part_size must be at least 5 MiB")
@@ -98,6 +99,22 @@ def start_multipart_upload(
         content_type=content_type,
         size_bytes=size_bytes,
     )
+    if restore_uri:
+        # 22 Oct (Restoring video…): the copy removed after 30 days unused is uploaded again to the SAME place,
+        # only inside this user's own project, and only when it is really gone.
+        from .storage_lifecycle import restore_target
+        key = restore_target(uri=restore_uri, user_id=user_id, project_id=project_id, bucket=target["bucket"])
+        head_client = _s3_client(s3, region=target["region"])
+        try:
+            head_client.head_object(Bucket=target["bucket"], Key=key)
+            raise FileExistsError("the source is still stored")
+        except FileExistsError:
+            raise
+        except Exception as exc:
+            code = str(getattr(exc, "response", {}).get("Error", {}).get("Code", ""))
+            if code not in ("404", "NoSuchKey", "NotFound"):
+                raise
+        target = {**target, "object_key": key, "source_uri": restore_uri}
     resolved_part_size = int(part_size)
     part_count = int(math.ceil(target["size_bytes"] / resolved_part_size))
     if not 1 <= part_count <= MAX_PARTS:

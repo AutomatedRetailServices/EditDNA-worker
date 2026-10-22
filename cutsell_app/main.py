@@ -429,11 +429,48 @@ def video_ready(project_id: str, payload: VideoReadyRequest):
 @app.get("/v1/projects/{project_id}/draft")
 def recover_draft(project_id: str, user_id: str):
     try:
-        return _hydrate_snapshot_assets(get_draft_snapshot(user_id=user_id, project_id=project_id))
+        snapshot = _hydrate_snapshot_assets(get_draft_snapshot(user_id=user_id, project_id=project_id))
+        # 22 Oct: opening a cut counts as using its stored copy (kept 30 days after the last use), and the app is told
+        # when a copy was removed so it can restore it from the original on the iPhone ("Restoring video…").
+        from cutsell_worker import storage_lifecycle
+        sources = snapshot.get("sources") or []
+        storage_lifecycle.touch([u for source in sources if isinstance(source, dict) for u in storage_lifecycle.media_uris(source)])
+        for source in sources:
+            if isinstance(source, dict) and source.get("uri"):
+                source["available"] = _source_available(str(source["uri"]))
+        return snapshot
     except KeyError:
         raise HTTPException(status_code=404, detail="draft not found") from None
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from None
+
+
+_AVAILABLE_CACHE: dict[str, tuple[float, bool]] = {}
+
+
+def _source_available(uri: str) -> bool:
+    """Is the stored copy still there (HEAD, cached 10 minutes)? Unknown answers count as available."""
+    import time as _time
+    hit = _AVAILABLE_CACHE.get(uri)
+    if hit and _time.time() - hit[0] < 600:
+        return hit[1]
+    available = True
+    try:
+        from cutsell_worker.storage import parse_s3_uri
+        from cutsell_worker.storage_routing import current_bucket, default_client, is_not_found
+        bucket, key = parse_s3_uri(uri)
+        if bucket != current_bucket():
+            return True   # an old cut in the previous storage: never "removed" by this rule
+        try:
+            default_client().head_object(Bucket=bucket, Key=key)
+        except Exception as exc:
+            available = not is_not_found(exc)
+    except Exception:
+        available = True
+    if len(_AVAILABLE_CACHE) > 5000:
+        _AVAILABLE_CACHE.clear()
+    _AVAILABLE_CACHE[uri] = (_time.time(), available)
+    return available
 
 
 def _strip_signed_links(draft: dict[str, Any]) -> dict[str, Any]:

@@ -25,6 +25,8 @@ class MultipartStartRequest(BaseModel):
     # Optional (iOS build 21 asks for 8 MiB). Absent = the server default (16 MiB). R2/S3 minimum
     # is 5 MiB for every part but the last.
     part_size: int | None = Field(default=None, ge=5 * 1024 * 1024, le=64 * 1024 * 1024)
+    # 22 Oct: upload a removed copy again to the same place (Restoring video…).
+    restore_uri: str | None = None
 
 
 class MultipartOwnerRequest(BaseModel):
@@ -50,6 +52,8 @@ def _translate_error(exc: Exception):
     if isinstance(exc, StorageError):
         # R2's own code and message reach the app (shown in Diagnostics).
         raise HTTPException(status_code=502, detail=str(exc)) from None
+    if isinstance(exc, FileExistsError):
+        raise HTTPException(status_code=409, detail=str(exc)) from None
     if isinstance(exc, ValueError) and "already completed" in str(exc):
         raise HTTPException(status_code=409, detail=str(exc)) from None
     if isinstance(exc, KeyError):
@@ -73,6 +77,7 @@ def start_upload(payload: MultipartStartRequest):
             content_type=payload.content_type,
             size_bytes=payload.size_bytes,
             **({"part_size": payload.part_size} if payload.part_size else {}),
+            **({"restore_uri": payload.restore_uri} if payload.restore_uri else {}),
         )
     except Exception as exc:
         _translate_error(exc)
