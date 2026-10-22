@@ -87,3 +87,11 @@ def test_deepgram_gives_up_after_three_and_does_not_retry_a_bad_request(tmp_path
     with pytest.raises(RuntimeError):
         asr._post_with_retries(str(audio), [], "k", post=bad, sleep=lambda s: None)
     assert n["c"] == 1
+
+
+def test_a_video_with_nobody_talking_fails_as_no_speech():
+    from cutsell_worker.simple_engine_adapter import NoSpeechError
+    assert issubclass(NoSpeechError, ValueError)          # every caller that caught ValueError still does
+    import inspect
+    from cutsell_worker import worker_job
+    assert '"no_speech"' in inspect.getsource(worker_job)  # the app reads this code

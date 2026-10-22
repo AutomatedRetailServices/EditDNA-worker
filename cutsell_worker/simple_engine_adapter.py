@@ -32,6 +32,11 @@ from .simple_engine import process as _process
 from .simple_engine.engine import OV as _JUNCTION_OVERLAP
 from .usage_limits import check_processing_allowance
 
+
+class NoSpeechError(ValueError):
+    """Nobody can be heard in the video (22 Oct). The app says so in plain words ("We couldn't hear anyone talking in
+    this video") and offers the video for Mix, instead of "This cut needs another try"."""
+
 ENGINE_NAME = "simple"
 ProgressCallback = Callable[[str, int], None]
 
@@ -184,7 +189,7 @@ def process_with_simple_engine(
             heard = transcribe(audio_path, language_hint=request.language_hint)
             words = [w for w in heard.get("words", []) if float(w["e"]) > float(w["s"])]
             if not words:
-                raise ValueError(f"no speech found in source {source.source_asset_id}")
+                raise NoSpeechError(f"no speech found in source {source.source_asset_id}")
 
             notify("analyzing", base + int(30 / total))
             # The silence refine reads the audio decoded from the source file itself (what it was calibrated on).
