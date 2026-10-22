@@ -58,11 +58,11 @@ jobs:
               j = call("GET", f"/v1/jobs/{job['job_id']}")
               if j["state"] in ("finished", "failed", "canceled") or time.time() - t0 > 900: break
               time.sleep(5)
-          print("export:", j["state"], j.get("error"), f"{int(time.time()-t0)} s")
+          print("::notice title=kf::export:", j["state"], j.get("error"), f"{int(time.time()-t0)} s")
           res = j.get("result") or {}
           link = next((v for k, v in res.items() if isinstance(v, str) and v.startswith("https://") and (".mp4" in v or "url" in k)), None)
           if not link:
-              print("result keys:", list(res)); raise SystemExit(1)
+              print("::notice title=kf::result keys:", list(res)); raise SystemExit(1)
           out = os.path.join(os.environ["RUNNER_TEMP"], "out.mp4")
           urllib.request.urlretrieve(link, out)
           w, h = 270, 480
@@ -74,12 +74,12 @@ jobs:
               rows.append(sum(1 for v in line if v > 200) / w)
           base = sorted(rows[:6])[3]
           zoom = [r / base for r in rows]
-          print("zoom every 0.1 s:", " ".join(f"{z:.2f}" for z in zoom))
+          print("::notice title=kf::zoom every 0.1 s:", " ".join(f"{z:.2f}" for z in zoom))
           near = zoom[20:31]
-          print("around the join (2.0-3.0 s):", " ".join(f"{z:.2f}" for z in near))
+          print("::notice title=kf::around the join 2.0-3.0 s:", " ".join(f"{z:.2f}" for z in near))
           steps = [b - a for a, b in zip(zoom, zoom[1:])]
           jump = max(abs(s) for s in steps[:58])
-          print(f"max zoom {max(zoom):.2f}; biggest step 0.1 s apart: {jump:.3f}")
+          print(f"::notice title=kf::max zoom {max(zoom):.2f}; biggest step 0.1 s apart: {jump:.3f}")
           ok = max(zoom) > 1.2 and jump < 0.08 and all(s > -0.03 for s in steps[8:40])
-          print("RESULT:", "PASS (smooth through the join)" if ok else "FAIL")
+          print("::notice title=kf::RESULT:", "PASS (smooth through the join)" if ok else "FAIL")
           PY
