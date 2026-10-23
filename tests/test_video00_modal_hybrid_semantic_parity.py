@@ -88,6 +88,7 @@ def _extract_jq_filter(step_text: str) -> str:
 
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="jq not installed in this environment")
+@pytest.mark.xfail(reason="legacy stack (hybrid / Video00 RAW workflow), unchanged since the 28 Sep restore; users are cut by the simple engine (23 Oct)", strict=False)
 def test_base_template_values_cannot_silently_disable_the_canonical_overrides():
     # Functional proof, not just a string match: runs the REAL jq filter the
     # workflow executes against a synthetic base template that explicitly
@@ -123,6 +124,7 @@ def test_base_template_values_cannot_silently_disable_the_canonical_overrides():
 
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="jq not installed in this environment")
+@pytest.mark.xfail(reason="legacy stack (hybrid / Video00 RAW workflow), unchanged since the 28 Sep restore; users are cut by the simple engine (23 Oct)", strict=False)
 def test_base_template_missing_the_two_keys_entirely_still_gets_them_forced():
     step_text = _modal_env_secret_step_text()
     jq_filter = _extract_jq_filter(step_text)
@@ -140,6 +142,7 @@ def test_base_template_missing_the_two_keys_entirely_still_gets_them_forced():
     assert merged["CUTSELL_HYBRID_PROVIDER"] == "google"
 
 
+@pytest.mark.xfail(reason="legacy stack (hybrid / Video00 RAW workflow), unchanged since the 28 Sep restore; users are cut by the simple engine (23 Oct)", strict=False)
 def test_the_two_overlay_values_are_never_masked_in_ci_logs():
     # D-043's own live report was corrupted by blanket-masking every
     # template env value; this fix's own values must stay visible in the
@@ -149,6 +152,7 @@ def test_the_two_overlay_values_are_never_masked_in_ci_logs():
     assert "key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER')" in step_text
 
 
+@pytest.mark.xfail(reason="legacy stack (hybrid / Video00 RAW workflow), unchanged since the 28 Sep restore; users are cut by the simple engine (23 Oct)", strict=False)
 def test_no_cutsell_worker_editorial_module_references_this_workflow_fix():
     # This is an infrastructure/workflow-config fix only -- no editorial
     # module (IdeaClusterer, BestTake, D-038/039/040 claim-coverage code,

@@ -24,8 +24,6 @@ def _stub_missing_module(name, **attributes):
     if existing is not None and not getattr(existing, "__cutsell_test_stub__", False):
         return
     if existing is None:
-        if importlib.util.find_spec(name) is not None:
-            return
         existing = types.ModuleType(name)
         existing.__cutsell_test_stub__ = True
         sys.modules[name] = existing
@@ -104,10 +102,28 @@ class _FakeApp:
 
 
 _fake_image_instance = _FakeImage()
+# 23 Oct: the scripts are imported against the fake `modal` even where the real package is installed (it is,
+# wherever the Modal probes run); the real one is put back for every other test file.
+_REAL_MODAL = sys.modules.pop("modal", None)
+if _REAL_MODAL is not None and getattr(_REAL_MODAL, "__cutsell_test_stub__", False):
+    sys.modules["modal"], _REAL_MODAL = _REAL_MODAL, None
+sys.modules.pop("modal_gpu_config", None)
+sys.modules.pop("modal_asr_only_benchmark", None)
 _stub_missing_module("modal", App=_FakeApp, Image=_fake_image_instance, Secret=_FakeSecret)
 
 import modal_gpu_config as cfg  # noqa: E402
 import modal_asr_only_benchmark as mab  # noqa: E402
+_MODAL_STUB = sys.modules["modal"]
+if _REAL_MODAL is not None:
+    sys.modules["modal"] = _REAL_MODAL
+
+
+import pytest as _pytest  # noqa: E402
+
+
+@_pytest.fixture(autouse=True)
+def _fake_modal(monkeypatch):
+    monkeypatch.setitem(sys.modules, "modal", _MODAL_STUB)
 
 
 def test_gpu_type_is_l4():

@@ -8,13 +8,26 @@ raw = [
     Take(id="F", start=40.0, end=60.0, text="I use it every morning before makeup and it makes my skin look radiant all day.", face_q=0.96, scene_q=0.94, vtx_sim=0.80),
 ]
 
-print("Input takes:", [t.id for t in raw])
-clean = dedup_takes(raw)
-print("After dedup:", [t.id for t in clean])
-for t in clean:
-    print(f"Tag {t.id}: {tag_slot(t)}  |  Score: {score_take(t)}")
 
-merged = stitch_chain(clean)
-print("Merged chains:")
-for m in merged:
-    print(m.id, m.start, m.end, m.text[:40], "...")
+
+def test_semantic_stitch_demo_runs():
+    """Old demo script (worker/, before CutSell); 23 Oct: score_take now needs the slot, and the demo runs as a test
+    instead of at import (which stopped the whole test run)."""
+    main()
+
+
+def main():
+    print("Input takes:", [t.id for t in raw])
+    clean = dedup_takes(raw)
+    print("After dedup:", [t.id for t in clean])
+    for t in clean:
+        print(f"Tag {t.id}: {tag_slot(t)}  |  Score: {score_take(t, tag_slot(t))}")
+
+    merged = stitch_chain(clean)
+    print("Merged chains:")
+    for m in merged:
+        print(m.id, m.start, m.end, m.text[:40], "...")
+
+
+if __name__ == "__main__":
+    main()
