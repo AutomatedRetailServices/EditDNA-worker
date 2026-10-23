@@ -312,7 +312,8 @@ final class Build24UITests: XCTestCase {
         element("editorExport").tap()
         check(element("exportSettings").waitForExistence(timeout: 15), "export settings open")
         pause(2)
-        log("detected: \(element("exportDetected").label) · hint: \(element("exportResolutionHint").label) · estimate: \(element("exportEstimate").label)")
+        func text(_ id: String) -> String { element(id).exists ? element(id).label : "?" }
+        log("detected: \(text("exportDetected")) · hint: \(text("exportResolutionHint")) · estimate: \(text("exportEstimate"))")
         check(!element("exportResolution_k4").isEnabled, "4K greyed out for a 1080p original")
         shot("export_settings")
         let started = Date()

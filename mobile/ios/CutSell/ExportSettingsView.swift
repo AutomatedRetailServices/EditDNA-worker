@@ -190,7 +190,8 @@ struct ExportSettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(CS.surfaceCard, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(CS.borderDefault, lineWidth: 1))
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: "\(info.width)x\(info.height) \(info.fps)fps \(info.codec) originals:\(info.originals)"))
         .accessibilityIdentifier("exportDetected")
     }
 
