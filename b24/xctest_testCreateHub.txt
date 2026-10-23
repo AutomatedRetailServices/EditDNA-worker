@@ -1,0 +1,17 @@
+B24UI    58.6 PASS no avatar on Create
+B24UI    60.3 PASS no plan meter on Create
+B24UI    60.5 PASS no 'Create more' title
+B24UI    62.9 PASS hubRecord shown
+B24UI    64.0 PASS hubFaceless shown
+B24UI    65.0 PASS hubMix shown
+B24UI    65.9 PASS hubPlanWeek shown
+B24UI    67.6 PASS hubMode_single shown
+B24UI    69.3 PASS hubMode_bulk shown
+B24UI    71.2 PASS hubMode_combine shown
+B24UI    76.0 PASS Record opens the camera
+B24UI   105.0 PASS Faceless shows Coming soon
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:612: error: -[CutSellUITests.Build24UITests testCreateHub] : Failed to tap "hubMix" Any: Timed out while evaluating UI query.
+Test Case '-[CutSellUITests.Build24UITests testCreateHub]' failed (245.425 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-23 21:38:40.675.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-23 21:38:40.677.
+Test Suite 'Selected tests' failed at 2026-10-23 21:38:40.678.

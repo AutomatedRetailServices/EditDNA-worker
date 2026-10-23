@@ -1,13 +1,12 @@
-B24UI    13.1 Photos access allowed
-B24UI    14.4 gallery CTA: Create 1 cut
-B24UI    19.4 PASS Processing screen
-B24UI    31.3 Processing screen said Queued: true
-B24UI    39.2 busy rows: [QUEUED]
-B24UI    45.5 busy rows: [PROCESSING 21%]
-B24UI    57.6 busy rows: [PROCESSING 53%]
-B24UI    63.5 busy rows: [PROCESSING 95%]
-B24UI    69.6 busy rows: []
-B24UI    70.1 PASS busy shows Queued
-B24UI    70.1 PASS busy is never FAILED
-B24UI    70.4 PASS the cut started by itself and finished
-B24UI    70.4 FAILURES: none
+B24UI    58.6 PASS no avatar on Create
+B24UI    60.3 PASS no plan meter on Create
+B24UI    60.5 PASS no 'Create more' title
+B24UI    62.9 PASS hubRecord shown
+B24UI    64.0 PASS hubFaceless shown
+B24UI    65.0 PASS hubMix shown
+B24UI    65.9 PASS hubPlanWeek shown
+B24UI    67.6 PASS hubMode_single shown
+B24UI    69.3 PASS hubMode_bulk shown
+B24UI    71.2 PASS hubMode_combine shown
+B24UI    76.0 PASS Record opens the camera
+B24UI   105.0 PASS Faceless shows Coming soon
