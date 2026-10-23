@@ -1,9 +1,0 @@
-B24UI    11.8 Photos access allowed
-B24UI    13.1 gallery CTA: Create 1 cut
-B24UI    18.2 single 1 sent
-B24UI    28.0 gallery CTA: Create 1 cut
-B24UI    96.2 FAIL Processing screen for single 2
-Test Case '-[CutSellUITests.Build24UITests testBusyStaysQueued]' passed (96.736 seconds).
-Test Suite 'Build24UITests' passed at 2026-10-23 16:11:29.350.
-Test Suite 'CutSellUITests.xctest' passed at 2026-10-23 16:11:29.351.
-Test Suite 'Selected tests' passed at 2026-10-23 16:11:29.351.

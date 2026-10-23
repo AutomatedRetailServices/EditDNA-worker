@@ -1,5 +1,0 @@
-B24UI    11.8 Photos access allowed
-B24UI    13.1 gallery CTA: Create 1 cut
-B24UI    18.2 single 1 sent
-B24UI    28.0 gallery CTA: Create 1 cut
-B24UI    96.2 FAIL Processing screen for single 2
