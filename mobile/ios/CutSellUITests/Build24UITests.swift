@@ -626,7 +626,8 @@ final class Build24UITests: XCTestCase {
     /// White Indigo Create (Figma 1164:2): logo only (no avatar), the 2 × 2 grid and the Upload dropzone; each of the 7
     /// buttons opens the right thing (a fresh launch per button).
     func testCreateHub() throws {
-        launchApp(fresh: true, extra: ["-CutSellProjectsMock"])
+        let extra = ["-CutSellProjectsMock", "-CutSellCatalogMock"]
+        launchApp(fresh: true, extra: extra)
         pause(2)
         shot("create_hub")
         check(!element("hubAvatar").exists, "no avatar on Create")
@@ -635,33 +636,49 @@ final class Build24UITests: XCTestCase {
         for id in ["hubRecord", "hubFaceless", "hubMix", "hubPlanWeek", "hubMode_single", "hubMode_bulk", "hubMode_combine"] {
             check(element(id).exists && element(id).isHittable, "\(id) shown")
         }
-        // Record → camera with teleprompter (or its permission screen on the Simulator)
+        /// "What are you promoting?" comes first: Continue is off until a product is chosen.
+        func promote(_ name: String, detect: Bool = false) {
+            let sheet = element("promotingSheet")
+            check(sheet.waitForExistence(timeout: 10), "\(name): 'What are you promoting?' first")
+            if detect {
+                check(element("promotingDetect").exists, "\(name): Detect for me (Bulk only)")
+                element("promotingDetect").tap()
+                return
+            }
+            check(!element("promotingDetect").exists, "\(name): no Detect for me")
+            check(!element("promotingContinue").isEnabled, "\(name): Continue off without a product")
+            let row = app.descendants(matching: .any).matching(identifier: "promotingRow").firstMatch
+            check(row.waitForExistence(timeout: 10), "\(name): her products listed")
+            row.tap()
+            element("promotingContinue").tap()
+        }
         element("hubRecord").tap()
+        shot("hub_promoting")
+        promote("Record")
         check(wait(15) { self.element("recordButton").exists || self.app.staticTexts["Allow camera access"].exists
                          || self.app.staticTexts["Allow microphone access"].exists }, "Record opens the camera")
         shot("hub_record")
-        // Faceless → the flow is not built yet: the "Coming soon" notice
-        launchApp(fresh: false, extra: ["-CutSellProjectsMock"])
+        launchApp(fresh: false, extra: extra)
         element("hubFaceless").tap()
+        promote("Faceless")
         check(app.alerts["Faceless video"].waitForExistence(timeout: 10), "Faceless shows Coming soon")
         shot("hub_faceless")
-        // Sales Mix → Sales Mix · Setup
-        launchApp(fresh: false, extra: ["-CutSellProjectsMock"])
+        launchApp(fresh: false, extra: extra)
         element("hubMix").tap()
+        promote("Sales Mix")
         check(element("mixProduct").waitForExistence(timeout: 15), "Sales Mix opens Sales Mix · Setup")
         shot("hub_mix")
-        // Plan my week → Plan › Goal (or the week)
-        launchApp(fresh: false, extra: ["-CutSellProjectsMock"])
+        launchApp(fresh: false, extra: extra)
         element("hubPlanWeek").tap()
         check(wait(15) { self.element("goalStart").exists || self.element("goalTimesHelp").exists
-                         || self.element("goalCount").exists },
-              "Plan my week opens Plan my week")
+                         || self.element("goalCount").exists }, "Plan my week opens Plan my week")
         shot("hub_planweek")
-        // Single / Bulk / Combine → the gallery in that mode
         for (mode, helper) in [("single", "One video → one edit."), ("bulk", "Each video becomes a separate edit."),
                                ("combine", "One edit in the order you selected.")] {
-            launchApp(fresh: false, extra: ["-CutSellProjectsMock"])
+            launchApp(fresh: false, extra: extra)
             element("hubMode_\(mode)").tap()
+            if mode == "bulk" { shot("hub_promoting_bulk") }
+            promote(mode, detect: mode == "bulk")
             allowPhotos()
             if !app.staticTexts[helper].waitForExistence(timeout: 20) { app.swipeUp(velocity: .slow); allowPhotos() }
             check(app.staticTexts[helper].waitForExistence(timeout: 20), "\(mode) opens the gallery in \(mode)")

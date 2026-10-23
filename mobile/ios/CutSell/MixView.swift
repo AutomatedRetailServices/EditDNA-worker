@@ -443,12 +443,15 @@ struct MixSetupView: View {
         .appColorScheme()
         .task {
             await catalog.refresh(session: appState.session, projects: appState.projects)
+            // 23 Oct: the product chosen in "What are you promoting?" (else the first one).
+            if productID == nil, let chosen = PromotingChoice.current?.productID,
+               catalog.allProducts.contains(where: { $0.product.productID == chosen }) { productID = chosen }
             if productID == nil, let first = catalog.allProducts.first { productID = first.product.productID }
         }
         .sheet(isPresented: $choosingProduct) {
             MixProductPicker(selected: $productID).environmentObject(appState)
                 .presentationDetents([.height(520), .large])
-                .presentationBackground(Color(hex: 0x0D121F))
+                .presentationBackground(CS.wiPage)
         }
         .confirmationDialog(L10n.tr("Add clips"), isPresented: Binding(get: { addingTo != nil }, set: { if !$0 { addingTo = nil } })) {
             Button(L10n.tr("Choose from Photos")) { picking = addingTo; addingTo = nil }

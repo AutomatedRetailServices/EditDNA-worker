@@ -395,7 +395,7 @@ struct ProductDetailView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
                         Button { dismiss() } label: {
-                            Text(L10n.tr("‹ \(detail?.brand ?? "Products")")).font(CS.inter(16, .semibold)).foregroundStyle(CS.cyan)
+                            Text(L10n.tr("‹ \(detail?.brand ?? "Products")")).font(CS.inter(16, .semibold)).foregroundStyle(CS.accent)
                         }
                         .accessibilityIdentifier("productBack")
                         Spacer()
@@ -403,45 +403,42 @@ struct ProductDetailView: View {
                             Button(L10n.tr("Rename product")) { newName = detail?.name ?? ""; renaming = true }
                             Button(selecting ? "Done selecting" : "Select videos") { selecting.toggle(); selected = [] }
                         } label: {
-                            Text(L10n.tr("•••")).font(CS.sf(16, .semibold)).foregroundStyle(Color(hex: 0xF2F7FF))
-                                .frame(width: 34, height: 34)
-                                .background(Color(hex: 0x040813, opacity: 0.9), in: Circle())
-                                .overlay(Circle().stroke(Color(hex: 0x144080), lineWidth: 1))
+                            WIHeaderIcon(image: "WIMore")
                         }
                     }
                     .padding(.top, 8)
                     HStack(alignment: .firstTextBaseline) {
-                        Text(L10n.tr(detail?.name ?? " ")).font(CS.inter(26, .bold)).foregroundStyle(Color.ink).lineLimit(2)
+                        Text(L10n.tr(detail?.name ?? " ")).font(CS.inter(26, .heavy)).tracking(-0.52).foregroundStyle(CS.wiInk).lineLimit(2)
                             .accessibilityIdentifier("productTitle")
                         Spacer(minLength: 8)
                         Button { newName = detail?.name ?? ""; renaming = true } label: {
-                            Text(L10n.tr("✎ Rename")).font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
+                            Text(L10n.tr("✎ Rename")).font(CS.inter(13, .semibold)).foregroundStyle(CS.accent)
                         }
                         .accessibilityIdentifier("productRename")
                     }
                     .padding(.top, 12)
-                    Text(L10n.tr(subtitle)).font(CS.inter(13)).foregroundStyle(Color(hex: 0x99A3BD)).padding(.top, 4)
+                    Text(L10n.tr(subtitle)).font(CS.inter(13, .medium)).foregroundStyle(CS.wiSecondary).padding(.top, 2)
                         .accessibilityIdentifier("productSubtitle")
 
                     if route.mixID != nil {
                         mixBanner.padding(.top, 18)
                     } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            chip("all", "All \(count("all"))", width: 64)
-                            chip("ready", "Ready \(count("ready"))", width: 76)
-                            chip("drafts", "Drafts \(count("drafts"))", width: 78)
-                            chip("processing", "Processing \(count("processing"))", width: 100)
-                        }
-                    }
+                    // Figma 1213:191: full-width All · Ready · Drafts · Processing.
+                    WISegmented(items: [
+                        .init(id: "all", title: "All", count: count("all"), accessibilityID: "productFilter_all"),
+                        .init(id: "ready", title: "Ready", count: count("ready"), accessibilityID: "productFilter_ready"),
+                        .init(id: "drafts", title: "Drafts", count: count("drafts"), accessibilityID: "productFilter_drafts"),
+                        .init(id: "processing", title: "Processing", count: count("processing"),
+                              accessibilityID: "productFilter_processing"),
+                    ], selection: $filter)
                     .padding(.top, 14)
 
                     Text(L10n.tr("✦  Grouped automatically from what you said in each video."))
-                        .font(CS.inter(11, .medium)).foregroundStyle(Color(hex: 0x99A3BD))
+                        .font(CS.inter(11, .medium)).foregroundStyle(CS.wiSecondary)
                         .padding(.horizontal, 13)
                         .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
-                        .background(Color(hex: 0x121A2B), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color(hex: 0x19E5FF), lineWidth: 1))
+                        .background(CS.wiPage, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(CS.accent, lineWidth: 1))
                         .padding(.top, 12)
                     }
 
@@ -459,19 +456,19 @@ struct ProductDetailView: View {
                             }
                         } label: {
                             Text(L10n.tr(selecting ? (selected.isEmpty ? "Cancel" : "Move \(selected.count)") : "Select"))
-                                .font(CS.inter(15, .semibold)).foregroundStyle(Color.ink)
-                                .frame(width: 110, height: 50)
-                                .overlay(Capsule().stroke(Color(hex: 0x596685), lineWidth: 1))
+                                .font(CS.inter(15, .bold)).foregroundStyle(CS.wiInk)
+                                .frame(width: 110, height: 52)
+                                .background(CS.wiPage, in: Capsule())
+                                .overlay(Capsule().stroke(CS.wiInk, lineWidth: 1.5))
                         }
                         .accessibilityIdentifier("productSelect")
                         if route.mixID != nil {
                             Button { Task { await exportAll() } } label: {
                                 Text(L10n.tr(exporter.running ? "Exporting \(exporter.done + 1) of \(exporter.total)…"
                                      : "Export all \(selecting && !selected.isEmpty ? selected.count : readyMixVideos.count)"))
-                                    .font(CS.sf(15, .semibold)).foregroundStyle(.white)
-                                    .frame(maxWidth: .infinity).frame(height: 50)
+                                    .font(CS.inter(15, .bold)).foregroundStyle(.white)
+                                    .frame(maxWidth: .infinity).frame(height: 52)
                                     .background(Capsule().fill(MixStyle.cta))
-                                    .shadow(color: Color(hex: 0x1969FF).opacity(0.25), radius: 9, y: 6)
                             }
                             .disabled(readyMixVideos.isEmpty || exporter.running)
                             .opacity(readyMixVideos.isEmpty ? 0.5 : 1)
@@ -479,12 +476,9 @@ struct ProductDetailView: View {
                         } else {
                         Button { openFirstDraft() } label: {
                             Text(L10n.tr("Edit \(drafts.count) draft\(drafts.count == 1 ? "" : "s") in bulk"))
-                                .font(CS.sf(15, .semibold)).foregroundStyle(.white)
-                                .frame(maxWidth: .infinity).frame(height: 50)
-                                .background(Capsule().fill(LinearGradient(stops: [
-                                    .init(color: Color(hex: 0x1969FF), location: 0), .init(color: Color(hex: 0x7C3AED), location: 0.55),
-                                    .init(color: Color(hex: 0x19E6FF), location: 1)], startPoint: .leading, endPoint: .trailing)))
-                                .shadow(color: Color(hex: 0x1969FF).opacity(0.25), radius: 9, y: 6)
+                                .font(CS.inter(15, .bold)).foregroundStyle(.white)
+                                .frame(maxWidth: .infinity).frame(height: 52)
+                                .background(Capsule().fill(CS.accentGradient))
                         }
                         .disabled(drafts.isEmpty)
                         .opacity(drafts.isEmpty ? 0.5 : 1)
@@ -515,7 +509,8 @@ struct ProductDetailView: View {
             AssignProductSheet(request: request)
                 .environmentObject(appState)
                 .presentationDetents([.height(560), .large])
-                .presentationBackground(Color(hex: 0x0D121F))
+                .presentationBackground(CS.wiPage)
+                .presentationCornerRadius(28)
         }
         .alert(L10n.tr("CutSell"), isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
             Button(L10n.tr("OK"), role: .cancel) {}
@@ -573,7 +568,7 @@ struct ProductDetailView: View {
                 openProject = project
             }
         } label: {
-            Color(hex: 0x050A17)
+            CS.wiSurface2
                 .aspectRatio(110.0 / 160.0, contentMode: .fit)
                 .overlay {
                     if let image = thumbnails.image(for: video.projectID) {
@@ -583,7 +578,7 @@ struct ProductDetailView: View {
                 .overlay(alignment: .topLeading) {
                     if video.mixCode != nil {
                         Text(L10n.tr("SALES MIX")).font(CS.inter(9, .bold)).foregroundStyle(.white)
-                            .frame(width: 34, height: 18).background(CS.brandFull, in: Capsule()).padding(7)
+                            .fixedSize().padding(.horizontal, 7).frame(height: 18).background(CS.accent, in: Capsule()).padding(7)
                             .accessibilityIdentifier("mixBadge")
                     }
                 }
@@ -592,24 +587,24 @@ struct ProductDetailView: View {
                         Text(video.mixCode.map { video.bucket == "processing" ? "\($0) · MAKING" : $0 }
                              ?? (video.bucket == "ready" ? "READY" : video.bucket == "processing" ? "PROCESSING" : "DRAFT"))
                             .font(CS.inter(9, .bold))
-                            .foregroundStyle(video.mixCode != nil ? CS.cyan : video.bucket == "ready" ? Color(hex: 0x33D98C)
-                                             : video.bucket == "processing" ? CS.cyan : Color(hex: 0x99A3BD))
+                            .foregroundStyle(video.mixCode != nil ? Color(fixed: 0x8FB6FF) : video.bucket == "ready" ? CS.wiReady
+                                             : video.bucket == "processing" ? Color(fixed: 0x19E6FF) : Color(fixed: 0xD5DAE3))
                             .lineLimit(1).minimumScaleFactor(0.8)
                         Text(Self.length(video.durationSec)).font(CS.inter(11, .semibold)).foregroundStyle(.white)
                     }
                     .padding(.horizontal, 8)
                     .frame(maxWidth: .infinity, minHeight: video.mixCode != nil ? 42 : 36, alignment: .leading)
-                    .background(Color.black.opacity(video.mixCode != nil ? 0.6 : 0.55))
+                    .background(LinearGradient(colors: [.clear, Color(fixed: 0x0B1020, opacity: 0.7)], startPoint: .top, endPoint: .bottom))
                 }
                 .overlay(alignment: .topTrailing) {
                     if selecting {
                         Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                            .font(.system(size: 20)).foregroundStyle(isSelected ? CS.cyan : .white).padding(7)
+                            .font(.system(size: 20)).foregroundStyle(isSelected ? CS.accent : .white).padding(7)
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(isSelected ? CS.cyan : Color(hex: 0x33405C), lineWidth: isSelected ? 2 : 1))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(isSelected ? CS.accent : CS.wiBorder, lineWidth: isSelected ? 2 : 1))
         }
         .buttonStyle(.plain)
         .task { if let project { await thumbnails.load(project: project, session: appState.session) } }
@@ -676,37 +671,34 @@ struct AssignProductSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Capsule().fill(Color(hex: 0x4D5770)).frame(width: 40, height: 5).frame(maxWidth: .infinity).padding(.top, 9)
-            Text(L10n.tr("Which product is this?")).font(CS.inter(22, .bold)).foregroundStyle(Color.ink).padding(.top, 17)
-            Text(L10n.tr("\(count) video\(count == 1 ? "" : "s") selected")).font(CS.inter(13)).foregroundStyle(Color(hex: 0x99A3BD))
-                .padding(.top, 5)
+            Capsule().fill(Color(fixed: 0xD5D9E2)).frame(width: 40, height: 5).frame(maxWidth: .infinity).padding(.top, 10)
+            Text(L10n.tr("Which product is this?")).font(CS.inter(22, .heavy)).foregroundStyle(CS.wiInk).padding(.top, 17)
+            Text(L10n.tr("\(count) video\(count == 1 ? "" : "s") selected")).font(CS.inter(13, .medium)).foregroundStyle(CS.wiSecondary)
+                .padding(.top, 4)
 
             if let suggestion = request.suggestion, let label = suggestion.label {
                 HStack {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(L10n.tr("✦ SUGGESTED FROM THE VIDEO")).font(CS.inter(10, .bold)).foregroundStyle(CS.cyan)
-                        Text(L10n.tr(label)).font(CS.inter(15, .semibold)).foregroundStyle(Color.ink).lineLimit(1)
+                        Text(L10n.tr("✦ SUGGESTED FROM THE VIDEO")).font(CS.inter(10, .bold)).foregroundStyle(CS.accent)
+                        Text(L10n.tr(label)).font(CS.inter(15, .semibold)).foregroundStyle(CS.wiInk).lineLimit(1)
                     }
                     Spacer()
                     Button { Task { await move(brand: suggestion.brand, product: suggestion.product) } } label: {
                         Text(L10n.tr("Confirm")).font(CS.inter(13, .semibold)).foregroundStyle(.white)
-                            .frame(width: 78, height: 30)
-                            .background(Capsule().fill(LinearGradient(stops: [
-                                .init(color: Color(hex: 0x19E5FF), location: 0), .init(color: Color(hex: 0x1769FF), location: 0.35),
-                                .init(color: Color(hex: 0x7D3BED), location: 0.70), .init(color: Color(hex: 0xFF21D6), location: 1)],
-                                startPoint: .leading, endPoint: .trailing)))
+                            .padding(.horizontal, 14).frame(height: 30)
+                            .background(Capsule().fill(CS.accent))
                     }
                     .accessibilityIdentifier("assignConfirmSuggestion")
                 }
                 .padding(.horizontal, 14.5)
                 .frame(height: 64)
-                .background(Color(hex: 0x141C2E), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color(hex: 0x19E5FF), lineWidth: 1.5))
+                .background(Color(fixed: 0xF3F7FF), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(CS.accent, lineWidth: 1.5))
                 .padding(.top, 18)
             }
 
             Text(L10n.tr(store.allProducts.isEmpty ? "You have no products yet" : "Or choose one of your products"))
-                .font(CS.inter(12, .semibold)).foregroundStyle(Color(hex: 0x99A3BD)).padding(.top, 16)
+                .font(CS.inter(12, .medium)).foregroundStyle(CS.wiSecondary).padding(.top, 20)
 
             ScrollView {
                 VStack(spacing: 0) {
@@ -714,11 +706,12 @@ struct AssignProductSheet: View {
                         Button { chosen = item.product.productID } label: {
                             HStack(spacing: 12) {
                                 ZStack {
-                                    Image("ProductsRadio").resizable().frame(width: 20, height: 20)
-                                    if chosen == item.product.productID { Circle().fill(CS.cyan).frame(width: 10, height: 10) }
+                                    Circle().stroke(chosen == item.product.productID ? CS.accent : Color(fixed: 0xC9CFDA), lineWidth: 1.5)
+                                        .frame(width: 20, height: 20)
+                                    if chosen == item.product.productID { Circle().fill(CS.accent).frame(width: 10, height: 10) }
                                 }
                                 Text(L10n.tr("\(item.brand.name) · \(item.product.name)"))
-                                    .font(CS.inter(14, .medium)).foregroundStyle(Color.ink).lineLimit(1)
+                                    .font(CS.inter(14, .medium)).foregroundStyle(CS.wiInk).lineLimit(1)
                                 Spacer()
                             }
                             .frame(height: 45)
@@ -726,10 +719,10 @@ struct AssignProductSheet: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("assignOption_\(item.brand.name) · \(item.product.name)")
-                        Rectangle().fill(Color(hex: 0x21293B)).frame(height: 1)
+                        Rectangle().fill(CS.wiBorder).frame(height: 1)
                     }
                     Button { addingNew = true } label: {
-                        Text(L10n.tr("+  New brand or product")).font(CS.inter(14, .semibold)).foregroundStyle(CS.cyan)
+                        Text(L10n.tr("+  New brand or product")).font(CS.inter(14, .semibold)).foregroundStyle(CS.accent)
                             .frame(maxWidth: .infinity, alignment: .leading).frame(height: 40)
                     }
                     .accessibilityIdentifier("assignNew")
@@ -740,14 +733,11 @@ struct AssignProductSheet: View {
             Button { Task { await move(productID: chosen) } } label: {
                 Group {
                     if working { ProgressView().tint(.white) } else {
-                        Text(L10n.tr("Move \(count) video\(count == 1 ? "" : "s")")).font(CS.sf(15, .semibold)).foregroundStyle(.white)
+                        Text(L10n.tr("Move \(count) video\(count == 1 ? "" : "s")")).font(CS.inter(16, .bold)).foregroundStyle(.white)
                     }
                 }
-                .frame(maxWidth: .infinity).frame(height: 50)
-                .background(Capsule().fill(LinearGradient(stops: [
-                    .init(color: Color(hex: 0x1969FF), location: 0), .init(color: Color(hex: 0x7C3AED), location: 0.55),
-                    .init(color: Color(hex: 0x19E6FF), location: 1)], startPoint: .leading, endPoint: .trailing)))
-                .shadow(color: Color(hex: 0x1969FF).opacity(0.25), radius: 9, y: 6)
+                .frame(maxWidth: .infinity).frame(height: 52)
+                .background(Capsule().fill(CS.accentGradient))
             }
             .disabled(chosen == nil || working)
             .opacity(chosen == nil ? 0.55 : 1)
@@ -755,8 +745,8 @@ struct AssignProductSheet: View {
             .accessibilityIdentifier("assignMove")
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 23)
-        .background(Color(hex: 0x0D121F).ignoresSafeArea())
+        .padding(.horizontal, 20)
+        .background(CS.wiPage.ignoresSafeArea())
         .appColorScheme()
         .alert(L10n.tr("New brand or product"), isPresented: $addingNew) {
             TextField(L10n.tr("Brand (e.g. CeraVe)"), text: $newBrand).accessibilityIdentifier("assignNewBrand")

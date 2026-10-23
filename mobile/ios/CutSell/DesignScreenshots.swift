@@ -25,7 +25,7 @@ enum DesignScreenshots {
 
     /// White Indigo review set (Figma 12_Prototype): the screens the Product Owner asked to see.
     static let whiteIndigo = [
-        "hub", "edits", "edits_products", "edits_processing", "plan", "you", "processing", "processing_failed", "ready",
+        "hub", "promoting_sheet", "promoting_bulk", "edits_ready", "product_detail", "assign", "plan_goal", "plan_week", "plan_today", "edits", "edits_products", "edits_processing", "plan", "you", "processing", "processing_failed", "ready",
         "err_too_long", "err_unsupported", "err_could_not_add", "perm_camera", "gallery_single", "gallery_access", "style",
         "camera", "editor_v4_base", "editor_v4_vo_record", "welcome",
     ]
@@ -48,7 +48,8 @@ struct DesignScreenshotRoot: View {
             .appColorScheme()
             .onAppear {
                 appState.isBootstrapping = false
-                if ["edits", "hub", "edits_products", "plan", "you"].contains(screen) { appState.projects = Self.sampleProjects }
+                if ["edits", "hub", "edits_products", "plan", "you", "edits_ready", "assign", "promoting_sheet", "promoting_bulk",
+                    "product_detail"].contains(screen) { appState.projects = Self.sampleProjects }
             }
     }
 
@@ -70,6 +71,34 @@ struct DesignScreenshotRoot: View {
             .background(CS.wiPage.ignoresSafeArea())
         case "edits_processing":
             EditsProcessingPreview()
+        case "promoting_sheet", "promoting_bulk":
+            ZStack {
+                HomeHubView(onUpload: { _ in }, onRecord: {}, onOpenProject: { _ in }, selectTab: { _ in })
+                PromotingSheet(purpose: screen == "promoting_bulk" ? .upload(.bulk) : .upload(.single), onContinue: { _ in }, onClose: {})
+            }
+        case "edits_ready":
+            ProjectsView(initialTab: .ready)
+        case "product_detail":
+            ProductDetailPreview()
+        case "assign":
+            ZStack(alignment: .bottom) {
+                ProjectsView(initialTab: .products)
+                Color(fixed: 0x0B1020, opacity: 0.45).ignoresSafeArea()
+                AssignProductSheet(request: AssignRequest(projectIDs: ["a", "b", "c", "d"],
+                                                          suggestion: CatalogSuggestion(brand: "CeraVe", product: "Foaming Cleanser",
+                                                                                        category: nil, confidence: 0.8)))
+                    .frame(height: 520)
+                    .clipShape(UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28, style: .continuous))
+                    .ignoresSafeArea(edges: .bottom)
+            }
+        case "plan_goal":
+            NavigationStack { PlanGoalView(onBuilt: {}) }
+        case "plan_week":
+            NavigationStack { PlanWeekView(onNewMix: {}, onSettings: {}, onOpenDay: { _ in }) }
+                .task { try? await PlanWeekStore.shared.build(session: nil) }
+        case "plan_today":
+            NavigationStack { PlanDayView(day: PlanDay.iso.string(from: Date())) }
+                .task { try? await PlanWeekStore.shared.build(session: nil) }
         case "welcome":
             WelcomeView()
         case "edits_products":
@@ -151,6 +180,9 @@ struct DesignScreenshotRoot: View {
         }
     }
 
+    /// The first product of the in-memory catalog (-CutSellCatalogMock).
+    private static var mockProductID: String { CatalogStore.shared.allProducts.first?.product.productID ?? "prod_cerave_hydrating" }
+
     private func gallery(_ preview: GalleryPreview) -> some View {
         GalleryPickerView(onCancel: {}, onCreate: { _, _, _ in }, preview: preview)
     }
@@ -165,6 +197,21 @@ struct DesignScreenshotRoot: View {
             sourceCount: 1,
             updatedAt: nil
         )
+    }
+}
+
+/// Product detail (Figma 1213:191) on the in-memory catalog (-CutSellCatalogMock).
+private struct ProductDetailPreview: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var id: String?
+    var body: some View {
+        NavigationStack {
+            if let id { ProductDetailView(route: ProductRoute(productID: id)) } else { CS.wiPage }
+        }
+        .task {
+            await CatalogStore.shared.refresh(session: nil, projects: appState.projects)
+            id = CatalogStore.shared.allProducts.first?.product.productID
+        }
     }
 }
 

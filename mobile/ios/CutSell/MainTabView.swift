@@ -69,7 +69,7 @@ struct MainTabView: View {
                     openReady = ReadyRoute(id: toast.projectID)
                 }
                 .padding(.horizontal, 20)
-                .padding(.bottom, 110)
+                .padding(.bottom, 84)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .task(id: toast.projectID) {
                     try? await Task.sleep(nanoseconds: 6_000_000_000)
@@ -87,7 +87,7 @@ struct MainTabView: View {
                     select(.edits)
                 }
                 .padding(.horizontal, 20)
-                .padding(.bottom, 110)
+                .padding(.bottom, 84)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .task(id: text) {
                     try? await Task.sleep(nanoseconds: 8_000_000_000)

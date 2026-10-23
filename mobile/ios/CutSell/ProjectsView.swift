@@ -486,18 +486,19 @@ struct EditTile: View {
     private var isReady: Bool { project.state == "draft_ready" }
     private var isProcessing: Bool { Project.processingStates.contains(project.state) }
 
+    /// White Indigo (Figma 1213:2): 9:12 thumbnail, radius 16, green (ready) or grey dot, white "…" button.
     var body: some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(Color(hex: 0x050A17))
-            .aspectRatio(108.0 / 96.0, contentMode: .fit)
+        let image = thumbnails.image(for: project.projectID)
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .fill(CS.wiSurface2)
+            .aspectRatio(110.0 / 150.0, contentMode: .fit)
             .overlay {
-                if let image = thumbnails.image(for: project.projectID) {
+                if let image {
                     Image(uiImage: image).resizable().scaledToFill()
-                        .overlay(LinearGradient(colors: [.clear, .black.opacity(0.65)], startPoint: .center, endPoint: .bottom))
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(CS.tileBorder, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(CS.wiBorder, lineWidth: image == nil ? 1 : 0))
             .task(id: project.state) {
                 await thumbnails.load(project: project, session: appState.session)
                 if project.state == "draft_ready" {
@@ -506,26 +507,30 @@ struct EditTile: View {
             }
             .overlay(alignment: .topLeading) {
                 Circle()
-                    .fill(isReady ? CS.ready : CS.draft)
-                    .frame(width: 10, height: 10)
-                    .padding(10)
+                    .fill(isReady ? CS.wiReady : Color(fixed: 0x9AA3B5))
+                    .frame(width: 8, height: 8)
+                    .overlay(Circle().stroke(Color(fixed: 0xFFFFFF), lineWidth: 1.5))
+                    .padding(11)
             }
             .overlay(alignment: .topTrailing) {
                 if showsMenu { EditTileMenu(project: project, onDelete: onDelete) }
             }
             .overlay {
                 if isProcessing {
-                    ProgressView().tint(CS.cyan)
+                    ProgressView().tint(image == nil ? CS.accent : Color(fixed: 0xFFFFFF))
                 }
             }
             .overlay(alignment: .bottomLeading) {
-                Text(CutNaming.readable(project: project))
-                    .font(CS.inter(11, .semibold))
-                    .foregroundStyle(thumbnails.image(for: project.projectID) == nil ? Color.ink : Color.white)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                    .padding(.horizontal, 9)
-                    .padding(.bottom, 8)
+                // No thumbnail yet: its name, so the tile is never blank.
+                if image == nil {
+                    Text(CutNaming.readable(project: project))
+                        .font(CS.inter(11, .semibold))
+                        .foregroundStyle(CS.wiInk)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .padding(.horizontal, 9)
+                        .padding(.bottom, 8)
+                }
             }
             .contentShape(Rectangle())
             // .contain (not .combine): the ••• menu stays its own button for VoiceOver and the UI tests
@@ -669,11 +674,11 @@ struct EditTileMenu: View {
             Button(L10n.tr("Delete"), role: .destructive, action: onDelete)
         } label: {
             Image(systemName: "ellipsis")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(Color(fixed: 0xFFFFFF))
-                .frame(width: 26, height: 20)
-                .background(Color(fixed: 0x0B1020, opacity: 0.45), in: Capsule())
-                .frame(width: 34, height: 28)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(CS.wiInk)
+                .frame(width: 26, height: 26)
+                .background(Color(fixed: 0xFFFFFF, opacity: 0.92), in: Circle())
+                .padding(6)
                 .contentShape(Rectangle())
         }
         .accessibilityLabel(L10n.tr("Options for \(project.title)"))

@@ -61,6 +61,15 @@ final class CutSubmitter: ObservableObject {
     /// Build 26: set while the videos of one Bulk send are submitted ({"bulk_size": "3", "bulk_id": …}). Sent in each
     /// source's metadata so the server caches the cut engine's fixed instructions for that send only.
     var bulkTag: [String: String]?
+    /// 23 Oct (PO): what she is promoting ("What are you promoting?"), sent in each source's metadata and used to place
+    /// the new project in that product right away. nil = Detect for me / not asked.
+    var promoting: PromotingChoice.Pick?
+
+    /// The Bulk tag + the chosen brand / product.
+    private var tags: [String: String]? {
+        guard let promoting else { return bulkTag }
+        return (bulkTag ?? [:]).merging(promoting.metadata) { own, _ in own }
+    }
 
     /// Source metadata: the Bulk tag and the Photos album name (a free brand / product hint). nil when empty.
     static func metadata(_ bulk: [String: String]?, album: String?) -> [String: String]? {
@@ -193,6 +202,7 @@ final class CutSubmitter: ObservableObject {
                 }
                 CutSellDiagnostics.log("project_created", ["seconds": String(format: "%.1f", Date().timeIntervalSince(createStarted))])
                 createdProjectID = project.projectID
+                PromotingChoice.place(projectID: project.projectID, pick: promoting, session: session)
                 ActiveUploads.shared.insert(project.projectID)
                 currentProjectID = project.projectID
                 projectID = project.projectID
@@ -307,7 +317,7 @@ final class CutSubmitter: ObservableObject {
                     uri: result.sourceURI,
                     sourceOrder: index,
                     durationSec: video.duration,
-                    metadata: Self.metadata(bulkTag, album: video.albumHint)
+                    metadata: Self.metadata(tags, album: video.albumHint)
                 ))
             }
 
@@ -371,7 +381,7 @@ extension CutSubmitter {
             let voiceURI = try await VoiceUpload.upload(fileURL: voices[index], projectID: projectID, session: session, order: index)
             try? FileManager.default.removeItem(at: voices[index])
             sources.append(SourceInput(originalName: video.url.lastPathComponent, uri: starts[index].sourceURI,
-                                       sourceOrder: index, durationSec: video.duration, metadata: ["audio_uri": voiceURI].merging(Self.metadata(bulkTag, album: video.albumHint) ?? [:]) { own, _ in own }))
+                                       sourceOrder: index, durationSec: video.duration, metadata: ["audio_uri": voiceURI].merging(Self.metadata(tags, album: video.albumHint) ?? [:]) { own, _ in own }))
         }
         CutSellDiagnostics.log("stage_timing", ["stage": "audio_upload", "seconds": String(format: "%.1f", Date().timeIntervalSince(voiceStarted))])
         stage("Cutting your video…")

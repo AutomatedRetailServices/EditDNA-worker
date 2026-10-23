@@ -37,6 +37,9 @@ struct CreateFlowView: View {
     @State private var jobItems: [UUID] = []
     /// Bulk: "Your N videos are being edited" (Figma 1134:4635).
     @State private var bulkSheetCount: Int?
+    /// "What are you promoting?" (Figma 1215:50): open for this purpose; `promotingThen` runs after Continue.
+    @State private var promoting: PromotingPurpose?
+    @State private var promotingThen: (() -> Void)?
 
     enum AfterCamera { case gallery, job(CreateJob) }
 
@@ -55,7 +58,8 @@ struct CreateFlowView: View {
                 onMix: { showingMix = true },
                 onRecord: { showingCamera = true },
                 onOpenProject: { path.append($0) },
-                selectTab: selectTab
+                selectTab: selectTab,
+                askPromoting: ask
             )
             .onChange(of: router.pending) { _, destination in openFromGuide(destination) }
             .toolbar(.hidden, for: .navigationBar)
@@ -74,6 +78,20 @@ struct CreateFlowView: View {
                 }
             }
             .animation(.easeOut(duration: 0.25), value: bulkSheetCount)
+            .overlay {
+                if let purpose = promoting {
+                    PromotingSheet(purpose: purpose, onContinue: { pick in
+                        PromotingChoice.current = pick
+                        let then = promotingThen
+                        promoting = nil
+                        promotingThen = nil
+                        then?()
+                    }, onClose: { promoting = nil; promotingThen = nil })
+                    .transition(.opacity)
+                    .zIndex(5)
+                }
+            }
+            .animation(.easeOut(duration: 0.2), value: promoting)
             .navigationDestination(for: Project.self) { project in
                 ProjectDetailView(project: project, onOpenEdits: { selectTab(.edits) })
             }
@@ -212,15 +230,21 @@ struct CreateFlowView: View {
     }
 
     /// A guide's "Try … now" (Upload / Mix / Record / Teleprompter).
+    /// Shows "What are you promoting?" and then runs `then` (the gallery, the camera, Sales Mix…).
+    private func ask(_ purpose: PromotingPurpose, then: @escaping () -> Void) {
+        promotingThen = then
+        promoting = purpose
+    }
+
     private func openFromGuide(_ destination: AppRouter.Destination?) {
         guard let destination, [.upload, .mix, .record, .script].contains(destination) else { return }
         router.pending = nil
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 700_000_000)      // Perfil closes first
             switch destination {
-            case .upload: galleryMode = .single; showingGallery = true
-            case .mix: showingMix = true
-            case .record: showingCamera = true
+            case .upload: ask(.upload(.single)) { galleryMode = .single; showingGallery = true }
+            case .mix: ask(.salesMix) { showingMix = true }
+            case .record: ask(.record) { showingCamera = true }
             case .script: TeleprompterStore.shared.openSheetNext = true; showingCamera = true
             default: break
             }
@@ -479,6 +503,8 @@ struct CreateFlowView: View {
 
     @MainActor
     private func work(_ current: CreateJob) async throws {
+        submitter.promoting = current.promoting
+        defer { submitter.promoting = nil }
         do {
             switch current.source {
             case .recorded(let video):
@@ -533,7 +559,8 @@ struct CreateFlowView: View {
                             firstFailure = firstFailure ?? error
                             CutSellDiagnostics.log("clip_cut_failed", Retry.fields(error, ["source_order": String(index), "of": String(count)]))
                             markFailed(item, error: error,
-                                       retryJob: CreateJob(mode: .single, source: .library([asset]), style: current.style))
+                                       retryJob: CreateJob(mode: .single, source: .library([asset]), style: current.style,
+                                                           promoting: current.promoting))
                         }
                         startedInJob = index + 1
                     }
@@ -614,6 +641,8 @@ struct CreateJob: Identifiable {
     let mode: CreateMode
     let source: Source
     let style: StyleChoice
+    /// What she is promoting, chosen before this job (captured when the job is made).
+    var promoting: PromotingChoice.Pick? = PromotingChoice.current
 }
 
 /// The gallery sheet and the mode it opens in (Single / Bulk / Combine).

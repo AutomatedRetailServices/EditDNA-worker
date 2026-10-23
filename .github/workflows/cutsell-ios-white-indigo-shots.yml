@@ -87,7 +87,7 @@ jobs:
             echo "$name" > "$RUNNER_TEMP/shots/$size/DEVICE.txt"
             for s in $screens; do
               xcrun simctl terminate "$udid" "$BUNDLE" >/dev/null 2>&1 || true
-              xcrun simctl launch "$udid" "$BUNDLE" -CutSellScreen "$s" -CutSellCatalogMock >/dev/null
+              xcrun simctl launch "$udid" "$BUNDLE" -CutSellScreen "$s" -CutSellCatalogMock -CutSellPlanMock >/dev/null
               sleep 4
               xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/shots/$size/$s.png" >/dev/null 2>&1 && ok=$((ok+1))
             done

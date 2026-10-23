@@ -746,12 +746,12 @@ struct PlanGoalView: View {
                 times = Array(Set(next)).sorted().prefix(Self.maxTimes).map { $0 }
             }
             .presentationDetents([.height(edit.id >= 0 ? 380 : 330)])
-            .presentationBackground(Color(hex: 0x0D121F))
+            .presentationBackground(CS.wiPage)
         }
         .sheet(isPresented: $pickingStart) {
             StartDateSheet(day: start) { start = $0 }
                 .presentationDetents([.height(470)])
-                .presentationBackground(Color(hex: 0x0D121F))
+                .presentationBackground(CS.wiPage)
         }
         .alert(L10n.tr("CutSell"), isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
             Button(L10n.tr("OK"), role: .cancel) {}
@@ -1010,7 +1010,7 @@ struct PlanWeekView: View {
         .sheet(item: $moving) { slot in
             MoveSlotSheet(slot: slot).environmentObject(appState)
                 .presentationDetents([.height(420)])
-                .presentationBackground(Color(hex: 0x0D121F))
+                .presentationBackground(CS.wiPage)
         }
         .task { await store.refresh(session: appState.session) }
     }

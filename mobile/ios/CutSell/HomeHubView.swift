@@ -7,6 +7,8 @@ struct HomeHubView: View {
     let onRecord: () -> Void
     let onOpenProject: (Project) -> Void
     let selectTab: (MainTab) -> Void
+    /// 23 Oct (PO): "What are you promoting?" first; the action runs after Continue / Detect for me.
+    var askPromoting: (PromotingPurpose, @escaping () -> Void) -> Void = { _, then in then() }
 
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var tracker = CutTracker.shared
@@ -38,8 +40,8 @@ struct HomeHubView: View {
                         .font(CS.inter(15, .medium))
                         .foregroundStyle(CS.wiSecondary)
                         .padding(.top, 32)
-                    Text(L10n.tr("What are we selling today?"))
-                        .font(CS.inter(24, .heavy))
+                    Text(L10n.tr("What are we promoting today?"))
+                        .font(CS.inter(23, .heavy))
                         .foregroundStyle(CS.wiInk)
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
@@ -48,15 +50,17 @@ struct HomeHubView: View {
                     // 3) 2 × 2 grid (Figma 1164:40, 1195:115, 1195:103, 1164:47).
                     VStack(spacing: 8) {
                         HStack(spacing: 8) {
-                            gridTile(icon: "WIRecord", title: "Record", subtitle: "Camera + teleprompter", id: "hubRecord", action: onRecord)
+                            gridTile(icon: "WIRecord", title: "Record", subtitle: "Camera + teleprompter", id: "hubRecord") {
+                                askPromoting(.record, onRecord)
+                            }
                             gridTile(icon: "WIMic", title: "Faceless", subtitle: "Just your voice and product", id: "hubFaceless") {
                                 // The Faceless flow is not built yet: the existing "Coming soon" notice.
-                                voiceOverSoon = true
+                                askPromoting(.faceless) { voiceOverSoon = true }
                             }
                         }
                         HStack(spacing: 8) {
                             gridTile(icon: "WISalesMix", title: "Sales Mix", subtitle: "Multiple: hooks + bodies + CTAs for the same product",
-                                     id: "hubMix", action: onMix)
+                                     id: "hubMix") { askPromoting(.salesMix, onMix) }
                             gridTile(icon: "WIPlanCal", title: "Plan my week", subtitle: "Post at your times", id: "hubPlanWeek") {
                                 AppRouter.shared.pending = .planWeek
                                 selectTab(.plan)
@@ -121,7 +125,7 @@ struct HomeHubView: View {
     /// button, the title and line centred, and three blue gradient tiles (Single / Bulk / Combine).
     private var uploadCard: some View {
         VStack(spacing: 0) {
-            Button { onUpload(.single) } label: {
+            Button { askPromoting(.upload(.single)) { onUpload(.single) } } label: {
                 Image("WIUpload").renderingMode(.template).resizable()
                     .frame(width: 24, height: 24)
                     .foregroundStyle(Color(fixed: 0xFFFFFF))
@@ -160,7 +164,7 @@ struct HomeHubView: View {
 
     /// Figma 1205:115 / 122 / 130: blue gradient tile, radius 18, soft blue shadow, white icon on 20 % white.
     private func tile(_ mode: CreateMode, icon: String, subtitle: String) -> some View {
-        Button { onUpload(mode) } label: {
+        Button { askPromoting(.upload(mode)) { onUpload(mode) } } label: {
             VStack(alignment: .leading, spacing: 0) {
                 Image(icon).renderingMode(.template).resizable()
                     .frame(width: 18, height: 18)

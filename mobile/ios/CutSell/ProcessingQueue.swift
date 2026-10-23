@@ -560,22 +560,23 @@ struct ReadyToast: View {
     let onView: () -> Void
 
     var body: some View {
-        HStack(spacing: 0) {
-            Text(L10n.tr("✓  \(Self.short(name)) is ready"))
-                .font(CS.inter(13, .semibold))
-                .foregroundStyle(Color.ink)
+        // White Indigo (Figma 1213:2): white card, green check, "View" in blue.
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(CS.wiSuccess)
+                .frame(width: 22, height: 22).background(CS.wiSuccessBg, in: Circle())
+            Text(L10n.tr("\(Self.short(name)) is ready"))
+                .font(CS.inter(14, .semibold))
+                .foregroundStyle(CS.wiInk)
                 .lineLimit(1)
             Spacer(minLength: 8)
             Button(L10n.tr("View"), action: onView)
-                .font(CS.inter(13, .semibold))
-                .foregroundStyle(CS.cyan)
+                .font(CS.inter(14, .bold))
+                .foregroundStyle(CS.accent)
                 .accessibilityIdentifier("readyToastView")
         }
-        .padding(.horizontal, 14.5)
-        .frame(height: 44)
-        .background(Color(hex: 0x141F33), in: Capsule())
-        .overlay(Capsule().stroke(LinearGradient(colors: [Color(hex: 0x19E5FF), Color(hex: 0xFF21D7)],
-                                                  startPoint: .leading, endPoint: .trailing), lineWidth: 1.5))
+        .padding(.horizontal, 14)
+        .frame(height: 46)
+        .wiCard(radius: 14, fill: CS.wiPage)
         .accessibilityIdentifier("readyToast")
     }
 
@@ -595,22 +596,22 @@ struct GroupReadyToast: View {
     let onView: () -> Void
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(CS.wiSuccess)
+                .frame(width: 22, height: 22).background(CS.wiSuccessBg, in: Circle())
             Text(text)
-                .font(CS.inter(13, .semibold))
-                .foregroundStyle(Color.ink)
+                .font(CS.inter(14, .semibold))
+                .foregroundStyle(CS.wiInk)
                 .lineLimit(1).minimumScaleFactor(0.8)
             Spacer(minLength: 8)
             Button(L10n.tr("View"), action: onView)
-                .font(CS.inter(13, .semibold))
-                .foregroundStyle(CS.cyan)
+                .font(CS.inter(14, .bold))
+                .foregroundStyle(CS.accent)
                 .accessibilityIdentifier("groupToastView")
         }
-        .padding(.horizontal, 14.5)
-        .frame(height: 44)
-        .background(Color(hex: 0x141F33), in: Capsule())
-        .overlay(Capsule().stroke(LinearGradient(colors: [Color(hex: 0x19E5FF), Color(hex: 0xFF21D7)],
-                                                  startPoint: .leading, endPoint: .trailing), lineWidth: 1.5))
+        .padding(.horizontal, 14)
+        .frame(height: 46)
+        .wiCard(radius: 14, fill: CS.wiPage)
         .accessibilityIdentifier("groupToast")
     }
 }
