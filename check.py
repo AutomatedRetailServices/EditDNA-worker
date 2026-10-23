@@ -57,10 +57,38 @@ def run_phase(items):
                                                          "batch_fallbacks", "batch_wait_s", "read_tokens", "write_1h_tokens")}})
         out[name] = row
 
-# Today's server allows 2 cuts at once per user: Single + quiet first, then a Bulk of 2.
-run_phase((("single", "talk.mp4", None), ("quiet", "quiet.mp4", None)))
-bulk = {"bulk_size": "2", "bulk_id": "prodcheck-" + uuid.uuid4().hex[:6]}
-run_phase((("bulk_a", "talk.mp4", bulk), ("bulk_b", "talk.mp4", bulk)))
+# After the 23 Oct Bulk fix: a Single and a Bulk of 3 at once (each Bulk video gets its own slot) ...
+bulk = {"bulk_size": "3", "bulk_id": "prodcheck-" + uuid.uuid4().hex[:6]}
+items = (("single", "talk.mp4", None), ("bulk_a", "talk.mp4", bulk), ("bulk_b", "talk.mp4", bulk), ("bulk_c", "talk.mp4", bulk))
+started = {}
+for name, path, meta in items:
+    pid = project("Prod check " + name)
+    uri, size = upload(pid, path)
+    r = requests.post(B + "/v1/flow-b/jobs", json={"project_id": pid, "user_id": U, "sources": [
+        {"original_name": path, "uri": uri, "source_order": 0, "metadata": meta}]}, headers=H, timeout=60)
+    out[name + "_submit"] = r.status_code
+    if r.status_code < 300:
+        jobs[name] = {"pid": pid, "uri": uri, "meta": meta, "job": r.json()["job_id"], "started": time.time()}
+        started[name] = jobs[name]
+# ... and one more Single while those run: the limit must answer 429 (not 500)
+pid = project("Prod check over limit")
+uri, size = upload(pid, "talk.mp4")
+r = requests.post(B + "/v1/flow-b/jobs", json={"project_id": pid, "user_id": U, "sources": [
+    {"original_name": "talk.mp4", "uri": uri, "source_order": 0}]}, headers=H, timeout=60)
+out["over_limit_submit"] = r.status_code
+out["over_limit_body"] = r.text[:120]
+for name, j in started.items():
+    res, secs = wait(j["job"])
+    row = {"state": res.get("state"), "error": res.get("error"), "seconds": round(time.time() - j["started"])}
+    if res.get("state") == "finished":
+        d = requests.get(B + f"/v1/projects/{j['pid']}/draft", params={"user_id": U}, headers=H, timeout=60).json()
+        src = (d.get("draft", {}).get("diagnostics", {}).get("simple_engine", {}).get("sources") or [{}])[0]
+        pc = src.get("prompt_cache") or {}
+        row.update({"cut_s": src.get("cut_duration_sec"), "available_flag": [x.get("available") for x in d.get("sources", [])],
+                    "cache": {k: pc.get(k) for k in ("ttl", "cache_used", "usd", "usd_normal_api", "batch_calls",
+                                                     "batch_fallbacks", "batch_wait_s")}})
+    out[name] = row
+run_phase((("quiet", "quiet.mp4", None),))
 # restore guard: a copy that is still stored must be refused (409)
 r = requests.post(B + "/v1/uploads/multipart/start", json={"project_id": jobs["single"]["pid"], "user_id": U, "original_name": "talk.mp4",
                   "content_type": "video/mp4", "size_bytes": 15258086, "restore_uri": jobs["single"]["uri"]}, headers=H, timeout=60)
