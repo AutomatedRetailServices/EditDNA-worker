@@ -734,6 +734,8 @@ def run_flow_b_job(payload: dict) -> dict:
         # the D-272 decision/reason vocabulary in the error payload/meta
         # instead of collapsing it into the generic exception class name.
         error_code = exc.__class__.__name__
+        if error_code == "NoSpeechError":
+            error_code = "no_speech"
         if isinstance(exc, SourceFormatGateBlocked):
             error_code = exc.primary_error_code or error_code
         error_payload: dict = {"job_id": job_id, "error": error_code}

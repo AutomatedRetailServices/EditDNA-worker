@@ -112,10 +112,30 @@ def _fallback_client(fallback: FallbackStorage, client):
     return client if client is not None else fallback_client_factory(fallback)
 
 
+def _moved_copy(key: str, client=None):
+    """The current-storage client when `key` (an old-bucket object) was copied there under the same key, else None.
+    One HEAD on the current storage; any failure keeps the old Amazon read. 22 Oct: after the copy, an old cut's
+    address points to the current storage without rewriting any stored record; Amazon stays the 30-day backup."""
+    current = current_bucket()
+    if not current:
+        return None
+    primary = client if client is not None else default_client()
+    try:
+        primary.head_object(Bucket=current, Key=key)
+        return primary
+    except Exception:
+        return None
+
+
 def download(bucket: str, key: str, destination: str, *, client=None, fallback_client=None) -> str:
     """Download one object to `destination` with the routing described in the module docstring."""
     fallback = fallback_storage()
     if fallback is not None and bucket == fallback.bucket:
+        # 22 Oct (PO): her old videos were copied to the current storage under the same key; read them there first.
+        moved = _moved_copy(key, client)
+        if moved is not None:
+            moved.download_file(current_bucket(), key, str(destination))
+            return str(destination)
         _fallback_client(fallback, fallback_client).download_file(bucket, key, str(destination))
         return str(destination)
     primary = client if client is not None else default_client()
@@ -132,6 +152,9 @@ def head(bucket: str, key: str, *, client=None, fallback_client=None) -> dict:
     """head_object with the same routing (a current-bucket miss is looked up on the fallback)."""
     fallback = fallback_storage()
     if fallback is not None and bucket == fallback.bucket:
+        moved = _moved_copy(key, client)
+        if moved is not None:
+            return moved.head_object(Bucket=current_bucket(), Key=key)
         return _fallback_client(fallback, fallback_client).head_object(Bucket=bucket, Key=key)
     primary = client if client is not None else default_client()
     try:
@@ -150,6 +173,10 @@ def presigned_get(bucket: str, key: str, *, expires_in: int, client=None, fallba
     extra = dict(params or {})
     fallback = fallback_storage()
     if fallback is not None and bucket == fallback.bucket:
+        moved = _moved_copy(key, client)
+        if moved is not None:
+            return moved.generate_presigned_url(
+                "get_object", Params={"Bucket": current_bucket(), "Key": key, **extra}, ExpiresIn=int(expires_in))
         return _fallback_client(fallback, fallback_client).generate_presigned_url(
             "get_object", Params={"Bucket": bucket, "Key": key, **extra}, ExpiresIn=int(expires_in))
     primary = client if client is not None else default_client()

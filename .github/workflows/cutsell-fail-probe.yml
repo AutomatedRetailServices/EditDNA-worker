@@ -10,7 +10,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: Check
@@ -19,7 +19,7 @@ jobs:
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
         run: |
           pip install -q modal
-          timeout 1500 modal run fail_probe.py > run.log 2>&1 || echo "::warning::stopped at the time limit"
+          timeout 3300 modal run fail_probe.py > run.log 2>&1 || echo "::warning::stopped at the time limit"
           python3 - <<'PY'
           import json, os
           tail = open("run.log", errors="replace").read()[-6000:]

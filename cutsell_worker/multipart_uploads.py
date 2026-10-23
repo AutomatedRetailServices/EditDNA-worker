@@ -7,10 +7,12 @@ Redis so ownership and expected part count can be revalidated after app restarts
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import functools
 import hashlib
 import json
 import logging
 import math
+import os
 from typing import Any
 
 from .config import load_runtime_config
@@ -52,15 +54,33 @@ def _redis_client(client=None):
     config = load_runtime_config()
     if not config.redis_url:
         raise RuntimeError("REDIS_URL is required for multipart upload sessions")
+    return _cached_redis(config.redis_url)
+
+
+# 22 Oct (production): every part link built a new S3 client and a new Redis connection (~0.65 s each,
+# one at a time). A 5-minute iPhone video has ~80 parts; the phone asks for all of them and the last
+# ones waited past its 20 s limit, so the upload failed. One client per process (both are thread-safe).
+@functools.lru_cache(maxsize=4)
+def _cached_redis(url: str):
     from redis import Redis
-    return Redis.from_url(config.redis_url)
+    return Redis.from_url(url)
+
+
+_S3_ENV = ("AWS_ENDPOINT_URL", "AWS_ENDPOINT_URL_S3", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN")
+
+
+@functools.lru_cache(maxsize=8)
+def _cached_s3(region: str, _env: tuple):
+    import boto3
+    return boto3.client("s3", region_name=region)
 
 
 def _s3_client(client=None, *, region: str | None = None):
     if client is not None:
         return client
-    import boto3
-    return boto3.client("s3", region_name=region or load_runtime_config().aws_region or "us-east-1")
+    # The key carries the S3 settings boto3 reads from the environment, so a changed setting gets a new client.
+    env = tuple(hashlib.sha256((os.environ.get(k) or "").encode()).hexdigest()[:16] for k in _S3_ENV)
+    return _cached_s3(region or load_runtime_config().aws_region or "us-east-1", env)
 
 
 def _load_session(upload_id: str, *, user_id: str, project_id: str, redis_client=None) -> dict[str, Any]:
@@ -88,6 +108,7 @@ def start_multipart_upload(
     part_size: int = DEFAULT_PART_SIZE,
     s3=None,
     redis_client=None,
+    restore_uri: str | None = None,
 ) -> dict[str, Any]:
     if int(part_size) < 5 * 1024 * 1024:
         raise ValueError("multipart part_size must be at least 5 MiB")
@@ -98,6 +119,22 @@ def start_multipart_upload(
         content_type=content_type,
         size_bytes=size_bytes,
     )
+    if restore_uri:
+        # 22 Oct (Restoring video…): the copy removed after 3 days unused is uploaded again to the SAME place,
+        # only inside this user's own project, and only when it is really gone.
+        from .storage_lifecycle import restore_target
+        key = restore_target(uri=restore_uri, user_id=user_id, project_id=project_id, bucket=target["bucket"])
+        head_client = _s3_client(s3, region=target["region"])
+        try:
+            head_client.head_object(Bucket=target["bucket"], Key=key)
+            raise FileExistsError("the source is still stored")
+        except FileExistsError:
+            raise
+        except Exception as exc:
+            code = str(getattr(exc, "response", {}).get("Error", {}).get("Code", ""))
+            if code not in ("404", "NoSuchKey", "NotFound"):
+                raise
+        target = {**target, "object_key": key, "source_uri": restore_uri}
     resolved_part_size = int(part_size)
     part_count = int(math.ceil(target["size_bytes"] / resolved_part_size))
     if not 1 <= part_count <= MAX_PARTS:

@@ -27,8 +27,8 @@ def _mark(stage):
         pass
 
 
-@app.function(image=image, secrets=[secret], timeout=420, cpu=4.0, memory=8192)
-def cut(key: str, ttl: str, cache_on: bool):
+@app.function(image=image, secrets=[secret], timeout=3000, cpu=2.0, memory=4096)
+def cut(key: str, ttl: str, cache_on: bool, batch: bool = False):
     import tempfile
     from pathlib import Path
     from cutsell_worker import storage_routing as sr
@@ -49,24 +49,31 @@ def cut(key: str, ttl: str, cache_on: bool):
         words = [w for w in heard["words"] if float(w["e"]) > float(w["s"])]
         _mark(f'heard {len(words)} words')
         t0 = time.time()
-        with llm.cache_scope(cache_on, ttl=ttl):
+        with llm.cache_scope(cache_on, ttl=ttl), llm.batch_scope(batch):
             out = process(words, duration, path, video_path=None, scene_cut_list=[])
             report = llm.cache_report(out["usage"], ttl=ttl)
         _mark('engine done')
         calls = [{k: u.get(k) for k in ("step", "input_tokens", "output_tokens", "cache_read_input_tokens",
-                                        "cache_creation_input_tokens", "cache_creation", "cache_ttl")} for u in out["usage"]]
+                                        "cache_creation_input_tokens", "cache_creation", "cache_ttl", "batch", "batch_wait_s", "batch_fallback")} for u in out["usage"]]
     return {"key": key, "ttl": ttl, "cache_on": cache_on, "seconds_long": round(duration, 1), "words": len(words),
             "started_utc": time.strftime("%H:%M:%S", time.gmtime(started)), "engine_s": round(time.time() - t0, 1),
-            "cut_s": out.get("cut_duration"), "t_download": round(t_dl, 1), "t_asr": round(t_asr, 1), "report": report, "calls": calls}
+            "cut_s": out.get("cut_duration"), "total_s": round(time.time() - started, 1), "splits": [(round(x["start"], 2), round(x["end"], 2), x["visible"]) for x in out["splits"]], "t_download": round(t_dl, 1), "t_asr": round(t_asr, 1), "report": report, "calls": calls}
 
 
 @app.local_entrypoint()
 def main():
     PLAN = json.load(open("cache_plan.json"))   # read here only: the containers don't have the file
     rows = []
+    if PLAN.get("parallel"):
+        args = [(k, PLAN.get("ttl", "1h"), PLAN.get("cache_on", True), PLAN.get("batch", False)) for k in PLAN["videos"]]
+        for key, res in zip(PLAN["videos"], cut.starmap(args, return_exceptions=True)):
+            rows.append(res if isinstance(res, dict) else {"key": key, "error": str(res)[:300]})
+        PLAN["videos"] = []
+        with open("engine_check.json", "w") as f:
+            json.dump({"label": PLAN.get("label"), "rows": rows}, f, indent=1, default=str)
     for key in PLAN["videos"]:
         try:
-            rows.append(cut.remote(key, PLAN.get("ttl", "1h"), PLAN.get("cache_on", True)))
+            rows.append(cut.remote(key, PLAN.get("ttl", "1h"), PLAN.get("cache_on", True), PLAN.get("batch", False)))
         except Exception as e:
             stage = None
             try:
@@ -74,5 +81,5 @@ def main():
             except Exception:
                 pass
             rows.append({"key": key, "error": f"{e.__class__.__name__}: {str(e)[:300]}", "last_stage": stage})
-        with open("engine_check.json", "w") as f:      # written after every video (a time limit keeps the rest)
+        with open("engine_check.json", "w") as f:   # written after every video (a time limit keeps the rest)
             json.dump({"label": PLAN.get("label"), "rows": rows}, f, indent=1, default=str)
