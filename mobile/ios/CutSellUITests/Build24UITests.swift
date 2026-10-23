@@ -105,21 +105,21 @@ final class Build24UITests: XCTestCase {
         _ = element("hubUpload").waitForExistence(timeout: 60)
     }
 
-    private func pickAndCreate(mode: String, count: Int) -> Bool {
+    private func pickAndCreate(mode: String, count: Int, first: Int = 0) -> Bool {
         // A mode chip on the Home Hub opens the gallery in that mode.
         let modeChip = element("hubMode_\(mode)")
         if modeChip.waitForExistence(timeout: 10) { modeChip.tap() } else { element("hubUpload").tap() }
         allowPhotos()
         let tiles = app.descendants(matching: .any).matching(identifier: "galleryTile")
-        _ = wait(30) { tiles.count >= count }
-        guard tiles.count >= count else { check(false, "\(count) videos in the gallery", "\(tiles.count)"); return false }
+        _ = wait(30) { tiles.count >= first + count }
+        guard tiles.count >= first + count else { check(false, "\(count) videos in the gallery", "\(tiles.count)"); return false }
         if mode != "single" {
             // The chip must open the gallery in its own mode (Single's helper is "One video → one edit.").
             let openedInSingle = app.staticTexts["One video → one edit."].exists
             check(!openedInSingle, "the \(mode) chip opened the gallery in \(mode)")
             if openedInSingle { app.buttons[mode.capitalized].firstMatch.tap(); pause(0.5) }
         }
-        for index in 0..<count { tiles.element(boundBy: index).tap(); pause(0.8) }
+        for index in first..<(first + count) { tiles.element(boundBy: index).tap(); pause(0.8) }
         let create = element("galleryCreateButton")
         log("gallery CTA: \(create.label)")
         shot("gallery_\(mode)")
@@ -252,9 +252,15 @@ final class Build24UITests: XCTestCase {
         launchApp(fresh: true)
         for n in 1...3 {
             if n > 1 { element("tab_create").tap(); pause(1.5) }
-            guard pickAndCreate(mode: "single", count: 1) else { return }
+            // A different video each time (the same file being uploaded already would not start a second cut).
+            guard pickAndCreate(mode: "single", count: 1, first: n - 1) else { return }
             let cont = element("continueInBackground")
-            check(cont.waitForExistence(timeout: 30), "Processing screen for single \(n)")
+            guard cont.waitForExistence(timeout: 45) else {
+                check(false, "Processing screen for single \(n)")
+                shot("busy_no_processing_\(n)")
+                return
+            }
+            log("single \(n) sent")
             cont.tap()
             pause(1)
         }
