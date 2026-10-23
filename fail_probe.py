@@ -52,8 +52,8 @@ def cut(key: str, ttl: str, cache_on: bool):
         t0 = time.time()
         with llm.cache_scope(cache_on, ttl=ttl):
             out = process(words, duration, path, video_path=None, scene_cut_list=[])
-        _mark('engine done')
             report = llm.cache_report(out["usage"], ttl=ttl)
+        _mark('engine done')
         calls = [{k: u.get(k) for k in ("step", "input_tokens", "output_tokens", "cache_read_input_tokens",
                                         "cache_creation_input_tokens", "cache_creation", "cache_ttl")} for u in out["usage"]]
     return {"key": key, "ttl": ttl, "cache_on": cache_on, "seconds_long": round(duration, 1), "words": len(words),
