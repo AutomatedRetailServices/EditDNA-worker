@@ -225,6 +225,8 @@ def test_the_same_recording_cut_three_times_is_planned_once_newest_cut(r):
     ids = {v["project_id"] for v in videos}
     assert ids == {c, other, take2}                                   # the newest cut stands for the recording
     assert next(v for v in videos if v["project_id"] == c)["other_cuts"] == 2
+    product_catalog.assign(user, [a, b, c, take2], brand="Brand", product="Perfume")
+    product_catalog.assign(user, [other], brand="Brand", product="Water")
     week = post_plan.build_week(user, _projects(user), now=datetime(2026, 10, 19, 14, tzinfo=timezone.utc))
     assert len(week["slots"]) == 3 and not {a, b} & {s["project_id"] for s in week["slots"]}
     assert post_plan.view(user, _projects(user), now=datetime(2026, 10, 19, 14, tzinfo=timezone.utc))["summary"]["ready"] == 3
@@ -239,10 +241,12 @@ def test_a_posted_cut_retires_its_recording_and_the_week_keeps_its_cut(r):
     assert [v["project_id"] for v in videos] == [old] and videos[0]["posted_at"]   # posted: never planned again
     user = "u5"
     old = _cut_of(r, user, "p1", PERFUME, created="2026-10-17T10:00:00Z")
+    product_catalog.assign(user, [old], brand="Brand", product="Perfume")
     now = datetime(2026, 10, 19, 14, tzinfo=timezone.utc)
     week = post_plan.build_week(user, _projects(user), now=now)
     assert [s["project_id"] for s in week["slots"]] == [old]
     newer = _cut_of(r, user, "p2", PERFUME, keep=[0], created="2026-10-20T10:00:00Z")
+    product_catalog.assign(user, [newer], brand="Brand", product="Perfume")
     week = post_plan.build_week(user, _projects(user), now=now)
     assert [s["project_id"] for s in week["slots"]] == [old]          # the cut already planned stays; no twin added
 
@@ -379,3 +383,15 @@ def test_the_api_gives_one_videos_caption_and_posted_state(monkeypatch, r):
     client.post("/v1/plan/posted", json={"user_id": "u1", "project_id": ids["single1"]})
     assert client.get("/v1/plan/video", params={"user_id": "u1", "project_id": ids["single1"]}).json()["posted_at"]
     assert client.get("/v1/plan/video", params={"user_id": "u1", "project_id": "nope"}).status_code == 404
+
+
+def test_a_video_without_a_product_stays_out_of_the_plan_until_assigned(r):
+    user = "u6"
+    loose = _cut_of(r, user, "p1", PERFUME, created="2026-10-17T10:00:00Z")
+    now = datetime(2026, 10, 19, 14, tzinfo=timezone.utc)
+    assert post_plan.build_week(user, _projects(user), now=now)["slots"] == []
+    product_catalog.assign(user, [loose], brand="CeraVe", product="Cream")
+    slots = post_plan.build_week(user, _projects(user), now=now)["slots"]
+    assert [s["project_id"] for s in slots] == [loose]
+    view = post_plan.view(user, _projects(user), now=now)
+    assert view["week"]["slots"][0]["brand"] == "CeraVe" and view["week"]["slots"][0]["product"] == "Cream"

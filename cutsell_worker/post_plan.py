@@ -495,7 +495,9 @@ def today_for(prefs: dict, now: Optional[datetime] = None) -> date:
 
 def build_week(user_id: str, projects: list[dict], *, client=None, now: Optional[datetime] = None) -> dict:
     plan = load(user_id, client=client)
-    videos = candidates(user_id, projects, client=client, plan=plan)
+    # 23 Oct (PO): only videos with a brand / product are planned (spread by product, "Brand · Product" in This week
+    # and Today); a video without one stays out until it is assigned.
+    videos = [v for v in candidates(user_id, projects, client=client, plan=plan) if v.get("product_id")]
     today = today_for(plan["prefs"], now)
     previous = (plan.get("week") or {})
     if plan["prefs"].get("times"):                       # Goal v2 (flexible): her count, times, days and start
