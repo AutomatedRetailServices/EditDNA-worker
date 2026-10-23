@@ -1,12 +1,19 @@
-B24UI    58.6 PASS no avatar on Create
-B24UI    60.3 PASS no plan meter on Create
-B24UI    60.5 PASS no 'Create more' title
-B24UI    62.9 PASS hubRecord shown
-B24UI    64.0 PASS hubFaceless shown
-B24UI    65.0 PASS hubMix shown
-B24UI    65.9 PASS hubPlanWeek shown
-B24UI    67.6 PASS hubMode_single shown
-B24UI    69.3 PASS hubMode_bulk shown
-B24UI    71.2 PASS hubMode_combine shown
-B24UI    76.0 PASS Record opens the camera
-B24UI   105.0 PASS Faceless shows Coming soon
+B24UI    23.3 PASS no avatar on Create
+B24UI    23.7 PASS no plan meter on Create
+B24UI    23.7 PASS no 'Create more' title
+B24UI    24.0 PASS hubRecord shown
+B24UI    24.2 PASS hubFaceless shown
+B24UI    24.4 PASS hubMix shown
+B24UI    24.7 PASS hubPlanWeek shown
+B24UI    25.1 PASS hubMode_single shown
+B24UI    25.5 PASS hubMode_bulk shown
+B24UI    25.9 PASS hubMode_combine shown
+B24UI    27.5 PASS Record opens the camera
+B24UI    35.8 PASS Faceless shows Coming soon
+B24UI    47.3 PASS Sales Mix opens Sales Mix · Setup
+B24UI    54.0 PASS Plan my week opens Plan my week
+B24UI    66.3 Photos access allowed
+B24UI    68.5 PASS single opens the gallery in single
+B24UI    80.0 PASS bulk opens the gallery in bulk
+B24UI    93.5 PASS combine opens the gallery in combine
+B24UI    93.7 FAILURES: none
