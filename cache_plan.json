@@ -1,1 +1,3 @@
-{"label": "probe: 1 video, size check", "ttl": "1h", "cache_on": true, "videos": ["Editdna good videos/good videos19.mp4"]}
+{"label": "5 videos back to back (1h cache: few videos in the last hour)", "ttl": "1h", "cache_on": true,
+ "videos": ["Editdna good videos/good videos1.mp4", "Editdna good videos/good videos2.mp4", "Editdna good videos/good videos3.mp4",
+            "Editdna good videos/good videos4.mp4", "Editdna good videos/good videos5.mp4"]}
