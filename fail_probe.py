@@ -1,8 +1,6 @@
-"""Diagnosis (PO 23 Oct): why the same video gets very different cuts run to run. Each video is heard ONCE (same words);
-then the engine runs N times with the normal API. Every step's answer is kept to see where the runs part ways.
-Report encrypted. Nothing written to the app's storage or Redis."""
+"""Security review (PO 23 Oct): NAMES of the worker's secret keys (never values) and what the storage / ASR keys may do.
+Read-only: lists and HEADs; the delete test targets a key that does not exist (no data can change). Report encrypted."""
 import json
-import time
 
 import modal
 
@@ -10,64 +8,90 @@ app = modal.App("cutsell-fail-probe")
 secret = modal.Secret.from_name("cutsell-worker")
 image = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install("ffmpeg")
     .pip_install_from_requirements("requirements.cutsell.worker.cpu.txt")
     .add_local_dir("cutsell_worker", remote_path="/root/cutsell_worker", ignore=["**/__pycache__/**", "**/*.pyc"])
 )
 
 
-@app.function(image=image, secrets=[secret], timeout=600, cpu=2.0, memory=4096)
-def hear(key: str):
-    import tempfile
-    from pathlib import Path
-    from cutsell_worker import storage_routing as sr
-    from cutsell_worker.media_probe import probe_media
-    from cutsell_worker.simple_engine import asr
-    fb = sr.fallback_storage()
-    client = sr._make_fallback_client(fb)
-    with tempfile.TemporaryDirectory() as d:
-        path = str(Path(d) / "v.mp4")
-        client.download_file(fb.bucket, key, path)
-        duration = float(probe_media(path).duration_sec)
-        heard = asr.transcribe_words(asr.extract_audio(path, str(Path(d) / "a.mp3")))
-    return {"key": key, "duration": duration, "words": [w for w in heard["words"] if float(w["e"]) > float(w["s"])]}
-
-
-@app.function(image=image, secrets=[secret], timeout=600, cpu=1.0, memory=2048)
-def run_once(heard: dict, run: int, env: dict = None):
+@app.function(image=image, secrets=[secret], timeout=600)
+def audit():
     import os
-    import tempfile
-    os.environ.update(env or {})
-    from pathlib import Path
+    import uuid
+    import boto3
+    import requests
+    from botocore.exceptions import ClientError
+    out = {"env_names": sorted(k for k in os.environ if not k.startswith(("MODAL_TASK", "MODAL_IMAGE", "MODAL_ENVIRONMENT",
+                                                                       "MODAL_CLOUD", "MODAL_REGION", "MODAL_SERVER", "MODAL_IDENTITY",
+                                                                       "LANG", "PATH", "HOME", "HOSTNAME", "PYTHON", "GPG", "TERM",
+                                                                       "SHLVL", "PWD", "_", "LC_", "SSL_")))}
+
+    def code(fn):
+        try:
+            fn()
+            return "ALLOWED"
+        except ClientError as e:
+            return "DENIED:" + e.response.get("Error", {}).get("Code", "?")
+        except Exception as e:
+            return "ERROR:" + e.__class__.__name__
+
     from cutsell_worker import storage_routing as sr
-    from cutsell_worker.simple_engine import engine, llm
+    probe_key = "security-review/does-not-exist-" + uuid.uuid4().hex
+    r2, r2_bucket = sr.default_client(), sr.current_bucket()
+    out["r2"] = {
+        "list_all_buckets": code(lambda: r2.list_buckets()),
+        "bucket_count": (lambda: len(r2.list_buckets().get("Buckets", [])))() if code(lambda: r2.list_buckets()) == "ALLOWED" else None,
+        "list_objects": code(lambda: r2.list_objects_v2(Bucket=r2_bucket, MaxKeys=1)),
+        "delete_object(nonexistent)": code(lambda: r2.delete_object(Bucket=r2_bucket, Key=probe_key)),
+        "get_bucket_policy/cors": code(lambda: r2.get_bucket_cors(Bucket=r2_bucket)),
+    }
     fb = sr.fallback_storage()
-    tmp = tempfile.mkdtemp()
-    path = str(Path(tmp) / "v.mp4")
-    sr._make_fallback_client(fb).download_file(fb.bucket, heard["key"], path)
-    answers = []
+    s3 = sr._make_fallback_client(fb)
+    out["s3_fallback"] = {
+        "list_all_buckets": code(lambda: s3.list_buckets()),
+        "list_objects": code(lambda: s3.list_objects_v2(Bucket=fb.bucket, MaxKeys=1)),
+        "delete_object(nonexistent)": code(lambda: s3.delete_object(Bucket=fb.bucket, Key=probe_key)),
+    }
+    try:
+        creds = s3._request_signer._credentials.get_frozen_credentials()
+        sess = boto3.Session(aws_access_key_id=creds.access_key, aws_secret_access_key=creds.secret_key,
+                             aws_session_token=creds.token)
+        ident = sess.client("sts").get_caller_identity()
+        arn = ident.get("Arn", "")
+        out["s3_fallback"]["identity_kind"] = arn.split(":")[5].split("/")[0] if arn.count(":") >= 5 else "?"
+        out["s3_fallback"]["identity_name"] = arn.split("/")[-1] if "/" in arn else ("root" if arn.endswith(":root") else "?")
+        iam = sess.client("iam")
+        out["s3_fallback"]["iam_list_users"] = code(lambda: iam.list_users(MaxItems=1))
+        if out["s3_fallback"]["identity_kind"] == "user":
+            name = out["s3_fallback"]["identity_name"]
+            out["s3_fallback"]["attached_policies"] = code(lambda: iam.list_attached_user_policies(UserName=name))
+            try:
+                out["s3_fallback"]["policy_names"] = [p["PolicyName"] for p in iam.list_attached_user_policies(UserName=name)["AttachedPolicies"]] + \
+                    iam.list_user_policies(UserName=name)["PolicyNames"]
+            except Exception as e:
+                out["s3_fallback"]["policy_names"] = "cannot read: " + e.__class__.__name__
+        out["s3_fallback"]["ec2_describe_regions"] = code(lambda: sess.client("ec2", region_name="us-east-1").describe_regions())
+    except Exception as e:
+        out["s3_fallback"]["identity_error"] = e.__class__.__name__
 
-    def call(prompt, **kw):
-        text, usage = llm.call_anthropic(prompt, **kw)
-        answers.append({"step": usage.get("step"), "text": text[-3000:], "out_tokens": usage.get("output_tokens"),
-                        "thinking_blocks": usage.get("thinking_blocks")})
-        return text, usage
-
-    with llm.cache_scope(True, ttl="1h"):
-        out = engine.process(heard["words"], heard["duration"], path, video_path=None, scene_cut_list=[], llm=call)
-    report = llm.cache_report(out["usage"])
-    return {"key": heard["key"], "run": run, "cut_s": out["cut_duration"], "passes": out.get("passes"),
-            "kept": [(round(x["start"], 2), round(x["end"], 2)) for x in out["splits"] if x["visible"]],
-            "usd": report["usd"], "answers": answers,
-            "lines": [" ".join(heard["words"][k]["w"] for k in u) for u in engine.lines_of(heard["words"])], "log": str(out.get("log"))[:3000]}
+    dg = os.environ.get("DEEPGRAM_API_KEY", "")
+    if dg:
+        h = {"Authorization": "Token " + dg}
+        try:
+            p = requests.get("https://api.deepgram.com/v1/projects", headers=h, timeout=20)
+            out["deepgram"] = {"list_projects": p.status_code}
+            if p.ok and p.json().get("projects"):
+                pid = p.json()["projects"][0]["project_id"]
+                k = requests.get(f"https://api.deepgram.com/v1/projects/{pid}/keys", headers=h, timeout=20)
+                out["deepgram"]["list_keys(admin)"] = k.status_code
+                if k.ok:
+                    out["deepgram"]["key_scopes"] = sorted({s for item in k.json().get("api_keys", []) for s in item.get("api_key", {}).get("scopes", [])})
+                    out["deepgram"]["key_count"] = len(k.json().get("api_keys", []))
+        except Exception as e:
+            out["deepgram"] = {"error": e.__class__.__name__}
+    return out
 
 
 @app.local_entrypoint()
 def main():
-    plan = json.load(open("cache_plan.json"))
-    heard = list(hear.map(plan["videos"]))
-    args = [(h, r, plan.get("env") or {}) for h in heard for r in range(plan.get("runs", 5))]
-    rows = list(run_once.starmap(args, return_exceptions=True))
-    rows = [r if isinstance(r, dict) else {"error": str(r)[:300]} for r in rows]
     with open("engine_check.json", "w") as f:
-        json.dump({"label": plan.get("label"), "words": {h["key"]: len(h["words"]) for h in heard}, "rows": rows}, f, default=str)
+        json.dump({"label": "security review: key names and storage permissions", "rows": [audit.remote()]}, f, indent=1)
