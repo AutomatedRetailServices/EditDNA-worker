@@ -1,4 +1,0 @@
-ffmpeg
-libass9
-fontconfig
-fonts-dejavu-core

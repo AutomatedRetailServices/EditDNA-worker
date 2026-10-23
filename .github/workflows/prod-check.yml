@@ -1,0 +1,50 @@
+name: CutSell production check (test user)
+
+on:
+  push:
+    branches: ['probe/prod-check']
+permissions:
+  contents: write
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check
+        run: |
+          sudo apt-get -qq update && sudo apt-get -qq install -y espeak-ng ffmpeg > /dev/null
+          T="Hola a todas. Hoy les quiero mostrar mi botella de agua favorita. Mantiene el agua fría veinticuatro horas. Es de acero y no suda. Está en oferta en mi tienda, toquen el enlace y llévensela hoy."
+          espeak-ng -v es -s 150 -w s.wav "$T $T"
+          ffmpeg -loglevel error -y -f lavfi -i "testsrc2=s=1080x1920:r=30:d=30" -i s.wav -af apad -t 30 -c:v libx264 -preset ultrafast -b:v 4M -pix_fmt yuv420p -c:a aac -shortest talk.mp4
+          ffmpeg -loglevel error -y -f lavfi -i "testsrc2=s=1080x1920:r=30:d=25" -f lavfi -i "anoisesrc=a=0.003:c=pink:d=25" -c:v libx264 -preset ultrafast -b:v 4M -pix_fmt yuv420p -c:a aac -t 25 quiet.mp4
+          pip install -q requests
+          timeout 2700 python3 check.py > run.log 2>&1 || true
+          python3 - <<'PY'
+          import json, os
+          data = json.load(open("engine_check.json")) if os.path.exists("engine_check.json") else {}
+          data["_run_log_tail"] = open("run.log", errors="replace").read()[-4000:]
+          json.dump(data, open("engine_check.json", "w"))
+          PY
+          cat > pub.pem <<'KEY'
+          -----BEGIN PUBLIC KEY-----
+          MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAlZotqgbNtP3sdy7aLID+
+          hfV4kr/wkxz3Evj/XL38P1kN5yHdVir9cA6+Z6zGgAcQNZMkH/0bin2YDP3q0lHu
+          V0Uerd9Ve1sOwlboAFNsSckwLlsQtqdu7pjaMLrca/UEWwIxAb/qXHylz0hWCp2/
+          GptQiimIrFXKvzP+0n8VGMCWtotEy7vo0AYI3PrQcEOckxaT3D3LXi57xWBHCttN
+          p5INocwT5zPZv1MVcTVTLflmeJBOf/BDqt7RDjFYJUdG2x7yIjx8zX6nVFu1eUGK
+          uY7y+GG0c7hu15z8jo0BEmrX4K+cxcoE1RkHC0JZqZgP7AXcyRG872O+eUhBnkBQ
+          fKsnJdBP5gaJLuDWKUBuntieToIzffdsKcFu+TkBIcQYLCAPdzow7A2vJIwLkq05
+          IcuTFW7QnhaEUSRVVjdOpRfTfWPBMOQrYVMqKdIH52rffHzbPXz9rAfH0DbdUKiy
+          t/jFjuLTfXSCOf38FIwbGAVucr2UxCryul+yNuRGqEhzAgMBAAE=
+          -----END PUBLIC KEY-----
+          KEY
+          sed -i 's/^ *//' pub.pem
+          openssl rand -out k.bin 32
+          gzip -c engine_check.json | openssl enc -aes-256-cbc -pbkdf2 -salt -pass file:k.bin -out report.enc
+          openssl pkeyutl -encrypt -pubin -inkey pub.pem -pkeyopt rsa_padding_mode:oaep -in k.bin -out key.enc
+          rm -f engine_check.json k.bin
+          mkdir -p out && mv report.enc key.enc out/
+          cd out && git init -q && git checkout -q -b probe-results/${GITHUB_REF_NAME#probe/} && git add . \
+            && git -c user.name=ci -c user.email=ci@cutsell.invalid commit -qm "encrypted engine check" \
+            && git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" probe-results/${GITHUB_REF_NAME#probe/}

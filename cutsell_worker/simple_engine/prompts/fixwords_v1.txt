@@ -1,6 +1,0 @@
-Below is an automatic transcript of a TikTok Shop creator's video, one word per item as index:word. The speech
-recognizer sometimes mishears a word: a similar-sounding word that makes no sense in the sentence, two words glued
-together, or a brand/product name written wrong. Using the whole context (products, clothes, beauty, shopping, the
-body, prices), fix ONLY words that are clearly misheard. Do not rephrase, do not change grammar or style, do not add or
-remove words, keep the original punctuation. Spoken slang and fillers are not errors. If a word is fine, leave it.
-Return ONLY JSON: [[index, "corrected word"], ...]  (an empty list if nothing is wrong)
