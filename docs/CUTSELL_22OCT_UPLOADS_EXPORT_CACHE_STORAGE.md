@@ -92,3 +92,15 @@ Nothing here is deployed until the Product Owner says so. Rollback of server and
 - 5 legacy stack (hybrid engine / Video00 RAW workflow, unchanged since the 28 Sep restore): xfail with the reason.
 - `test_semantic_stitch.py` (old 2025 demo script): ran at import and stopped the run; now a test. Pass.
 - None of them is on the path that cuts users' videos (simple engine). Full suite: 10200 passed, 0 failed.
+
+## 23 Oct — Bulk / Mix without times (build 39), busy = Queued, Apple push (build 40, not deployed)
+- Build 39 (TestFlight): Bulk / Mix say "We'll notify you when your videos are ready. You can keep using CutSell." from
+  the first moment; Bulk rows Queued / Processing / Ready under a "3 of 10 ready" group bar; no times; ONE notice per
+  Bulk ("Your 10 videos are ready ✨" / "9 ready, 1 needs attention"); Mix one notice. Single / Combine unchanged.
+- Limit per user (production): 2 cuts at once for Single / Combine; a Bulk gets one slot per video (max 10); Mix none.
+- App (next build): a 429 `processing_concurrency_limit` is never an error: the video shows Queued and is sent again by
+  itself every 60 s (a 429 `monthly_processing_limit` is still shown as before). Simulator: PASS.
+- Apple push (`cutsell_worker/push.py`, `/v1/push/register`): the app registers its token and language; the worker sends
+  Single / Combine one per cut, a Bulk ONE when every video is done, a Mix one. Nothing is sent until the PO puts
+  APNS_KEY_P8 / APNS_KEY_ID / APNS_TEAM_ID in the Modal secret `cutsell-worker`; while the server sends them the app
+  posts no local "ready" notice (a Bulk with an upload that never reached the server is told by the app).
