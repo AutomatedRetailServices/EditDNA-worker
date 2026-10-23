@@ -852,35 +852,44 @@ struct MixGroupRow: View {
         Button(action: onOpen) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
-                    Text(L10n.tr("SALES MIX")).font(CS.inter(9, .bold)).foregroundStyle(.white)
-                        .frame(width: 34, height: 18).background(CS.brandFull, in: Capsule())
+                    Text(L10n.tr("SALES MIX")).font(CS.inter(10, .bold)).foregroundStyle(CS.accent)
+                        .fixedSize()
+                        .padding(.horizontal, 8).frame(height: 20)
+                        .background(CS.accentSoft, in: Capsule())
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(L10n.tr("Sales Mix · \(mix.total) video\(mix.total == 1 ? "" : "s")")).font(CS.inter(14, .semibold)).foregroundStyle(.white)
+                        Text(L10n.tr("Sales Mix · \(mix.total) video\(mix.total == 1 ? "" : "s")")).font(CS.inter(14, .bold)).foregroundStyle(CS.wiInk)
+                            .lineLimit(1)
                             .accessibilityIdentifier("mixGroupTitle")
                         Text([mix.brand, mix.product].compactMap { $0 }.joined(separator: " · ")
                              + (mix.brand == nil && mix.product == nil ? "\(mix.clipCount) clips" : ""))
-                            .font(CS.inter(12)).foregroundStyle(Color(hex: 0x99A3BD)).lineLimit(1)
+                            .font(CS.inter(12, .medium)).foregroundStyle(CS.wiSecondary).lineLimit(1)
                     }
-                    Spacer()
+                    Spacer(minLength: 6)
                     Text(L10n.tr(mix.failedClips.isEmpty ? "\(mix.ready) of \(mix.total) ready" : "Needs a retry"))
                         .font(CS.inter(12, .semibold))
-                        .foregroundStyle(mix.failedClips.isEmpty ? CS.cyan : Color(hex: 0xFFB840))
+                        .foregroundStyle(mix.failedClips.isEmpty ? CS.accent : CS.wiWarning)
+                        .lineLimit(1).fixedSize()
                         .accessibilityIdentifier("mixGroupProgress")
                 }
-                ProgressView(value: Double(mix.ready), total: Double(max(1, mix.total))).tint(CS.cyan)
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color(fixed: 0xE6EAF2))
+                        Capsule().fill(CS.accent).frame(width: max(6, proxy.size.width * Double(mix.ready) / Double(max(1, mix.total))))
+                    }
+                }
+                .frame(height: 6)
                 if !mix.failedClips.isEmpty {
                     HStack {
                         Text(L10n.tr("Clip \(mix.failedClips.compactMap(\.label).joined(separator: ", ")) couldn’t be cleaned."))
-                            .font(CS.inter(12)).foregroundStyle(Color(hex: 0xFFB840))
+                            .font(CS.inter(12, .medium)).foregroundStyle(CS.wiSecondary)
                         Spacer()
-                        Button(L10n.tr("Retry"), action: onRetry).font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan)
+                        Button(L10n.tr("Retry"), action: onRetry).font(CS.inter(12, .bold)).foregroundStyle(CS.wiError)
                             .accessibilityIdentifier("mixRetry")
                     }
                 }
             }
             .padding(14)
-            .background(Color(hex: 0x0F1726), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color(hex: 0x33405C), lineWidth: 1))
+            .wiCard(shadow: false)
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .contain)
@@ -932,7 +941,7 @@ final class MixExporter: ObservableObject {
                 }
                 guard let link else { failed += 1; continue }
                 let (temporary, _) = try await URLSession.shared.download(from: link)
-                let file = FileManager.default.temporaryDirectory.appendingPathComponent("CutSell-Sales Mix-\(UUID().uuidString).mp4")
+                let file = FileManager.default.temporaryDirectory.appendingPathComponent("CutSell-Mix-\(UUID().uuidString).mp4")
                 try FileManager.default.moveItem(at: temporary, to: file)
                 try await PHPhotoLibrary.shared().performChanges {
                     PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: file)

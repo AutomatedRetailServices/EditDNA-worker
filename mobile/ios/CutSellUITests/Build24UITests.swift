@@ -483,19 +483,13 @@ final class Build24UITests: XCTestCase {
     /// section, "Pick how many" → 12, Processing shows ONE group, Results (MIX tiles with codes) and Export all.
     func testMixFlow() throws {
         launchApp(fresh: true, extra: ["-CutSellCatalogMock", "-CutSellMixMock"])
-        check(!element("hubMode_bulk").exists && !element("hubMode_mix").exists, "Create is for one video (no Bulk, no Mix)")
+        // White Indigo: Sales Mix starts from Create (hubMix); Plan shows In progress + This week.
         element("tab_plan").tap()
-        let newMix = element("planNewMix")
-        check(newMix.waitForExistence(timeout: 20), "Plan · New Mix")
-        check(element("planBulk").exists && element("planMyWeek").exists, "Plan · Bulk and This week")
+        check(element("planMyWeek").waitForExistence(timeout: 20), "Plan · This week")
         shot("plan_home")
-        // Bulk opens the Bulk gallery (the same pipeline as before); closed again here.
-        element("planBulk").tap()
-        allowPhotos()
-        let bulkCTA = element("galleryCreateButton")
-        check(bulkCTA.waitForExistence(timeout: 20), "Plan · Bulk opens the gallery")
-        if app.buttons["Close"].firstMatch.exists { app.buttons["Close"].firstMatch.tap() }
-        pause(2)
+        element("tab_create").tap()
+        let newMix = element("hubMix")
+        check(newMix.waitForExistence(timeout: 20), "Create · Sales Mix")
         newMix.tap()
         check(element("mixProduct").waitForExistence(timeout: 15), "Mix setup")
         pause(2)

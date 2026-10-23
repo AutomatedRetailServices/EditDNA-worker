@@ -241,63 +241,66 @@ struct QueueRowView: View {
     let row: ProcessingQueue.Row
     var onRetry: () -> Void = {}
 
-    private static let error = Color(hex: 0xFF4D67)
-    private static let track = Color(hex: 0x081226)
+    private var failed: Bool { if case .failed = row.state { return true }; return false }
 
+    /// White Indigo row (Figma 1177:113 / 125 / 145): number, thumbnail, name ("…" when long), duration · state.
     var body: some View {
-        HStack(spacing: 10) {
-            Text(L10n.tr(String(format: "%02d", order)))
+        HStack(spacing: 0) {
+            Text(verbatim: String(format: "%02d", order))
                 .font(CS.inter(11, .bold))
-                .foregroundStyle(orderColor)
+                .foregroundStyle(failed ? CS.wiError : CS.accent)
                 .frame(width: 28, height: 28)
-                .background(Self.track, in: Circle())
+                .background(failed ? CS.wiErrorBg2 : CS.accentSoft, in: Circle())
             thumbnail
                 .frame(width: 46, height: 60)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            VStack(alignment: .leading, spacing: 5) {
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .padding(.leading, 10)
+            VStack(alignment: .leading, spacing: 0) {
                 Text(row.name)
-                    .font(CS.inter(12, .semibold))
-                    .foregroundStyle(CS.textPrimaryF)
+                    .font(CS.inter(14, .bold))
+                    .foregroundStyle(CS.wiInk)
                     .lineLimit(1)
-                    .truncationMode(.middle)
-                HStack {
-                    Text(isNoSpeech ? L10n.tr(ProcessingQueue.noSpeech)
-                         : row.slow ? L10n.tr(ProcessingQueue.slowText) : row.group != nil ? "" : Self.clock(row.duration))
-                        .font(CS.inter(11, .medium))
-                        .foregroundStyle(CS.textSecondaryF)
-                        .lineLimit(1).minimumScaleFactor(0.7)
-                        .accessibilityIdentifier(isNoSpeech ? "queueRowNoSpeech" : row.slow ? "queueRowSlow" : "queueRowDuration")
-                    Spacer(minLength: 6)
-                    Text(L10n.tr(statusText))
-                        .font(CS.inter(10, .semibold))
-                        .foregroundStyle(statusColor)
-                        .accessibilityIdentifier("queueRowStatus")
+                    .truncationMode(.tail)
+                HStack(spacing: 0) {
+                    let time = isNoSpeech || row.slow ? "" : Self.clock(row.duration)
+                    if isNoSpeech || row.slow {
+                        Text(L10n.tr(isNoSpeech ? ProcessingQueue.noSpeech : ProcessingQueue.slowText))
+                            .foregroundStyle(isNoSpeech ? CS.wiError : CS.wiSecondary)
+                            .font(CS.inter(12, .medium))
+                            .accessibilityIdentifier(isNoSpeech ? "queueRowNoSpeech" : "queueRowSlow")
+                    } else {
+                        Text(verbatim: time)
+                            .font(CS.inter(12, .medium))
+                            .foregroundStyle(CS.wiSecondary)
+                            .accessibilityIdentifier("queueRowDuration")
+                        Text(verbatim: (time.isEmpty ? "" : " · ") + L10n.tr(statusText))
+                            .font(CS.inter(12, .semibold))
+                            .foregroundStyle(statusColor)
+                            .accessibilityIdentifier("queueRowStatus")
+                    }
                 }
-                .frame(height: 16)
+                .lineLimit(1).minimumScaleFactor(0.75)
+                .padding(.top, 4)
                 if let fraction = progress {
                     GeometryReader { proxy in
                         ZStack(alignment: .leading) {
-                            Capsule().fill(Self.track)
-                            Capsule()
-                                .fill(LinearGradient(stops: [.init(color: Color(hex: 0x19E6FF), location: 0),
-                                                             .init(color: Color(hex: 0x1769FF), location: 0.55),
-                                                             .init(color: Color(hex: 0xFF21D7), location: 1)],
-                                                     startPoint: .leading, endPoint: .trailing))
-                                .frame(width: max(5, proxy.size.width * fraction))
+                            Capsule().fill(Color(fixed: 0xE6EAF2))
+                            Capsule().fill(CS.accent).frame(width: max(6, proxy.size.width * fraction))
                         }
                     }
-                    .frame(height: 5)
+                    .frame(height: 6)
+                    .frame(maxWidth: 180)
+                    .padding(.top, 10)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: 60)
-            trailing
+            .padding(.leading, 12)
+            trailing.padding(.leading, 8)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.leading, 13)
+        .padding(.trailing, 13)
         .frame(height: 84)
-        .background(Color(hex: 0x0C1730), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color(hex: 0x19345F), lineWidth: 1))
+        .wiCard(fill: failed ? CS.wiErrorBg : CS.wiCard, border: failed ? Color(fixed: 0xF6C9CB) : CS.wiBorder, shadow: false)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("queueRow")
     }
@@ -306,57 +309,48 @@ struct QueueRowView: View {
         if let image = row.thumbnail {
             Image(uiImage: image).resizable().scaledToFill()
         } else {
-            Color(hex: 0x060B17)
+            CS.wiSurface2
         }
     }
 
     private var isNoSpeech: Bool { if case .failed(let why) = row.state { return why == ProcessingQueue.noSpeech }; return false }
 
+    /// Figma 1177:152 "Retry": white, 1.5 pt red border, 32 high, radius 16, the turn icon and Bold 12.
+    private func outlined(_ title: String, color: Color, icon: String?) -> some View {
+        HStack(spacing: 4) {
+            if let icon { Image(icon).renderingMode(.template).resizable().frame(width: 14, height: 14) }
+            Text(L10n.tr(title)).font(CS.inter(12, .bold)).lineLimit(1).fixedSize()
+        }
+        .foregroundStyle(color)
+        .padding(.leading, icon == nil ? 12 : 10).padding(.trailing, 12)
+        .frame(height: 32)
+        .background(CS.wiPage, in: Capsule())
+        .overlay(Capsule().stroke(color, lineWidth: 1.5))
+    }
+
     @ViewBuilder private var trailing: some View {
         switch row.state {
         case .failed where isNoSpeech:
             // Nobody talks in it: Retry would fail again; it can still be a clip of a Mix.
-            Button { AppRouter.shared.pending = .mix } label: {
-                Text(L10n.tr("Use in Sales Mix"))
-                    .font(CS.inter(10, .semibold))
-                    .foregroundStyle(CS.cyan)
-                    .lineLimit(1)
-                    .fixedSize()
-                    .padding(.horizontal, 8)
-                    .frame(minWidth: 48)
-                    .frame(height: 28)
-                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(CS.cyan, lineWidth: 1))
-            }
-            .buttonStyle(.plain)
-            .frame(minWidth: 48)
-            .frame(height: 60)
-            .accessibilityIdentifier("queueRowUseInMix")
+            Button { AppRouter.shared.pending = .mix } label: { outlined("Use in Sales Mix", color: CS.accent, icon: nil) }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("queueRowUseInMix")
         case .failed:
-            Button(action: onRetry) {
-                // "Reintentar" is longer than "Retry": the button grows instead of breaking the word.
-                Text(L10n.tr("Retry"))
-                    .font(CS.inter(10, .semibold))
-                    .foregroundStyle(Self.error)
-                    .lineLimit(1)
-                    .fixedSize()
-                    .padding(.horizontal, 8)
-                    .frame(minWidth: 48)
-                    .frame(height: 28)
-                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Self.error, lineWidth: 1))
-            }
-            .buttonStyle(.plain)
-            .frame(minWidth: 48)
-            .frame(height: 60)
-            .accessibilityIdentifier("queueRowRetry")
+            Button(action: onRetry) { outlined("Retry", color: CS.wiError, icon: "WIRetry") }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("queueRowRetry")
         case .queued:
-            Image("QueueIconQueued").resizable().frame(width: 26, height: 26).frame(width: 32, height: 60)
-        case .uploading, .processing:
-            SpinningIcon().frame(width: 32, height: 60)
+            Image("WIClock").renderingMode(.template).resizable().frame(width: 24, height: 24)
+                .foregroundStyle(CS.wiSecondary)
+                .frame(width: 28)
+        case .uploading(let p), .processing(let p):
+            ProgressRing(fraction: row.group != nil ? nil : Double(min(100, max(0, p))) / 100)
+                .frame(width: 28, height: 28)
         case .ready:
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(CS.cyan)
-                .frame(width: 32, height: 60)
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(CS.wiReady)
+                .frame(width: 28)
                 .accessibilityIdentifier("queueRowReady")
         }
     }
@@ -370,36 +364,21 @@ struct QueueRowView: View {
     }
 
     private var statusText: String {
-        if row.group != nil {
-            switch row.state {
-            case .queued: return "QUEUED"
-            case .uploading, .processing: return "PROCESSING"
-            case .ready: return "READY"
-            case .failed(let why): return why == ProcessingQueue.noSpeech ? "NO VOICE" : "FAILED"
-            }
-        }
         switch row.state {
-        case .queued: return "QUEUED"
-        case .ready: return "READY"
-        case .uploading(let p): return "UPLOADING \(p)%"
-        case .processing(let p): return "PROCESSING \(p)%"
-        case .failed(let why): return why == ProcessingQueue.noSpeech ? "NO VOICE" : "FAILED"
+        case .queued: return "Queued"
+        case .ready: return "Done"
+        case .uploading(let p): return row.group != nil ? "Processing" : "Uploading \(p)%"
+        case .processing(let p): return row.group != nil ? "Processing" : "Processing \(p)%"
+        case .failed(let why): return why == ProcessingQueue.noSpeech ? "No voice" : "Failed"
         }
     }
 
     private var statusColor: Color {
         switch row.state {
-        case .queued: return CS.textSecondaryF
-        case .failed: return Self.error
-        default: return CS.cyan
-        }
-    }
-
-    private var orderColor: Color {
-        switch row.state {
-        case .queued: return CS.textSecondaryF
-        case .failed: return Self.error
-        default: return CS.cyan
+        case .queued: return CS.wiSecondary
+        case .failed: return CS.wiError
+        case .ready: return CS.wiSuccess
+        default: return CS.accent
         }
     }
 
@@ -407,6 +386,33 @@ struct QueueRowView: View {
         guard seconds > 0 else { return "" }
         let total = Int(seconds.rounded())
         return String(format: "%d:%02d", total / 60, total % 60)
+    }
+}
+
+/// Figma 1177:122 "Ring": a 28 pt progress ring (#E6EAF2 track, #1769FF arc). No fraction = an arc that turns.
+struct ProgressRing: View {
+    let fraction: Double?
+    @State private var turning = false
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(Color(fixed: 0xE6EAF2), lineWidth: 3)
+            if let fraction {
+                Circle()
+                    .trim(from: 0, to: max(0.04, fraction))
+                    .stroke(CS.accent, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .animation(.easeOut(duration: 0.3), value: fraction)
+            } else {
+                Circle()
+                    .trim(from: 0, to: 0.28)
+                    .stroke(CS.accent, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(turning ? 270 : -90))
+                    .animation(.linear(duration: 1.1).repeatForever(autoreverses: false), value: turning)
+            }
+        }
+        .padding(1.5)
+        .onAppear { turning = true }
     }
 }
 
@@ -428,20 +434,25 @@ struct BulkGroupHeader: View {
     let ready: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text(L10n.tr("Bulk · \(total) videos"))
-                    .font(CS.inter(14, .semibold)).foregroundStyle(.white)
+                    .font(CS.cardTitle).foregroundStyle(CS.wiInk)
                 Spacer()
                 Text(L10n.tr("\(ready) of \(total) ready"))
-                    .font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan)
+                    .font(CS.inter(12, .semibold)).foregroundStyle(CS.accent)
                     .accessibilityIdentifier("bulkGroupReady")
             }
-            ProgressView(value: Double(ready), total: Double(max(1, total))).tint(CS.cyan)
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color(fixed: 0xE6EAF2))
+                    Capsule().fill(CS.accent).frame(width: max(6, proxy.size.width * Double(ready) / Double(max(1, total))))
+                }
+            }
+            .frame(height: 6)
         }
-        .padding(12)
-        .background(Color(hex: 0x0C1730), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color(hex: 0x19345F), lineWidth: 1))
+        .padding(14)
+        .wiCard(shadow: false)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("bulkGroupHeader")
     }

@@ -216,18 +216,19 @@ struct ProductsList: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                Text(L10n.tr("⌕")).font(CS.inter(16, .medium)).foregroundStyle(Color(hex: 0x99A3BD))
-                TextField("", text: $search, prompt: Text(L10n.tr("Search brand or product")).foregroundStyle(Color(hex: 0x99A3BD)))
-                    .font(CS.inter(13))
-                    .foregroundStyle(.white)
+            // Figma 1166:24 "Search": 44 high, radius 20, 18 pt line icon.
+            HStack(spacing: 8) {
+                Image("WISearch").renderingMode(.template).resizable().frame(width: 18, height: 18)
+                    .foregroundStyle(CS.wiSecondary)
+                TextField("", text: $search, prompt: Text(L10n.tr("Search brand or product")).foregroundStyle(CS.wiSecondary))
+                    .font(CS.inter(14, .medium))
+                    .foregroundStyle(CS.wiInk)
                     .accessibilityIdentifier("productsSearch")
             }
             .padding(.horizontal, 13)
-            .frame(height: 40)
-            .background(Color(hex: 0x0F1726), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color(hex: 0x33405C), lineWidth: 1))
-            .padding(.top, 12)
+            .frame(height: 44)
+            .wiCard()
+            .padding(.top, 10)
 
             if !store.overview.uncategorized.isEmpty {
                 needBanner.padding(.top, 12)
@@ -235,21 +236,21 @@ struct ProductsList: View {
 
             if !store.available {
                 Text(L10n.tr("Your products will appear here as your cuts are organized."))
-                    .font(CS.inter(13)).foregroundStyle(Color(hex: 0x99A3BD)).padding(.top, 24)
+                    .font(CS.inter(13, .medium)).foregroundStyle(CS.wiSecondary).padding(.top, 24)
             } else if brands.isEmpty && store.overview.uncategorized.isEmpty {
                 Text(L10n.tr("No products yet. New cuts are grouped by the brand and product you talk about."))
-                    .font(CS.inter(13)).foregroundStyle(Color(hex: 0x99A3BD)).padding(.top, 24)
+                    .font(CS.inter(13, .medium)).foregroundStyle(CS.wiSecondary).padding(.top, 24)
                     .accessibilityIdentifier("productsEmpty")
             }
 
             ForEach(brands) { brand in
                 HStack(alignment: .firstTextBaseline) {
-                    Text(brand.name).font(CS.inter(17, .bold)).foregroundStyle(Color.ink)
+                    Text(brand.name).font(CS.sectionTitle).foregroundStyle(CS.wiInk).lineLimit(1)
                     Spacer()
                     Text(L10n.tr("\(brand.products.count) product\(brand.products.count == 1 ? "" : "s") · \(brand.videos) video\(brand.videos == 1 ? "" : "s")"))
-                        .font(CS.inter(11, .medium)).foregroundStyle(Color(hex: 0x99A3BD))
+                        .font(CS.inter(12, .medium)).foregroundStyle(CS.wiSecondary)
                 }
-                .padding(.top, 14)
+                .padding(.top, 16)
                 VStack(spacing: 8) {
                     ForEach(brand.products) { product in
                         NavigationLink(value: ProductRoute(productID: product.productID)) {
@@ -259,7 +260,7 @@ struct ProductsList: View {
                         .accessibilityIdentifier("productRow_\(product.name)")
                     }
                 }
-                .padding(.top, 7)
+                .padding(.top, 9)
             }
         }
         .accessibilityElement(children: .contain)
@@ -276,21 +277,18 @@ struct ProductsList: View {
             onAssign(ids, common?.value.first)
         } label: {
             HStack(spacing: 10) {
-                Image("ProductsNeedDot").resizable().frame(width: 10, height: 10)
+                Circle().fill(CS.wiWarning).frame(width: 10, height: 10)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(L10n.tr("\(count) video\(count == 1 ? "" : "s") need\(count == 1 ? "s" : "") a product"))
-                        .font(CS.inter(14, .semibold)).foregroundStyle(Color.ink)
-                    Text(L10n.tr("We couldn’t tell from the video")).font(CS.inter(11)).foregroundStyle(Color(hex: 0x99A3BD))
+                        .font(CS.inter(14, .semibold)).foregroundStyle(CS.wiInk)
+                    Text(L10n.tr("We couldn’t tell from the video")).font(CS.inter(11)).foregroundStyle(CS.wiSecondary)
                 }
                 Spacer()
-                Text(L10n.tr("Assign ›")).font(CS.inter(13, .semibold)).foregroundStyle(Color(hex: 0xFFB840))
+                Text(L10n.tr("Assign ›")).font(CS.inter(13, .semibold)).foregroundStyle(Color(fixed: 0xFFB840))
             }
             .padding(.leading, 15).padding(.trailing, 16)
             .frame(height: 52)
-            // Day mode (Figma 1146:91): a white card with the soft shadow.
-            .background(Color(dark: 0x1F170D, light: 0xFFFFFF), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color(dark: 0x73521F, light: 0xE2E6EF), lineWidth: 1))
-            .dayCardShadow()
+            .wiCard()
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("productsAssignBanner")
@@ -303,7 +301,7 @@ struct ProductsList: View {
     }
 }
 
-/// Figma 1135:2841 (350 × 76).
+/// White Indigo product card (Figma 1166:34, 350 × 76): stacked cover, Bold 15 name, counts, chevron.
 struct ProductRow: View {
     let product: CatalogProduct
     let cover: UIImage?
@@ -311,36 +309,39 @@ struct ProductRow: View {
     var body: some View {
         HStack(spacing: 0) {
             ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color(hex: 0x1F2638))
-                    .frame(width: 44, height: 52).offset(x: 7, y: -5)
+                RoundedRectangle(cornerRadius: 9, style: .continuous).fill(CS.wiPage)
+                    .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
+                    .frame(width: 44, height: 54).offset(x: 5, y: -4)
                 Group {
-                    if let cover { Image(uiImage: cover).resizable().scaledToFill() } else { Color(hex: 0x1F2638) }
+                    if let cover { Image(uiImage: cover).resizable().scaledToFill() } else { CS.wiSurface2 }
                 }
                 .frame(width: 44, height: 54)
                 .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
             }
-            .frame(width: 58, alignment: .leading)
-            .padding(.leading, 11)
-            .padding(.top, 5)
+            .frame(width: 56, alignment: .leading)
+            .padding(.leading, 13)
+            .padding(.top, 4)
             VStack(alignment: .leading, spacing: 0) {
-                Text(product.name).font(CS.inter(14, .semibold)).foregroundStyle(Color.ink).lineLimit(1)
+                Text(product.name).font(CS.cardTitle).foregroundStyle(CS.wiInk).lineLimit(1)
                 Text(L10n.tr("\(product.videos) video\(product.videos == 1 ? "" : "s")"))
-                    .font(CS.inter(11)).foregroundStyle(Color(hex: 0x99A3BD)).padding(.top, 3)
-                HStack(spacing: 10) {
-                    if product.ready > 0 { Text(L10n.tr("\(product.ready) ready")).foregroundStyle(Color(hex: 0x33D98C)) }
-                    if product.drafts > 0 { Text(L10n.tr("\(product.drafts) draft\(product.drafts == 1 ? "" : "s")")).foregroundStyle(Color(hex: 0x99A3BD)) }
-                    if product.processing > 0 { Text(L10n.tr("\(product.processing) processing")).foregroundStyle(CS.cyan) }
+                    .font(CS.inter(12, .medium)).foregroundStyle(CS.wiSecondary).padding(.top, 2)
+                HStack(spacing: 8) {
+                    if product.ready > 0 { Text(L10n.tr("\(product.ready) ready")).foregroundStyle(CS.wiReady) }
+                    if product.drafts > 0 { Text(L10n.tr("\(product.drafts) draft\(product.drafts == 1 ? "" : "s")")).foregroundStyle(CS.wiSecondary) }
+                    if product.processing > 0 { Text(L10n.tr("\(product.processing) processing")).foregroundStyle(CS.accent) }
                 }
-                .font(CS.inter(11, .semibold))
-                .padding(.top, 5)
+                .font(CS.inter(12, .semibold))
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .padding(.top, 4)
             }
             Spacer(minLength: 8)
-            Text(L10n.tr("›")).font(CS.inter(20, .medium)).foregroundStyle(Color(hex: 0x99A3BD)).padding(.trailing, 13)
+            Image("WIChevronSmall").renderingMode(.template).resizable().frame(width: 18, height: 18)
+                .foregroundStyle(CS.wiSecondary)
+                .padding(.trailing, 17)
         }
         .frame(height: 76)
         .frame(maxWidth: .infinity)
-        .background(Color(hex: 0x0F1726), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color(hex: 0x33405C), lineWidth: 1))
+        .wiCard()
         .contentShape(Rectangle())
     }
 }

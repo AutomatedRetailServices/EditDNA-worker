@@ -28,6 +28,7 @@
 "A sound didn't download" = "Un sonido no se descargó";
 "A video ready at each time you pick." = "Un video listo en cada horario que elijas.";
 "AI & CONTENT" = "IA Y CONTENIDO";
+"AI cuts silences, mistakes & repeats." = "La IA corta silencios, errores y repeticiones.";
 "Account" = "Cuenta";
 "Account & Security" = "Cuenta y seguridad";
 "Account ID" = "ID de cuenta";
@@ -139,6 +140,7 @@
 "CUT · 0:40" = "CORTE · 0:40";
 "Cache cleared on this iPhone. Your projects are safe." = "Caché borrada en este iPhone. Tus proyectos están a salvo.";
 "Camera" = "Cámara";
+"Camera + teleprompter" = "Cámara + teleprompter";
 "Camera and microphone permission are required to record." = "Para grabar se necesita permiso de cámara y micrófono.";
 "Camera with clips · 60 s · 3 min · 10 min" = "Cámara con clips · 60 s · 3 min · 10 min";
 "Camera with clips · 60s · 3m · 10m" = "Cámara con clips · 60 s · 3 min · 10 min";
@@ -271,6 +273,7 @@
 "Couldn’t start the cut" = "No se pudo iniciar el corte";
 "Create" = "Crear";
 "Create 1 cut" = "Crear 1 corte";
+"Create more" = "Crear más";
 "Create text at the playhead." = "Crea texto en la línea de reproducción.";
 "Create %@ cuts" = "Crear %1$@ cortes";
 "Create %lld cuts" = "Crear %1$lld cortes";
@@ -310,7 +313,7 @@
 "CutSell.ai needs camera access so you can record video." = "CutSell.ai necesita acceso a la cámara para que puedas grabar video.";
 "CutSell.ai needs microphone access to record your voiceover." = "CutSell.ai necesita acceso al micrófono para grabar tu voz en off.";
 "CutSell.ai needs microphone access when you record video or voice-over." = "CutSell.ai necesita acceso al micrófono cuando grabas video o voz en off.";
-"Cuts being edited now. You can leave the app." = "Cortes que se están editando. Puedes salir de la app.";
+"Cuts being edited now. You can leave the app." = "Cortes en edición ahora. Puedes salir de la app.";
 "Cutting your video" = "Cortando tu video";
 "Cutting your video…" = "Cortando tu video…";
 "Cutting your video… almost done" = "Cortando tu video… casi listo";
@@ -366,7 +369,7 @@
 "Drag to move, pinch to resize, tap to fix words." = "Arrastra para mover, pellizca para cambiar el tamaño, toca para corregir palabras.";
 "Drag · pinch · turn with two fingers" = "Arrastra · pellizca · gira con dos dedos";
 "EDIT" = "EDITAR";
-"Each one moves to Ready when it’s done" = "Cada uno pasa a Listos cuando termina";
+"Each one moves to Ready when it’s done" = "Cada uno pasa a Listos al terminar";
 "Each one, as soon as it’s done" = "Cada uno, apenas termine";
 "Each video becomes a separate edit." = "Cada video se vuelve una edición aparte.";
 "Edge" = "Borde";
@@ -380,6 +383,7 @@
 "Edit %lld draft%@ in bulk" = "Editar %1$lld borrador%2$@ juntos";
 "Edit %lld draft%lld in bulk" = "Editar %1$lld borrador%2$lld juntos";
 "Editing keeps going on our servers even if you close the app. We’ll notify you as each cut is ready." = "La edición sigue en nuestros servidores aunque cierres la app. Te avisamos cuando cada corte esté listo.";
+"Editing keeps going on our servers. We’ll notify you as each cut is ready." = "La edición sigue en nuestros servidores. Te avisamos cuando cada corte esté listo.";
 "Editing time saved" = "Tiempo de edición ahorrado";
 "Editor basics" = "Lo básico del editor";
 "Edits" = "Mis videos";
@@ -419,6 +423,7 @@
 "Faceless video" = "Video sin cámara";
 "Fade in" = "Entrada suave";
 "Fade out" = "Salida suave";
+"Failed" = "Falló";
 "Faster" = "Más rápido";
 "Fill" = "Rellenar";
 "Final cut" = "Corte final";
@@ -496,6 +501,9 @@
 "Help" = "Ayuda";
 "Help & Legal" = "Ayuda y legal";
 "Help & Support" = "Ayuda y soporte";
+"Hi %@ 👋" = "Hola %1$@ 👋";
+"Hi %lld 👋" = "Hola %1$lld 👋";
+"Hi 👋" = "Hola 👋";
 "Hi! Today I'm showing you…" = "¡Hola! Hoy te muestro…";
 "Hidden by Apple" = "Oculto por Apple";
 "High" = "Alta";
@@ -532,6 +540,7 @@
 "It appears on the video at the playhead for 3 seconds." = "Aparece en el video en la línea de reproducción durante 3 segundos.";
 "It couldn't be copied from your library. Check your connection (iCloud) and try again." = "No se pudo copiar de tu galería. Revisa tu conexión (iCloud) y vuelve a intentarlo.";
 "It scrolls near the lens while you record." = "Sube junto a la cámara mientras grabas.";
+"Join into one" = "Unir en uno";
 "Jump and smooth" = "Salta y suaviza";
 "Keep Current Selection" = "Mantener selección actual";
 "Keep CutSell open until it finishes." = "Deja CutSell abierto hasta que termine.";
@@ -590,8 +599,10 @@
 "Make %lld video%@" = "Hacer %1$lld video%2$@";
 "Make %lld video%lld" = "Hacer %1$lld video%2$lld";
 "Making your video…" = "Haciendo tu video…";
+"Manage" = "Gestionar";
 "Manage local cache and 4K source files" = "Administra la caché local y los originales en 4K";
 "Many" = "Varios";
+"Many at once" = "Varios a la vez";
 "Mark read" = "Marcar como leído";
 "Marked as posted" = "Marcado como publicado";
 "Match" = "Igual";
@@ -685,6 +696,7 @@
 "No updates" = "No hay novedades";
 "No video, audio or transcript is sent unless you choose it in the report." = "No se envía video, audio ni transcripción a menos que lo elijas en el reporte.";
 "No videos in your library yet." = "Todavía no hay videos en tu galería.";
+"No voice" = "Sin voz";
 "No voice-over placed on the timeline yet." = "Todavía no hay voz en off en la línea de tiempo.";
 "No voice-over yet" = "Todavía no hay voz en off";
 "Not asked yet" = "Todavía no se pidió";
@@ -706,6 +718,7 @@
 "One edit in the order you selected." = "Una edición en el orden que elegiste.";
 "One notification when the whole group is ready." = "Un solo aviso cuando todo el grupo esté listo.";
 "One selected video could not be retrieved. The videos already loaded were kept." = "No se pudo traer un video seleccionado. Los videos que ya se cargaron se mantienen.";
+"One video" = "Un video";
 "One video per day, with reminders" = "Un video por día, con recordatorios";
 "One video → one edit." = "Un video → una edición.";
 "Only videos can go on this track." = "En esta pista solo van videos.";
@@ -797,6 +810,7 @@
 "Please try again." = "Vuelve a intentarlo.";
 "Position & scale" = "Posición y tamaño";
 "Post and track your videos" = "Publica y sigue tus videos";
+"Post at your times" = "Publica a tus horas";
 "Post it in TikTok and come back to CutSell." = "Publícalo en TikTok y vuelve a CutSell.";
 "Post to TikTok" = "Publicar en TikTok";
 "Posted" = "Publicado";
@@ -834,6 +848,8 @@
 "Processing failed" = "El procesamiento falló";
 "Processing %@" = "Procesando %1$@";
 "Processing %lld" = "Procesando %1$lld";
+"Processing %@%%" = "Procesando %1$@%%";
+"Processing %lld%%" = "Procesando %1$lld%%";
 "Product (e.g. Hydrating Cleanser)" = "Producto (ej. Hydrating Cleanser)";
 "Product name" = "Nombre del producto";
 "Product photos or clips + your voice. No camera." = "Fotos o clips del producto + tu voz. Sin cámara.";
@@ -841,12 +857,14 @@
 "Product:" = "Producto:";
 "Products" = "Productos";
 "Products in My videos" = "Productos en Mis videos";
+"Profile" = "Perfil";
 "Profile, sign-in and devices" = "Perfil, inicio de sesión y dispositivos";
 "Project name (optional)" = "Nombre del proyecto (opcional)";
 "Projects" = "Proyectos";
 "Proof" = "Prueba";
 "QUEUED" = "EN COLA";
 "Quality" = "Calidad";
+"Queued" = "En cola";
 "Queued · it starts by itself when there's room" = "En cola · empieza sola cuando haya espacio";
 "RAW · 1:46" = "CRUDO · 1:46";
 "READY" = "LISTO";
@@ -855,9 +873,11 @@
 "Ready" = "Listos";
 "Ready %@" = "Listos %1$@";
 "Ready %lld" = "Listos %1$lld";
+"Recent" = "Recientes";
 "Recent cuts" = "Cortes recientes";
 "Recents" = "Recientes";
 "Record" = "Grabar";
+"Record a few hooks, bodies & CTAs. We mix them into many videos." = "Graba unos hooks, cuerpos y CTAs. Los mezclamos en muchos videos.";
 "Record a few versions of each part. CutSell cleans every clip once and builds every combination for you." = "Graba varias versiones de cada parte. CutSell limpia cada clip una vez y arma todas las combinaciones por ti.";
 "Record again" = "Grabar de nuevo";
 "Record here or choose existing footage. Both use the same CutSell AI edit pipeline." = "Graba aquí o elige material que ya tienes. Los dos usan la misma edición con IA de CutSell.";
@@ -948,9 +968,10 @@
 "Script settings" = "Ajustes del guion";
 "Scroll speed" = "Velocidad";
 "Search" = "Buscar";
-"Search brand or product" = "Buscar marca o producto";
-"Search edits" = "Buscar ediciones";
+"Search brand or product" = "Busca marca o producto";
+"Search edits" = "Buscar cortes";
 "Search guides" = "Buscar guías";
+"See all" = "Ver todo";
 "See all in Edits" = "Ver todo en Mis videos";
 "See all in Edits ›" = "Ver todo en Mis videos ›";
 "See the 4 welcome screens again" = "Mira de nuevo las 4 pantallas de bienvenida";
@@ -1232,6 +1253,8 @@
 "Uploading %@ of %lld…" = "Subiendo %1$@ de %2$lld…";
 "Uploading %lld of %@…" = "Subiendo %1$lld de %2$@…";
 "Uploading %lld of %lld…" = "Subiendo %1$lld de %2$lld…";
+"Uploading %@%%" = "Subiendo %1$@%%";
+"Uploading %lld%%" = "Subiendo %1$lld%%";
 "Use" = "Usar";
 "Use B-roll's own audio" = "Usar el audio del B-roll";
 "Use Bulk or Sales Mix to turn a few clips into dozens of videos." = "Usa Varios o Sales Mix para convertir unos clips en decenas de videos.";
@@ -1314,6 +1337,8 @@
 "We’ll let you know in CutSell when your cut is ready." = "Te avisamos en CutSell cuando tu corte esté listo.";
 "We’ll notify you as each cut is ready." = "Te avisamos cuando cada corte esté listo.";
 "We’re saving you hours per day…" = "Te estamos ahorrando horas al día…";
+"What are we selling today?" = "¿Qué vendemos hoy?";
+"What’s in progress and what to post." = "Lo que está en proceso y qué publicar.";
 "When it's ready you get a notice. The cut is saved in Edits." = "Cuando esté listo te avisa. El corte queda guardado en Mis videos.";
 "When your videos are ready, CutSell spreads them over the week so your feed stays varied." = "Cuando tus videos estén listos, CutSell los reparte en la semana para que tu feed tenga variedad.";
 "Which product is this Sales Mix for?" = "¿Para qué producto es este Sales Mix?";
@@ -1337,6 +1362,7 @@
 "You can change this later in Settings." = "Puedes cambiarlo luego en Ajustes.";
 "You can change this later in iOS Settings." = "Puedes cambiarlo luego en Ajustes de iOS.";
 "You can change this later in the editor." = "Puedes cambiarlo luego en el editor.";
+"You can close the app" = "Puedes cerrar la app";
 "You can close this screen or the app. Editing keeps going, one video at a time." = "Puedes cerrar esta pantalla o la app. La edición sigue, un video a la vez.";
 "You can leave this screen. CutSell keeps processing on the server." = "Puedes salir de esta pantalla. CutSell sigue procesando en el servidor.";
 "You can leave this screen. We'll let you know when it's ready." = "Puedes salir de esta pantalla. Te avisamos cuando esté listo.";
@@ -1354,7 +1380,7 @@
 "Your cut" = "Tu corte";
 "Your cut is ready" = "Tu corte está listo";
 "Your cuts will show up here." = "Tus cortes aparecerán aquí.";
-"Your cuts, organized by brand and product." = "Tus cortes, ordenados por marca y producto.";
+"Your cuts, organized by brand and product." = "Tus cortes, por marca y producto.";
 "Your draft is ready" = "Tu borrador está listo";
 "Your edits this month" = "Tus ediciones de este mes";
 "Your finished CutSell video is ready." = "Tu video de CutSell está listo.";

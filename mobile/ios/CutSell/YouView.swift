@@ -124,26 +124,28 @@ struct YouView: View {
 
     private var isApple: Bool { appState.session?.isAppleAccount == true }
 
+    /// White Indigo Profile (Figma 1174:2): user card, blue plan card, one menu card with dividers.
     var body: some View {
         ZStack {
-            YouStyle.base.ignoresSafeArea()
+            CS.wiPage.ignoresSafeArea()
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    BrandLogo().padding(.top, 4)
-                    Text(L10n.tr("You")).font(.system(size: 30, weight: .semibold)).foregroundStyle(YouStyle.primary).padding(.top, 11)
-                    accountCard.padding(.top, 9)
-                    usageCard.padding(.top, 16)
-                    VStack(spacing: 2) {
-                        row("YouGlyphAccount", "Account & Security", "Profile, sign-in and devices", .account)
-                        row("YouGlyphPlan", "Plan & Usage", "Subscription, usage and history", .plan)
-                        row("YouGlyphPrivacy", "Privacy & Data", "Permissions, consent and deletion", .privacy)
-                        row("YouGlyphPrefs", "Preferences", "Language, camera and notifications", .preferences, tile: "YouRowIconPrefs")
-                        row(nil, "Connections", "TikTok · coming soon", .connections)
-                        row("YouGlyphHelp", "Help & Legal", "Guides, support and policies", .help)
+                    WIHeader { EmptyView() }
+                    WIScreenTitle(title: "Profile").padding(.top, 2)
+                    accountCard.padding(.top, 14)
+                    usageCard.padding(.top, 12)
+                    VStack(spacing: 0) {
+                        row("WIAccount", "Account & Security", "Profile, sign-in and devices", .account)
+                        row("WIPlanUsage", "Plan & Usage", "Subscription, usage and history", .plan)
+                        row("WIPrivacy", "Privacy & Data", "Permissions, consent and deletion", .privacy)
+                        row("WIPrefs", "Preferences", "Language, camera and notifications", .preferences)
+                        row("WIConnections", "Connections", "TikTok · coming soon", .connections)
+                        row("WIHelp", "Help & Legal", "Guides, support and policies", .help, divider: false)
                     }
+                    .wiCard(shadow: false)
                     .padding(.top, 16)
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, 20)
                 .padding(.bottom, 24)
             }
         }
@@ -169,80 +171,97 @@ struct YouView: View {
         return isApple ? L10n.tr("Your account") : L10n.tr("Guest")
     }
 
+    /// Figma 1174:19 "Card/User": gradient avatar with the initial, Bold 16 name, grey e-mail, chevron.
     private var accountCard: some View {
         Button { page = .account } label: {
-            HStack(spacing: 14) {
-                ZStack {
-                    Image("YouAvatar").resizable().frame(width: 50, height: 50)
-                    Text(verbatim: String(displayName.prefix(1)).uppercased())
-                        .font(.system(size: 20, weight: .semibold)).foregroundStyle(YouStyle.primary)
-                }
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(verbatim: displayName).font(.system(size: 17, weight: .semibold)).foregroundStyle(YouStyle.primary).lineLimit(1)
+            HStack(spacing: 12) {
+                Text(verbatim: String(displayName.prefix(1)).uppercased())
+                    .font(CS.inter(18, .bold)).foregroundStyle(Color(fixed: 0xFFFFFF))
+                    .frame(width: 44, height: 44)
+                    .background(CS.accentGradient, in: Circle())
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(verbatim: displayName).font(CS.inter(16, .bold)).foregroundStyle(CS.wiInk).lineLimit(1)
                     Text(verbatim: isApple ? (profile.email.isEmpty ? L10n.tr("Signed in with Apple") : profile.email)
                                            : L10n.tr("Using CutSell without an account."))
-                        .font(.system(size: 12)).foregroundStyle(YouStyle.secondary).lineLimit(1)
+                        .font(CS.inter(13, .medium)).foregroundStyle(CS.wiSecondary).lineLimit(1)
                 }
                 Spacer()
-                Text(verbatim: "›").font(.system(size: 24)).foregroundStyle(YouStyle.muted)
+                Image("WIChevronSmall").renderingMode(.template).resizable().frame(width: 18, height: 18)
+                    .foregroundStyle(CS.wiSecondary)
             }
-            .padding(.horizontal, 15)
-            .frame(height: 86)
-            .youCard(radius: 18)
+            .padding(.leading, 15).padding(.trailing, 17)
+            .frame(height: 76)
+            .wiCard(shadow: false)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("youAccountCard")
     }
 
-    /// This month's edits (real count; 30 = the monthly number Create shows).
+    /// Figma 1174:26 "Card/Plan": blue gradient, edits used this month, white bar, "Manage ›".
     private var usageCard: some View {
         let used = PlanMeter.cutsThisMonth(appState.projects)
         let limit = PlanMeter.figmaMonthlyCuts
+        let white = Color(fixed: 0xFFFFFF)
         return Button { page = .plan } label: {
             VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    Text(L10n.tr("THIS MONTH")).font(.system(size: 12, weight: .semibold)).foregroundStyle(CS.cyan)
-                    Spacer()
-                    Text(verbatim: L10n.tr("Details") + "  ›").font(.system(size: 12, weight: .semibold)).foregroundStyle(YouStyle.secondary)
-                }
-                Text(L10n.tr("\(used) of \(limit) edits used")).font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(YouStyle.primary).padding(.top, 15)
                 HStack(alignment: .center) {
-                    Text(L10n.tr("Resets \(YouStyle.nextMonthStart())")).font(.system(size: 11)).foregroundStyle(YouStyle.muted)
+                    Text(L10n.tr("THIS MONTH")).font(CS.inter(11, .bold)).tracking(0.88).foregroundStyle(white.opacity(0.85))
                     Spacer()
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 3).fill(YouStyle.control).frame(width: 142, height: 6)
-                        RoundedRectangle(cornerRadius: 3).fill(Color(hex: 0x0E46D9))
-                            .frame(width: max(4, 142 * min(1, CGFloat(used) / CGFloat(max(1, limit)))), height: 6)
+                    HStack(spacing: 2) {
+                        Text(L10n.tr("Manage")).font(CS.inter(12, .semibold))
+                        Image("WIManageArrow").renderingMode(.template).resizable().frame(width: 14, height: 14)
                     }
+                    .foregroundStyle(white)
+                    .padding(.leading, 12).padding(.trailing, 8)
+                    .frame(height: 26)
+                    .background(white.opacity(0.18), in: Capsule())
+                }
+                Text(L10n.tr("\(used) of \(limit) edits used")).font(CS.inter(17, .bold))
+                    .foregroundStyle(white).padding(.top, 6)
+                HStack(alignment: .center, spacing: 12) {
+                    GeometryReader { proxy in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(white.opacity(0.25))
+                            Capsule().fill(white).frame(width: max(6, proxy.size.width * min(1, CGFloat(used) / CGFloat(max(1, limit)))))
+                        }
+                    }
+                    .frame(height: 6)
+                    Text(L10n.tr("Resets \(YouStyle.nextMonthStart())")).font(CS.inter(12, .medium))
+                        .foregroundStyle(white.opacity(0.85)).lineLimit(1).fixedSize()
                 }
                 .padding(.top, 12)
             }
-            .padding(.horizontal, 15).padding(.top, 13).padding(.bottom, 26)
-            .youCard(radius: 18, border: Color(hex: 0x0E46D9))
+            .padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 16)
+            .background(CS.accentGradient, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("youUsageCard")
     }
 
-    private func row(_ glyph: String?, _ title: String, _ detail: String, _ target: YouPage, tile: String = "YouRowIcon") -> some View {
+    /// Figma 1174:37 "Row": white 36 pt icon tile, Bold 15 title, grey 12 detail, chevron, divider from the text.
+    private func row(_ icon: String, _ title: String, _ detail: String, _ target: YouPage, divider: Bool = true) -> some View {
         Button { page = target } label: {
             HStack(spacing: 12) {
-                ZStack {
-                    Image(tile).resizable().frame(width: 32, height: 32)
-                    if let glyph { Image(glyph).resizable().frame(width: 16, height: 16) }
-                    else { Text(verbatim: "↗").font(.system(size: 13, weight: .bold)).foregroundStyle(CS.cyan) }
-                }
+                Image(icon).renderingMode(.template).resizable().frame(width: 20, height: 20)
+                    .foregroundStyle(CS.wiInk)
+                    .frame(width: 36, height: 36)
+                    .background(CS.wiPage, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(L10n.tr(title)).font(.system(size: 15, weight: .semibold)).foregroundStyle(YouStyle.primary)
-                    Text(L10n.tr(detail)).font(.system(size: 11)).foregroundStyle(YouStyle.muted)
+                    Text(L10n.tr(title)).font(CS.cardTitle).foregroundStyle(CS.wiInk).lineLimit(1)
+                    Text(L10n.tr(detail)).font(CS.inter(12, .medium)).foregroundStyle(CS.wiSecondary).lineLimit(1)
+                        .minimumScaleFactor(0.85)
                 }
-                Spacer()
-                Text(verbatim: "›").font(.system(size: 22)).foregroundStyle(YouStyle.muted)
+                Spacer(minLength: 6)
+                Image("WIChevronSmall").renderingMode(.template).resizable().frame(width: 18, height: 18)
+                    .foregroundStyle(CS.wiSecondary)
             }
-            .padding(.horizontal, 11)
-            .frame(height: 56)
-            .youCard(radius: 14)
+            .padding(.leading, 13).padding(.trailing, 15)
+            .frame(height: 60)
+            .overlay(alignment: .bottom) {
+                if divider { Rectangle().fill(CS.wiBorder).frame(height: 1).padding(.leading, 61) }
+            }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("youRow_\(target.rawValue)")

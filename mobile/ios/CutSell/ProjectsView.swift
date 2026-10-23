@@ -30,7 +30,7 @@ struct ProjectsView: View {
     @State private var resumeCut: PendingCutRecord?
     @State private var projectPendingDelete: Project?
     @State private var errorMessage: String?
-    @State private var selectedTab: EditsTab = .all
+    @State private var selectedTab: EditsTab = .ready
     @ObservedObject private var router = AppRouter.shared
     @State private var showingSearch = false
     @State private var searchText = ""
@@ -93,8 +93,9 @@ struct ProjectsView: View {
 
     /// Figma 1135:2686: Processing · Ready · Products · Drafts · All, sliding sideways. Processing only while
     /// something is being made.
+    /// White Indigo (Figma 1166:4): one full-width bar, Processing · Ready · Products · Drafts (no "All").
     private var visibleTabs: [EditsTab] {
-        processingRows.isEmpty && mixCenter.active.isEmpty ? [.ready, .products, .drafts, .all] : EditsTab.allCases
+        processingRows.isEmpty && mixCenter.active.isEmpty ? [.ready, .products, .drafts] : [.processing, .ready, .products, .drafts]
     }
 
     private func chipTitle(_ tab: EditsTab) -> String {
@@ -121,46 +122,35 @@ struct ProjectsView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         header
-                        Text(L10n.tr("Edits"))
-                            .font(CS.inter(34, .semibold))
-                            .foregroundStyle(Color.ink)
-                            .padding(.top, 12)
-                        Text(L10n.tr(selectedTab == .processing ? "Cuts being edited now. You can leave the app."
-                             : selectedTab == .products ? "Your cuts, organized by brand and product."
-                             : "Your saved cuts, ready to review or share."))
-                            .font(CS.inter(14))
-                            .foregroundStyle(CS.textSecondary)
+                        WIScreenTitle(title: "Edits",
+                                      subtitle: selectedTab == .processing ? "Cuts being edited now. You can leave the app."
+                                        : selectedTab == .products ? "Your cuts, organized by brand and product."
+                                        : "Your saved cuts, ready to review or share.")
                             .padding(.top, 2)
 
                         if showingSearch {
-                            TextField("", text: $searchText, prompt: Text(L10n.tr("Search edits")).foregroundStyle(CS.textMuted))
-                                .font(CS.inter(15))
-                                .foregroundStyle(Color.ink)
-                                .padding(.horizontal, 14)
-                                .frame(height: 42)
-                                .background(CS.fieldBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(CS.fieldBorder, lineWidth: 1))
-                                .padding(.top, 14)
-                                .accessibilityIdentifier("editsSearchField")
+                            HStack(spacing: 8) {
+                                Image("WISearch").renderingMode(.template).resizable().frame(width: 18, height: 18)
+                                    .foregroundStyle(CS.wiSecondary)
+                                TextField("", text: $searchText, prompt: Text(L10n.tr("Search edits")).foregroundStyle(CS.wiSecondary))
+                                    .font(CS.inter(14, .medium))
+                                    .foregroundStyle(CS.wiInk)
+                                    .accessibilityIdentifier("editsSearchField")
+                            }
+                            .padding(.horizontal, 13)
+                            .frame(height: 44)
+                            .wiCard()
+                            .padding(.top, 12)
                         }
 
-                        // Figma 1135:2823-2830: 38 pt chips, 6 pt apart, sliding sideways.
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 6) {
-                                ForEach(visibleTabs) { tab in
-                                    EditsFilterChip(title: chipTitle(tab), isSelected: selectedTab == tab) {
-                                        selectedTab = tab
-                                    }
-                                    .frame(minWidth: tab.chipWidth)  // longer words (Spanish) widen the chip
-                                    .accessibilityIdentifier("editsFilter\(tab.rawValue)")
-                                }
-                            }
-                            // .contain keeps each chip's own id (editsFilterProcessing…).
-                            .accessibilityElement(children: .contain)
-                            .accessibilityIdentifier("editsTabPicker")
-                        }
-                        .scrollClipDisabled()
-                        .padding(.top, 22)
+                        // Figma 1173:2: full width, every segment visible.
+                        WISegmented(items: visibleTabs.map { tab in
+                            .init(id: tab, title: tab.rawValue, count: tab == .products ? nil : count(tab),
+                                  accessibilityID: "editsFilter\(tab.rawValue)")
+                        }, selection: $selectedTab)
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("editsTabPicker")
+                        .padding(.top, 13)
 
                         if selectedTab == .processing {
                             processingList
@@ -181,7 +171,7 @@ struct ProjectsView: View {
 
                         if shownProjects.isEmpty {
                             emptyState
-                                .padding(.top, 80)
+                                .padding(.top, 24)
                         } else {
                             LazyVGrid(columns: columns, spacing: 8) {
                                 ForEach(shownProjects) { project in
@@ -242,7 +232,7 @@ struct ProjectsView: View {
                 AssignProductSheet(request: request)
                     .environmentObject(appState)
                     .presentationDetents([.height(560), .large])
-                    .presentationBackground(Color(hex: 0x0D121F))
+                    .presentationBackground(CS.wiPage)
             }
             .task(id: selectedTab) { if selectedTab == .products { await refreshCatalog() } }
             .sheet(item: $resumeCut) { pending in
@@ -284,7 +274,7 @@ struct ProjectsView: View {
                 set: { if !$0 { errorMessage = nil } }
             )) { Button(L10n.tr("OK"), role: .cancel) {} } message: { Text(L10n.tr(errorMessage ?? "")) }
         }
-        .tint(CS.cyan)
+        .tint(CS.accent)
     }
 
     private func refreshCatalog() async {
@@ -315,21 +305,15 @@ struct ProjectsView: View {
     /// Figma 1134:2825-2884: "In order", the rows, and the note.
     private var processingList: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(L10n.tr("In order")).font(CS.inter(16, .semibold)).foregroundStyle(Color.ink)
-                Spacer()
-                if !onlyGroups {
-                    Text(L10n.tr("Each one moves to Ready when it’s done")).font(CS.inter(11, .medium)).foregroundStyle(Color(hex: 0x99A3BD))
-                }
-            }
-            .padding(.top, 16)
+            WISectionTitle(title: "In order", note: onlyGroups ? nil : "Each one moves to Ready when it’s done")
+                .padding(.top, 20)
             if let focus = queue.focus {
                 HStack {
                     Text(L10n.tr(mixCenter.mixes.contains { $0.mixID == focus } ? "Showing this Sales Mix" : "Showing this Bulk"))
-                        .font(CS.inter(12, .semibold)).foregroundStyle(Color(hex: 0x99A3BD))
+                        .font(CS.inter(12, .semibold)).foregroundStyle(CS.wiSecondary)
                     Spacer()
                     Button(L10n.tr("Show all")) { queue.focus = nil }
-                        .font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan)
+                        .font(CS.inter(12, .semibold)).foregroundStyle(CS.accent)
                         .accessibilityIdentifier("processingShowAll")
                 }
                 .padding(.top, 10)
@@ -337,15 +321,7 @@ struct ProjectsView: View {
             }
             if hasGroups {
                 // 23 Oct (PO): Bulk and Mix say this from the first moment, with no times.
-                Text(L10n.tr(ProcessingQueue.groupMessage))
-                    .font(CS.inter(13, .semibold))
-                    .foregroundStyle(Color.ink)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 15)
-                    .padding(.vertical, 12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(hex: 0x0F1726), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color(hex: 0x33405C), lineWidth: 1))
+                WINote(title: nil, text: ProcessingQueue.groupMessage)
                     .padding(.top, 12)
                     .accessibilityIdentifier("processingGroupMessage")
             }
@@ -365,16 +341,9 @@ struct ProjectsView: View {
             }
             .padding(.top, 12)
             if !onlyGroups {
-            Text(L10n.tr("Editing keeps going on our servers even if you close the app. We’ll notify you as each cut is ready."))
-                .font(CS.inter(12))
-                .foregroundStyle(Color(hex: 0x99A3BD))
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 15)
-                .padding(.vertical, 10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(hex: 0x0F1726), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color(hex: 0x33405C), lineWidth: 1))
-                .padding(.top, 18)
+            // Figma 1177:157 "Note".
+            WINote(title: "You can close the app", text: "Editing keeps going on our servers. We’ll notify you as each cut is ready.")
+                .padding(.top, 16)
             }
         }
         .accessibilityElement(children: .contain)
@@ -399,41 +368,31 @@ struct ProjectsView: View {
         }
     }
 
+    /// Figma 1169:2 / 1169:6: logo, then search and ••• (40 pt, #F3F5F9).
     private var header: some View {
-        HStack(spacing: 10) {
-            BrandLogo()
-            Spacer()
-            CircleIconButton(size: 32, action: {
+        WIHeader {
+            Button {
                 showingSearch.toggle()
                 if !showingSearch { searchText = "" }
-            }) {
-                Image("IconSearch").resizable().frame(width: 16, height: 16)
-            }
+            } label: { WIHeaderIcon(image: "WISearch") }
+            .buttonStyle(.plain)
             .accessibilityLabel(L10n.tr("Search"))
             Menu {
                 Button(L10n.tr("New cut")) { selectTab(.create) }
                 Button(L10n.tr("Refresh")) { Task { await refreshAll() } }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 34, height: 34)
-                    .background(Color(dark: 0x050A17, light: 0x0B1020), in: Circle())
-                    .overlay(Circle().stroke(Color(dark: 0x144080, light: 0x0B1020), lineWidth: 1))
-            }
+            } label: { WIHeaderIcon(image: "WIMore") }
             .accessibilityLabel(L10n.tr("More"))
         }
-        .padding(.top, 8)
     }
 
     private func resumeRow(_ pending: PendingCutRecord) -> some View {
         HStack(spacing: 12) {
             Image(systemName: "arrow.clockwise.icloud")
-                .foregroundStyle(CS.cyan)
+                .foregroundStyle(CS.accent)
             VStack(alignment: .leading, spacing: 3) {
                 Text(L10n.tr(pending.title.isEmpty ? "Interrupted Cut" : pending.title))
-                    .font(CS.inter(14, .semibold))
-                    .foregroundStyle(Color.ink)
+                    .font(CS.inter(14, .bold))
+                    .foregroundStyle(CS.wiInk)
                 Text(L10n.tr("\(pending.videos.count) clip\(pending.videos.count == 1 ? "" : "s") • Resume upload"))
                     .font(CS.inter(12))
                     .foregroundStyle(CS.textSecondary)
@@ -441,35 +400,30 @@ struct ProjectsView: View {
             Spacer()
             Image(systemName: "chevron.right").font(.caption).foregroundStyle(CS.textMuted)
         }
-        .padding(12)
-        .background(CS.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(CS.tileBorder, lineWidth: 1))
+        .padding(14)
+        .wiCard()
     }
 
     private var emptyState: some View {
-        HStack(spacing: 20) {
+        HStack(spacing: 18) {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(hex: 0x050A17))
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color(hex: 0x1A8CFF), lineWidth: 1.5))
-                .overlay(Image("EmptyPlay").resizable().frame(width: 44, height: 44))
-                .frame(width: 90, height: 160)
-            VStack(alignment: .leading, spacing: 8) {
+                .fill(CS.accentSoft)
+                .overlay(Image(systemName: "play.fill").font(.system(size: 22)).foregroundStyle(CS.accent))
+                .frame(width: 72, height: 120)
+            VStack(alignment: .leading, spacing: 6) {
                 Text(L10n.tr(emptyTitle))
-                    .font(CS.inter(19, .semibold))
-                    .foregroundStyle(Color.ink)
+                    .font(CS.cardTitle)
+                    .foregroundStyle(CS.wiInk)
                 Text(L10n.tr(emptyMessage))
-                    .font(CS.inter(13))
-                    .foregroundStyle(Color(hex: 0x99B2E0))
+                    .font(CS.inter(13, .medium))
+                    .foregroundStyle(CS.wiSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
         }
-        .padding(20)
+        .padding(18)
         .frame(maxWidth: .infinity)
-        .frame(minHeight: 220)
-        .background(Color(hex: 0x040812, opacity: 0.96), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Color(hex: 0x14478C), lineWidth: 1))
-        .padding(.horizontal, 10)
+        .wiCard()
     }
 
     private var emptyTitle: String {

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Create tab start screen (Figma 03_Create "Create v3/Home Hub · Mix", node 1139:2814 = Home Hub 1068:22 + a Mix row).
+/// Create tab start screen (White Indigo, Figma 12_Prototype 1164:2 "Create v3 ✅ ELEGIDO"): no plan meter, no Script card.
 struct HomeHubView: View {
     let onUpload: (CreateMode) -> Void
     var onMix: () -> Void = {}
@@ -17,62 +17,96 @@ struct HomeHubView: View {
     /// Turns on the "Faceless video" row once that flow is built.
     static let facelessVideoReady = false
 
+    @ObservedObject private var account = AccountProfile.shared
+
+    private var firstName: String {
+        account.name.split(separator: " ").first.map(String.init) ?? ""
+    }
+
     var body: some View {
         ZStack {
-            CS.base.ignoresSafeArea()
+            CS.wiPage.ignoresSafeArea()
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack { BrandLogo(); Spacer(); planMeter }
-                        .padding(.top, 6)
+                VStack(alignment: .leading, spacing: 0) {
+                    // Header (Figma 1164:2): logo left (~172 pt with its glow), round avatar with the initial right.
+                    HStack(alignment: .center) {
+                        BrandLogo(width: 172).padding(.leading, -11.5)
+                        Spacer()
+                        Button { selectTab(.you) } label: {
+                            Text(verbatim: String(firstName.first ?? "C").uppercased())
+                                .font(CS.inter(16, .bold))
+                                .foregroundStyle(CS.accent)
+                                .frame(width: 40, height: 40)
+                                .background(CS.accentSoft, in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("hubAvatar")
+                    }
+                    .frame(height: 67)
+                    .padding(.top, 2)
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(L10n.tr("Create"))
-                            .font(CS.inter(30, .heavy))
-                            .foregroundStyle(CS.textPrimaryF)
-                        Text(L10n.tr("Turn your raw video into a ready-to-sell cut."))
-                            .font(CS.inter(14))
-                            .foregroundStyle(CS.textSecondaryF)
+                    Text(firstName.isEmpty ? L10n.tr("Hi 👋") : L10n.tr("Hi \(firstName) 👋"))
+                        .font(CS.inter(15, .medium))
+                        .foregroundStyle(CS.wiSecondary)
+                        .padding(.top, 6)
+                    Text(L10n.tr("What are we selling today?"))
+                        .font(CS.inter(32, .heavy))
+                        .tracking(CS.screenTitleTracking)
+                        .lineSpacing(0)
+                        .foregroundStyle(CS.wiInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 4)
+
+                    uploadCard.padding(.top, 14)
+
+                    Text(L10n.tr("Create more"))
+                        .font(CS.sectionTitle)
+                        .foregroundStyle(CS.wiInk)
+                        .padding(.top, 18)
+                    salesMixCard.padding(.top, 10)
+                    HStack(spacing: 8) {
+                        smallCard(icon: "WIRecord", title: "Record", subtitle: "Camera + teleprompter", id: "hubRecord", action: onRecord)
+                        smallCard(icon: "WIPlanCal", title: "Plan my week", subtitle: "Post at your times", id: "hubPlanWeek") {
+                            selectTab(.plan)
+                        }
                     }
                     .padding(.top, 8)
-                    .padding(.bottom, 4)
-
-                    uploadCard
-                    mixRow
-                    rowCard(icon: "HubCamera", title: "Record with CutSell",
-                            subtitle: "Camera with clips · 60s · 3m · 10m", id: "hubRecord", action: onRecord)
-                    // "Faceless video" (Figma 1139:2814, renamed 21 Oct): product photos or clips + her voice, no camera.
-                    // Hidden until the flow exists (today the button could only say "coming soon").
+                    // "Faceless video" stays hidden until the flow exists.
                     if Self.facelessVideoReady {
-                        rowCard(icon: "HubMic", title: "Faceless video",
-                                subtitle: "Product photos or clips + your voice. No camera.", id: "hubFaceless") { voiceOverSoon = true }
+                        smallCard(icon: "WIRecord", title: "Faceless video", subtitle: "Product photos or clips + your voice. No camera.",
+                                  id: "hubFaceless") { voiceOverSoon = true }
+                            .padding(.top, 8)
                     }
 
-                    HStack {
-                        Text(L10n.tr("Recent cuts"))
-                            .font(CS.inter(15, .bold))
-                            .foregroundStyle(CS.textPrimaryF)
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(L10n.tr("Recent"))
+                            .font(CS.sectionTitle)
+                            .foregroundStyle(CS.wiInk)
                         Spacer()
-                        Button(L10n.tr("See all in Edits")) { selectTab(.edits) }
+                        Button(L10n.tr("See all")) { selectTab(.edits) }
                             .font(CS.inter(13, .semibold))
-                            .foregroundStyle(CS.cyan)
+                            .foregroundStyle(CS.accent)
+                            .accessibilityIdentifier("hubSeeAll")
                     }
-                    .padding(.top, 10)
+                    .padding(.top, 18)
 
                     if recent.isEmpty {
                         Text(L10n.tr("Your cuts will show up here."))
-                            .font(CS.inter(13))
-                            .foregroundStyle(CS.textMutedF)
-                            .frame(maxWidth: .infinity, minHeight: 92)
-                            .background(CS.surfaceCard, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(CS.borderDefault, lineWidth: 1))
+                            .font(CS.inter(13, .medium))
+                            .foregroundStyle(CS.wiSecondary)
+                            .frame(maxWidth: .infinity, minHeight: 90)
+                            .background(CS.wiCard, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
+                            .padding(.top, 12)
                     } else {
-                        HStack(spacing: 10) {
+                        HStack(spacing: 8) {
                             ForEach(Array(recent.enumerated()), id: \.element.id) { index, project in
                                 Button { onOpenProject(project) } label: { recentTile(project, index: index) }
                                     .buttonStyle(.plain)
                             }
-                            ForEach(recent.count..<3, id: \.self) { _ in Color.clear.frame(height: 92) }
+                            ForEach(recent.count..<3, id: \.self) { _ in Color.clear.frame(height: 90) }
                         }
+                        .padding(.top, 12)
                     }
                 }
                 .padding(.horizontal, 20)
@@ -92,138 +126,132 @@ struct HomeHubView: View {
         }
     }
 
-    /// "7 / 30 cuts · Plan" (Figma). The count is real: cuts this account made this month.
-    /// 30 is the number in the Figma design; no plan limit is enforced yet.
-    private var planMeter: some View {
-        let used = PlanMeter.cutsThisMonth(appState.projects)
-        let limit = PlanMeter.figmaMonthlyCuts
-        return Button { selectTab(.plan) } label: {
-            HStack(spacing: 8) {
-                ZStack(alignment: .leading) {
-                    Capsule().fill(CS.borderDefault).frame(width: 44, height: 5)
-                    Capsule().fill(CS.brandFull)
-                        .frame(width: max(5, 44 * min(1, CGFloat(used) / CGFloat(limit))), height: 5)
-                }
-                Text(L10n.tr("\(used) / \(limit) cuts ·"))
-                    .font(CS.inter(12, .medium))
-                    .foregroundStyle(CS.textSecondaryF)
-                Text(L10n.tr("Plan"))
-                    .font(CS.inter(12, .semibold))
-                    .foregroundStyle(CS.cyan)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(CS.surfaceControl, in: Capsule())
-            .overlay(Capsule().stroke(CS.borderDefault, lineWidth: 1))
-            .dayCardShadow()
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("planMeter")
-    }
-
+    /// Figma 1164:92 "Upload/Tiles": blue gradient card, its round upload button (Single) and three white tiles.
     private var uploadCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Build 24: only this upper part is the card's own tap (Single). The Single / Bulk / Combine
-            // chips below are separate buttons, so a Bulk tap can never also open the gallery in Single.
-            VStack(alignment: .leading, spacing: 4) {
-                Image("HubUpload")
-                    .resizable()
-                    .frame(width: 26, height: 26)
-                    .frame(width: 52, height: 52)
-                    .background(Color(fixed: 0x050814, opacity: 0.28), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                Spacer().frame(height: 12)
-                Text(L10n.tr("Upload videos"))
-                    .font(CS.inter(24, .heavy))
-                    .foregroundStyle(.white)
-                Text(L10n.tr("From your gallery. AI cuts it for you."))
-                    .font(CS.inter(14))
-                    .foregroundStyle(.white)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-            .onTapGesture { onUpload(.single) }
-                HStack(spacing: 6) {
-                    ForEach([CreateMode.single, .bulk, .combine], id: \.self) { mode in
-                        Button { onUpload(mode) } label: {
-                            Text(L10n.tr(mode.title))
-                                .font(CS.inter(12, .semibold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(Color(fixed: 0x050814, opacity: 0.3), in: Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("hubMode_\(mode.rawValue)")
-                    }
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L10n.tr("Upload videos"))
+                        .font(CS.inter(22, .heavy))
+                        .foregroundStyle(.white)
+                    Text(L10n.tr("AI cuts silences, mistakes & repeats."))
+                        .font(CS.inter(13, .medium))
+                        .foregroundStyle(Color.white.opacity(0.82))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(.top, 12)
+                Spacer(minLength: 8)
+                Button { onUpload(.single) } label: {
+                    Image("WIUpload").renderingMode(.template).resizable()
+                        .frame(width: 22, height: 22)
+                        .foregroundStyle(.white)
+                        .frame(width: 42, height: 42)
+                        .background(Color.white.opacity(0.18), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L10n.tr("Upload videos"))
+                .accessibilityIdentifier("hubUploadButton")
             }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 20)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(CS.brandFull, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .shadow(color: Color(hex: 0x7C3AED, opacity: 0.55), radius: 25, y: 18)
-            .accessibilityElement(children: .contain)
-            .accessibilityAddTraits(.isButton)
-            .accessibilityIdentifier("hubUpload")
+            HStack(spacing: 8) {
+                tile(.single, icon: "WISingle", subtitle: "One video")
+                tile(.bulk, icon: "WIBulk", subtitle: "Many at once")
+                tile(.combine, icon: "WICombine", subtitle: "Join into one")
+            }
+            .padding(.top, 18)
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(CS.accentGradient, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("hubUpload")
     }
 
-    /// Figma 1139:2886 "Mix": opens Mix · Setup (the same screen as New Mix in Plan).
-    private var mixRow: some View {
+    private func tile(_ mode: CreateMode, icon: String, subtitle: String) -> some View {
+        Button { onUpload(mode) } label: {
+            VStack(alignment: .leading, spacing: 0) {
+                Image(icon).renderingMode(.template).resizable()
+                    .frame(width: 20, height: 20)
+                    .foregroundStyle(CS.accent)
+                    .frame(width: 36, height: 36)
+                    .background(CS.accentSoft, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                Spacer(minLength: 10)
+                Text(L10n.tr(mode.title))
+                    .font(CS.inter(14, .bold))
+                    .foregroundStyle(CS.wiInk)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                Text(L10n.tr(subtitle))
+                    .font(CS.inter(11, .medium))
+                    .foregroundStyle(CS.wiSecondary)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                    .padding(.top, 4)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, minHeight: 112, maxHeight: 112, alignment: .topLeading)
+            .background(CS.wiPage, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("hubMode_\(mode.rawValue)")
+    }
+
+    /// Figma 1164:30 "Sales Mix" (full width): opens Sales Mix · Setup.
+    private var salesMixCard: some View {
         Button(action: onMix) {
             HStack(spacing: 14) {
-                Text(L10n.tr("⊞"))
-                    .font(CS.inter(18, .bold))
+                Image("WISalesMix").renderingMode(.template).resizable()
+                    .frame(width: 20, height: 20)
                     .foregroundStyle(.white)
-                    .frame(width: 46, height: 46)
-                    .background(CS.brandFull, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(CS.borderDefault, lineWidth: 1))
-                VStack(alignment: .leading, spacing: 2) {
+                    .frame(width: 38, height: 38)
+                    .background(CS.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                VStack(alignment: .leading, spacing: 4) {
                     Text(L10n.tr("Sales Mix"))
-                        .font(CS.inter(16, .bold))
-                        .foregroundStyle(CS.textPrimaryF)
-                    Text(L10n.tr("Hooks × bodies × CTAs → many videos"))
-                        .font(CS.inter(13))
-                        .foregroundStyle(CS.textMutedF)
+                        .font(CS.cardTitle)
+                        .foregroundStyle(CS.wiInk)
+                    Text(L10n.tr("Record a few hooks, bodies & CTAs. We mix them into many videos."))
+                        .font(CS.inter(11, .medium))
+                        .foregroundStyle(CS.wiSecondary)
                         .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
-                Image("HubChevron").resizable().frame(width: 20, height: 20)
+                Image("WIChevron").renderingMode(.template).resizable()
+                    .frame(width: 18, height: 18)
+                    .foregroundStyle(CS.accent)
             }
-            .padding(16)
-            .background(CS.surfaceCard, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(CS.borderDefault, lineWidth: 1))
-            .dayCardShadow()
+            .padding(.horizontal, 13)
+            .padding(.vertical, 18)
+            .frame(maxWidth: .infinity, minHeight: 96)
+            .background(CS.wiCard, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("hubMix")
     }
 
-    private func rowCard(icon: String, title: String, subtitle: String, id: String, action: @escaping () -> Void) -> some View {
+    /// Figma 1164:40 / 1164:47: half-width card, white icon box, title, small line.
+    private func smallCard(icon: String, title: String, subtitle: String, id: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 14) {
-                Image(icon)
-                    .resizable()
-                    .frame(width: 24, height: 24)
-                    .frame(width: 46, height: 46)
-                    .background(CS.surfaceControl, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(CS.borderDefault, lineWidth: 1))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(L10n.tr(title))
-                        .font(CS.inter(16, .bold))
-                        .foregroundStyle(CS.textPrimaryF)
-                    Text(L10n.tr(subtitle))
-                        .font(CS.inter(13))
-                        .foregroundStyle(CS.textMutedF)
-                        .multilineTextAlignment(.leading)
-                }
-                Spacer(minLength: 0)
-                Image("HubChevron").resizable().frame(width: 20, height: 20)
+            VStack(alignment: .leading, spacing: 0) {
+                Image(icon).renderingMode(.template).resizable()
+                    .frame(width: 20, height: 20)
+                    .foregroundStyle(CS.wiInk)
+                    .frame(width: 38, height: 38)
+                    .background(CS.wiPage, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
+                Spacer(minLength: 8)
+                Text(L10n.tr(title))
+                    .font(CS.cardTitle)
+                    .foregroundStyle(CS.wiInk)
+                    .lineLimit(1).minimumScaleFactor(0.85)
+                Text(L10n.tr(subtitle))
+                    .font(CS.inter(11, .medium))
+                    .foregroundStyle(CS.wiSecondary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .padding(.top, 3)
             }
-            .padding(16)
-            .background(CS.surfaceCard, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(CS.borderDefault, lineWidth: 1))
-            .dayCardShadow()
+            .padding(13)
+            .frame(maxWidth: .infinity, minHeight: 112, maxHeight: 112, alignment: .topLeading)
+            .background(CS.wiCard, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(id)
@@ -231,35 +259,22 @@ struct HomeHubView: View {
 
     private static let tileColors: [UInt32] = [0x2A3F6B, 0x4A2A6B, 0x1F5A6B]
 
+    /// "Recent" (Figma 1164:56-58): thumbnails, 90 high, radius 14.
     private func recentTile(_ project: Project, index: Int) -> some View {
-        let isReady = project.state == "draft_ready"
         let isProcessing = Project.processingStates.contains(project.state)
-        return RoundedRectangle(cornerRadius: 16, style: .continuous)
-            // Video tiles stay dark in day mode too (Figma 1146:60-66).
+        return RoundedRectangle(cornerRadius: 14, style: .continuous)
             .fill(LinearGradient(colors: [Color(fixed: Self.tileColors[index % 3]), Color(fixed: 0x0C1730)],
                                  startPoint: .topLeading, endPoint: .bottomTrailing))
-            .frame(height: 92)
+            .frame(height: 90)
             .overlay {
                 if let image = thumbnails.image(for: project.projectID) {
                     Image(uiImage: image).resizable().scaledToFill()
-                        .overlay(LinearGradient(colors: [.clear, .black.opacity(0.6)], startPoint: .center, endPoint: .bottom))
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(CS.borderDefault, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .task(id: project.state) { await thumbnails.load(project: project, session: appState.session) }
-            .overlay(alignment: .topLeading) {
-                Circle().fill(isReady ? CS.ready : CS.draft).frame(width: 8, height: 8).padding(7)
-            }
             .overlay {
-                if isProcessing { ProgressView().tint(CS.cyan) }
-            }
-            .overlay(alignment: .bottomLeading) {
-                Text(CutNaming.readable(project: project))
-                    .font(CS.inter(11, .semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-                    .padding(8)
+                if isProcessing { ProgressView().tint(.white) }
             }
             .accessibilityLabel(project.title)
     }

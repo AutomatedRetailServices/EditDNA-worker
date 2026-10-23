@@ -9,16 +9,17 @@ enum MainTab: String, CaseIterable, Hashable {
         case .create: return "Create"
         case .edits: return "Edits"
         case .plan: return "Plan"
-        case .you: return "You"
+        case .you: return "Profile"
         }
     }
 
+    /// White Indigo line icons (Figma 1164:59 Nav/White), tinted in code.
     var image: String {
         switch self {
-        case .create: return "TabCreate"
-        case .edits: return "TabEdits"
-        case .plan: return "TabPlan"
-        case .you: return "TabYou"
+        case .create: return "WITabCreate"
+        case .edits: return "WITabEdits"
+        case .plan: return "WITabPlan"
+        case .you: return "WITabProfile"
         }
     }
 }
@@ -205,6 +206,8 @@ struct ReadyBanner: View {
 }
 
 /// Bottom tab bar (Figma "Tab Bar": 358 × 88, radius 26).
+/// White Indigo bottom bar (Figma 1164:59 "Nav/White"): floating, white, radius 24, 1 pt #E6E9EF border, soft
+/// shadow; 4 tabs with the label centred under its icon; active = #1769FF + a dot, inactive = black icon, #6B7385 label.
 struct CSTabBar: View {
     let current: MainTab
     let select: (MainTab) -> Void
@@ -216,18 +219,24 @@ struct CSTabBar: View {
                 Button {
                     select(item)
                 } label: {
-                    VStack(spacing: 4) {
+                    VStack(spacing: 0) {
                         Image(item.image)
+                            .renderingMode(.template)
                             .resizable()
                             .interpolation(.high)
-                            .scaledToFit()
-                            .frame(width: 44, height: 44)
-                            .shadow(color: isActive ? CS.cyan.opacity(0.75) : .clear, radius: 8)
+                            .frame(width: 26, height: 26)
+                            .foregroundStyle(isActive ? CS.accent : CS.wiInk)
+                            .padding(.top, 13)
                         Text(L10n.tr(item.title))
-                            .font(CS.inter(13, isActive ? .semibold : .regular))
-                            .foregroundStyle(isActive ? CS.cyan : CS.textTab)
+                            .font(CS.inter(11, isActive ? .semibold : .medium))
+                            .foregroundStyle(isActive ? CS.accent : CS.wiSecondary)
+                            .lineLimit(1)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 8)
+                        Circle().fill(isActive ? CS.accent : .clear).frame(width: 5, height: 5).padding(.top, 4)
+                        Spacer(minLength: 0)
                     }
-                    .opacity(isActive ? 1 : 0.68)
                     .frame(maxWidth: .infinity)
                     .contentShape(Rectangle())
                 }
@@ -236,10 +245,10 @@ struct CSTabBar: View {
                 .accessibilityIdentifier("tab_\(item.rawValue)")
             }
         }
-        .padding(.horizontal, 4)
-        .frame(height: 88)
-        .background(Color(hex: 0x060E1D, opacity: 0.96), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(Color(hex: 0x143866, opacity: 0.9), lineWidth: 1))
+        .frame(height: 80)
+        .background(CS.wiPage, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
+        .shadow(color: Color(fixed: 0x0D1433, opacity: 0.08), radius: 8, x: 0, y: 4)
         .padding(.horizontal, 16)
         .padding(.bottom, 2)
     }

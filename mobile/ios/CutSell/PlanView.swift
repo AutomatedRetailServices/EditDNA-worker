@@ -40,7 +40,7 @@ struct PlanView: View {
                     }
                 }
         }
-        .tint(CS.cyan)
+        .tint(CS.accent)
         .task { await week.refresh(session: appState.session) }
         // A guide's "Try Plan my week now".
         .onAppear { openFromGuide() }
@@ -58,30 +58,21 @@ struct PlanView: View {
 
     private var home: some View {
         ZStack {
-            CS.base.ignoresSafeArea()
+            CS.wiPage.ignoresSafeArea()
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    BrandLogo().frame(maxWidth: .infinity).padding(.top, 2)
-                    Text(L10n.tr("Plan")).font(CS.inter(32, .bold)).foregroundStyle(CS.textPrimaryF).padding(.top, 20)
-                    Text(L10n.tr("Make videos in batches and plan what to post."))
-                        .font(CS.inter(14)).foregroundStyle(Color(hex: 0x99A3BD)).padding(.top, 2)
-
-                    HStack(spacing: 8) {
-                        bigButton(icon: "⊞", title: "New Sales Mix", subtitle: "Hooks × bodies × CTAs → many videos",
-                                  highlighted: true, id: "planNewMix") { showingMix = true }
-                        bigButton(icon: "⇪", title: "Bulk", subtitle: "Upload many videos at once",
-                                  highlighted: false, id: "planBulk") { queue.requestedCreateMode = .bulk }
-                    }
-                    .padding(.top, 18)
+                    // White Indigo (Figma 1166:107): no Sales Mix / Bulk cards here (they are on Create).
+                    WIHeader { EmptyView() }
+                    WIScreenTitle(title: "Plan", subtitle: "What’s in progress and what to post.").padding(.top, 2)
 
                     HStack(alignment: .firstTextBaseline) {
-                        Text(L10n.tr("In progress")).font(CS.inter(16, .semibold)).foregroundStyle(Color.ink)
+                        Text(L10n.tr("In progress")).font(CS.sectionTitle).foregroundStyle(CS.wiInk)
                         Spacer()
                         Button(L10n.tr("See all in Edits ›")) { openEdits(focus: nil) }
-                            .font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan)
+                            .font(CS.inter(13, .semibold)).foregroundStyle(CS.accent)
                             .accessibilityIdentifier("planSeeAll")
                     }
-                    .padding(.top, 18)
+                    .padding(.top, 22)
                     VStack(spacing: 8) {
                         ForEach(mixes.active) { mix in
                             Button { openEdits(focus: mix.mixID) } label: {
@@ -104,16 +95,17 @@ struct PlanView: View {
                         }
                         if mixes.active.isEmpty && queue.activeBulks.isEmpty {
                             Text(L10n.tr("Nothing in progress. Start a Sales Mix or a Bulk."))
-                                .font(CS.inter(13)).foregroundStyle(Color(hex: 0x99A3BD))
-                                .frame(maxWidth: .infinity, minHeight: 60)
-                                .background(Color(hex: 0x0F1726), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color(hex: 0x33405C), lineWidth: 1))
+                                .font(CS.inter(13, .medium)).foregroundStyle(CS.wiSecondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 14)
+                                .frame(maxWidth: .infinity, minHeight: 64)
+                                .wiCard()
                                 .accessibilityIdentifier("planNothingInProgress")
                         }
                     }
-                    .padding(.top, 10)
+                    .padding(.top, 9)
 
-                    thisWeek.padding(.top, 18)
+                    thisWeek.padding(.top, 22)
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 20)
@@ -138,66 +130,37 @@ struct PlanView: View {
         selectTab(.edits)
     }
 
-    private func bigButton(icon: String, title: String, subtitle: String, highlighted: Bool, id: String,
-                           action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 0) {
-                Text(icon).font(CS.inter(18, .bold)).foregroundStyle(highlighted ? Color.white : Color.ink)
-                    .frame(width: 40, height: 40)
-                    .background {
-                        if highlighted {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous).fill(CS.brandFull)
-                        } else {
-                            // Day mode (Figma 1146:178): no box behind the Bulk icon.
-                            RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(dark: 0x1F2638, light: 0xFFFFFF))
-                        }
-                    }
-                Text(L10n.tr(title)).font(CS.inter(16, .bold)).foregroundStyle(Color.ink).padding(.top, 12)
-                Text(L10n.tr(subtitle)).font(CS.inter(11)).foregroundStyle(Color(hex: 0x99A3BD))
-                    .fixedSize(horizontal: false, vertical: true).padding(.top, 4)
-                Spacer(minLength: 0)
-            }
-            .padding(14.5)
-            .frame(maxWidth: .infinity, minHeight: 132, maxHeight: 132, alignment: .topLeading)
-            .background(Color(hex: 0x0F1726), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(highlighted ? (LightPalette.enabled && scheme == .light ? AnyShapeStyle(CS.brandStroke) : AnyShapeStyle(Color(hex: 0x19E5FF)))
-                                    : AnyShapeStyle(Color(hex: 0x33405C)), lineWidth: highlighted ? 1.5 : 1))
-            .dayCardShadow()
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier(id)
-    }
-
     enum Tag { case mix, bulk }
 
+    /// Figma 1166:123 / 132: thumbnail, "SALES MIX" (blue) or "BULK" (white) tag, title, detail, bar and n/total.
     private func progressCard(tag: Tag, title: String, detail: String, ready: Int, total: Int, image: UIImage?) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            Color(hex: 0x1A2236)
+            CS.wiSurface2
                 .frame(width: 40, height: 52)
                 .overlay { if let image { Image(uiImage: image).resizable().scaledToFill() } }
                 .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 8) {
-                    Text(L10n.tr(tag == .mix ? "SALES MIX" : "BULK")).font(CS.inter(9, .bold)).foregroundStyle(tag == .mix ? Color.white : Color.ink)
-                        .frame(width: tag == .mix ? 35 : 42, height: 18)
-                        .background {
-                            if tag == .mix { Capsule().fill(CS.brandFull) } else { Capsule().fill(Color(hex: 0x1F2638)) }
-                        }
-                    Text(L10n.tr(title)).font(CS.inter(14, .semibold)).foregroundStyle(Color.ink).lineLimit(1)
+                    Text(L10n.tr(tag == .mix ? "SALES MIX" : "BULK")).font(CS.inter(9, .bold))
+                        .foregroundStyle(tag == .mix ? Color(fixed: 0xFFFFFF) : CS.wiInk)
+                        .fixedSize()
+                        .padding(.horizontal, 8).frame(height: 18)
+                        .background(tag == .mix ? CS.accent : CS.wiPage, in: Capsule())
+                        .overlay(Capsule().stroke(tag == .mix ? .clear : CS.wiBorder, lineWidth: 1))
+                    Text(L10n.tr(title)).font(CS.inter(14, .semibold)).foregroundStyle(CS.wiInk).lineLimit(1)
                 }
-                Text(L10n.tr(detail)).font(CS.inter(11)).foregroundStyle(Color(hex: 0x99A3BD)).lineLimit(1).padding(.top, 6)
-                HStack(spacing: 0) {
+                Text(L10n.tr(detail)).font(CS.inter(11)).foregroundStyle(CS.wiSecondary).lineLimit(1).padding(.top, 6)
+                HStack(spacing: 12) {
                     GeometryReader { proxy in
                         ZStack(alignment: .leading) {
-                            Capsule().fill(Color(hex: 0x242B40))
-                            Capsule().fill(CS.brandFull)
+                            Capsule().fill(CS.wiPage)
+                            Capsule().fill(CS.accent)
                                 .frame(width: proxy.size.width * CGFloat(ready) / CGFloat(max(1, total)))
                         }
                     }
                     .frame(height: 6)
-                    Text(L10n.tr("\(ready)/\(total)")).font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan)
-                        .frame(width: 50, alignment: .trailing)
+                    Text(verbatim: "\(ready)/\(total)").font(CS.inter(12, .semibold)).foregroundStyle(CS.accent)
+                        .fixedSize()
                 }
                 .padding(.top, 8)
             }
@@ -205,8 +168,7 @@ struct PlanView: View {
         .padding(.horizontal, 13)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
-        .background(Color(hex: 0x0F1726), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color(hex: 0x33405C), lineWidth: 1))
+        .wiCard()
     }
 
     /// "This week": the days of this week with a dot per planned video (its product's color), and today's plan.
@@ -223,15 +185,19 @@ struct PlanView: View {
         name.locale = L10n.locale
         name.dateFormat = "EEE"
         return VStack(alignment: .leading, spacing: 0) {
-            Text(L10n.tr("This week")).font(CS.inter(16, .semibold)).foregroundStyle(Color.ink)
-            HStack(spacing: 6) {
+            Text(L10n.tr("This week")).font(CS.sectionTitle).foregroundStyle(CS.wiInk)
+            // Figma 1166:144-171: 7 days filling the width, 7 pt apart; today blue.
+            HStack(spacing: 7) {
                 ForEach(Array(days.enumerated()), id: \.offset) { _, day in
                     let isToday = calendar.isDate(day, inSameDayAs: today)
                     let key = PlanDay.iso.string(from: day)
                     Button { if week.hasWeek, slots.contains(where: { $0.date == key }) { path = [.week, .day(key)] } } label: {
                         VStack(spacing: 2) {
-                            Text(name.string(from: day).replacingOccurrences(of: ".", with: "").capitalizedFirst).font(CS.inter(11, .semibold)).foregroundStyle(Color.ink)
-                            Text(L10n.tr("\(calendar.component(.day, from: day))")).font(CS.inter(14, .bold)).foregroundStyle(Color.ink)
+                            Text(name.string(from: day).replacingOccurrences(of: ".", with: "").capitalizedFirst).font(CS.inter(11, .semibold))
+                                .foregroundStyle(isToday ? Color(fixed: 0xFFFFFF) : CS.wiInk)
+                                .lineLimit(1).minimumScaleFactor(0.8)
+                            Text(verbatim: "\(calendar.component(.day, from: day))").font(CS.inter(14, .bold))
+                                .foregroundStyle(isToday ? Color(fixed: 0xFFFFFF) : CS.wiInk)
                             HStack(spacing: 2) {
                                 ForEach(slots.filter { $0.date == key }.prefix(4)) { slot in
                                     Image(week.dot(for: slot)).resizable().frame(width: 6, height: 6)
@@ -241,33 +207,26 @@ struct PlanView: View {
                             .frame(height: 6)
                         }
                         .frame(maxWidth: .infinity).frame(height: 62)
-                        .background {
-                            if isToday {
-                                RoundedRectangle(cornerRadius: 14, style: .continuous).fill(CS.brandFull)
-                            } else {
-                                RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(hex: 0x0F1726))
-                            }
-                        }
+                        .background(isToday ? CS.accent : CS.wiPage, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(isToday ? .clear : Color(hex: 0x33405C), lineWidth: 1))
+                            .stroke(isToday ? .clear : CS.wiBorder, lineWidth: 1))
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.top, 11)
+            .padding(.top, 10)
             Button { path = week.hasWeek ? [.week] : [.goal] } label: {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(L10n.tr(cardTitle(todays: todays))).font(CS.inter(14, .semibold)).foregroundStyle(Color.ink)
+                    Text(L10n.tr(cardTitle(todays: todays))).font(CS.inter(14, .semibold)).foregroundStyle(CS.wiInk)
                         .accessibilityIdentifier("planWeekCardTitle")
-                    Text(L10n.tr(cardBody(slots: slots))).font(CS.inter(11)).foregroundStyle(Color(hex: 0x99A3BD))
+                    Text(L10n.tr(cardBody(slots: slots))).font(CS.inter(11)).foregroundStyle(CS.wiSecondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text(L10n.tr("Plan my week ›")).font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan)
+                    Text(L10n.tr("Plan my week ›")).font(CS.inter(12, .semibold)).foregroundStyle(CS.accent)
                         .padding(.top, 2)
                 }
                 .padding(15)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(hex: 0x0F1726), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color(hex: 0x33405C), lineWidth: 1))
+                .wiCard()
             }
             .buttonStyle(.plain)
             .padding(.top, 12)
