@@ -1,5 +1,8 @@
-"""Read-only: why did the 23 Oct 17:51 UTC cuts fail (RQ job error + the last failed jobs). No writes."""
+"""Diagnosis (PO 23 Oct): why the same video gets very different cuts run to run. Each video is heard ONCE (same words);
+then the engine runs N times with the normal API. Every step's answer is kept to see where the runs part ways.
+Report encrypted. Nothing written to the app's storage or Redis."""
 import json
+import time
 
 import modal
 
@@ -13,65 +16,58 @@ image = (
 )
 
 
-@app.function(image=image, secrets=[secret], timeout=600)
-def audit():
-    import os, tempfile, subprocess, json
+@app.function(image=image, secrets=[secret], timeout=600, cpu=2.0, memory=4096)
+def hear(key: str):
+    import tempfile
     from pathlib import Path
-    from redis import Redis
-    from rq.job import Job
     from cutsell_worker import storage_routing as sr
+    from cutsell_worker.media_probe import probe_media
     from cutsell_worker.simple_engine import asr
-    from cutsell_worker import simple_engine_adapter as ad
-    r = Redis.from_url(os.environ["REDIS_URL"], socket_timeout=15)
-    out = {}
-    for jid in ("ca083ad4-03cc-49f3-afe1-4df1d580e4f5",):
-        try:
-            if len(jid) < 36:
-                jid = next(k.decode().split(":")[-1] for k in r.scan_iter(f"rq:job:{jid}*", count=1000) if k.decode().count(":") == 2)
-            j = Job.fetch(jid, connection=r)
-            src = (j.args[0].get("sources") or [{}])[0]
-            meta = src.get("metadata") or {}
-            uri = src.get("uri")
-            row = {"voice_only": bool(meta.get("audio_uri")), "duration_sec_sent": src.get("duration_sec"), "language_hint": j.args[0].get("language_hint")}
-            with tempfile.TemporaryDirectory() as d:
-                local = str(Path(d) / ("a" + Path(uri).suffix))
-                bucket, key = uri[5:].split("/", 1)
-                client = sr.default_client()
-                try:
-                    client.download_file(sr.current_bucket(), key, local)
-                except Exception:
-                    sr._make_fallback_client(sr.fallback_storage()).download_file(sr.fallback_storage().bucket, key, local)
-                row["file_ext"] = Path(uri).suffix
-                p = subprocess.run(["ffprobe", "-v", "error", "-show_format", "-show_streams", "-of", "json", local], capture_output=True, text=True)
-                info = json.loads(p.stdout or "{}")
-                keep = {"format": {k: v for k, v in (info.get("format") or {}).items() if k in ("size", "bit_rate", "format_name")},
-                        "format_tags": {k: v for k, v in ((info.get("format") or {}).get("tags") or {}).items() if "location" not in k.lower() and "iso6709" not in k.lower()},
-                        "streams": [{k: v for k, v in st.items() if k in ("codec_type", "codec_name", "bit_rate", "width", "height", "r_frame_rate", "sample_rate", "channels", "duration")}
-                                    | {"tags": {k: v for k, v in (st.get("tags") or {}).items() if k in ("handler_name", "encoder", "vendor_id")}} for st in info.get("streams") or []]}
-                row["probe"] = keep
-                mp3 = asr.extract_audio(local, str(Path(d) / "x.mp3"))
-                row["mean_db"] = ad._mean_volume_db(mp3)
-                heard = asr.transcribe_words(mp3)
-                words = [w for w in heard.get("words", []) if float(w["e"]) > float(w["s"])]
-                row["detected_language"] = heard.get("language")
-                row["words_first_pass"] = len(words)
-                again = ad._heard_in_her_language(heard, mp3, lambda path, language_hint=None: asr.transcribe_words(path, language_hint=language_hint), None)
-                w2 = [w for w in again.get("words", []) if float(w["e"]) > float(w["s"])]
-                row["words_after_es_en"] = len(w2)
-                row["text_sample_words"] = len(" ".join(w["w"] for w in w2[:12]))
-                dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", local],
-                                           capture_output=True, text=True).stdout.strip() or 0)
-                row["duration_measured"] = dur
-                row["rule_no_words"] = not w2
-                row["rule_nobody_talking"] = ad._nobody_talking(w2, dur)
-                row["rule_background_voice"] = ad._only_background_voice(w2, mp3)
-            out[jid[:8]] = row
-        except Exception as e:
-            out[jid[:8]] = {"error": e.__class__.__name__ + ": " + str(e)[:300]}
-    return out
+    fb = sr.fallback_storage()
+    client = sr._make_fallback_client(fb)
+    with tempfile.TemporaryDirectory() as d:
+        path = str(Path(d) / "v.mp4")
+        client.download_file(fb.bucket, key, path)
+        duration = float(probe_media(path).duration_sec)
+        heard = asr.transcribe_words(asr.extract_audio(path, str(Path(d) / "a.mp3")))
+    return {"key": key, "duration": duration, "words": [w for w in heard["words"] if float(w["e"]) > float(w["s"])]}
+
+
+@app.function(image=image, secrets=[secret], timeout=600, cpu=1.0, memory=2048)
+def run_once(heard: dict, run: int, env: dict = None):
+    import os
+    import tempfile
+    os.environ.update(env or {})
+    from pathlib import Path
+    from cutsell_worker import storage_routing as sr
+    from cutsell_worker.simple_engine import engine, llm
+    fb = sr.fallback_storage()
+    tmp = tempfile.mkdtemp()
+    path = str(Path(tmp) / "v.mp4")
+    sr._make_fallback_client(fb).download_file(fb.bucket, heard["key"], path)
+    answers = []
+
+    def call(prompt, **kw):
+        text, usage = llm.call_anthropic(prompt, **kw)
+        answers.append({"step": usage.get("step"), "text": text[-3000:], "out_tokens": usage.get("output_tokens"),
+                        "thinking_blocks": usage.get("thinking_blocks")})
+        return text, usage
+
+    with llm.cache_scope(True, ttl="1h"):
+        out = engine.process(heard["words"], heard["duration"], path, video_path=None, scene_cut_list=[], llm=call)
+    report = llm.cache_report(out["usage"])
+    return {"key": heard["key"], "run": run, "cut_s": out["cut_duration"], "passes": out.get("passes"),
+            "kept": [(round(x["start"], 2), round(x["end"], 2)) for x in out["splits"] if x["visible"]],
+            "usd": report["usd"], "answers": answers,
+            "lines": [" ".join(heard["words"][k]["w"] for k in u) for u in engine.lines_of(heard["words"])], "log": str(out.get("log"))[:3000]}
 
 
 @app.local_entrypoint()
 def main():
+    plan = json.load(open("cache_plan.json"))
+    heard = list(hear.map(plan["videos"]))
+    args = [(h, r, plan.get("env") or {}) for h in heard for r in range(plan.get("runs", 5))]
+    rows = list(run_once.starmap(args, return_exceptions=True))
+    rows = [r if isinstance(r, dict) else {"error": str(r)[:300]} for r in rows]
     with open("engine_check.json", "w") as f:
-        json.dump({"label": "no_speech 23 Oct: the original video", "rows": [audit.remote()]}, f, indent=1, default=str)
+        json.dump({"label": plan.get("label"), "words": {h["key"]: len(h["words"]) for h in heard}, "rows": rows}, f, default=str)
