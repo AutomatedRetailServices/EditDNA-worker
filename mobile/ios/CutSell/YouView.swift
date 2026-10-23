@@ -50,12 +50,7 @@ final class AppPrefs: ObservableObject {
     /// The app's colour scheme: Automatic follows the iPhone, Dark / Light force one. The editor, the camera,
     /// processing and the intro are always dark (they keep `.appColorScheme()`).
     var colorScheme: ColorScheme? {
-        guard LightPalette.enabled else { return .dark }        // CutSell is dark only for now
-        switch appearance {
-        case .automatic: return nil
-        case .dark: return .dark
-        case .light: return .light
-        }
+        .light                  // 23 Oct: White Indigo is the only look (no Appearance choice)
     }
 
     nonisolated static var remindersOn: Bool { UserDefaults.standard.object(forKey: "cutsell.pref.notifyReminders") as? Bool ?? true }
@@ -471,7 +466,7 @@ struct PreferencesPage: View {
             YouSection(label: "GENERAL") {
                 YouRow(title: "App language", value: language.choice == .automatic ? "System Default" : language.choice.title, id: "prefLanguage") { open(.language) }
                 // Day mode is off for now (22 Oct): no Appearance row; the page and the light palette stay in the code.
-                if LightPalette.enabled {
+                if false {               // White Indigo only (23 Oct): no Appearance row
                     YouRow(title: "Appearance", value: YouStyle.title(prefs.appearance), id: "prefAppearance") { open(.appearance) }
                 }
                 YouToggleRow(title: "Haptic feedback", isOn: $prefs.haptics, divider: false, id: "prefHaptics")

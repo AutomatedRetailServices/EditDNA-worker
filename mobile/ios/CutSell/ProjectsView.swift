@@ -325,7 +325,7 @@ struct ProjectsView: View {
             .padding(.top, 16)
             if let focus = queue.focus {
                 HStack {
-                    Text(L10n.tr(mixCenter.mixes.contains { $0.mixID == focus } ? "Showing this Mix" : "Showing this Bulk"))
+                    Text(L10n.tr(mixCenter.mixes.contains { $0.mixID == focus } ? "Showing this Sales Mix" : "Showing this Bulk"))
                         .font(CS.inter(12, .semibold)).foregroundStyle(Color(hex: 0x99A3BD))
                     Spacer()
                     Button(L10n.tr("Show all")) { queue.focus = nil }

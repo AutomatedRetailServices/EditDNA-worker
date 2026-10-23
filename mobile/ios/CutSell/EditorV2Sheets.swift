@@ -130,7 +130,10 @@ struct VoiceOverRecordSheet: View {
     @State private var playing = false
     @State private var saving = false
 
-    var body: some View {
+    // White Indigo (23 Oct): the voice over keeps its approved (dark) design.
+    var body: some View { voiceOverContent.environment(\.colorScheme, .dark) }
+
+    @ViewBuilder private var voiceOverContent: some View {
         VStack(spacing: 0) {
             Capsule().fill(Color(hex: 0x3A5280)).frame(width: 40, height: 4).padding(.top, 10)
             HStack(spacing: 10) {

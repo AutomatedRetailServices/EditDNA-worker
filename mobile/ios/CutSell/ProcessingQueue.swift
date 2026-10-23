@@ -317,7 +317,7 @@ struct QueueRowView: View {
         case .failed where isNoSpeech:
             // Nobody talks in it: Retry would fail again; it can still be a clip of a Mix.
             Button { AppRouter.shared.pending = .mix } label: {
-                Text(L10n.tr("Use in Mix"))
+                Text(L10n.tr("Use in Sales Mix"))
                     .font(CS.inter(10, .semibold))
                     .foregroundStyle(CS.cyan)
                     .lineLimit(1)

@@ -494,7 +494,7 @@ struct TeleprompterSheet: View {
                     Button { Task { await split() } } label: {
                         Group {
                             if splitting { ProgressView().tint(.white) }
-                            else { Text(L10n.tr("✦ Split for Mix")).font(CS.inter(13, .semibold)).foregroundStyle(.white) }
+                            else { Text(L10n.tr("✦ Split for Sales Mix")).font(CS.inter(13, .semibold)).foregroundStyle(.white) }
                         }
                         .frame(maxWidth: .infinity).frame(height: 32)
                         .background(Color(fixed: 0x121A2B), in: Capsule())
@@ -596,7 +596,7 @@ struct TeleprompterSheet: View {
 
     private func split() async {
         save()
-        guard let session = appState.session else { notice = "Sign in or continue to use Split for Mix."; return }
+        guard let session = appState.session else { notice = "Sign in or continue to use Split for Sales Mix."; return }
         splitting = true
         defer { splitting = false }
         do {
@@ -604,10 +604,10 @@ struct TeleprompterSheet: View {
                 "/v1/scripts/split", method: "POST",
                 body: SplitBody(user_id: session.userID, script: draft, product: store.label), timeout: 40)
             store.setParts(answer.parts, for: store.key)
-            notice = "Split into Hook, Body, Benefit and CTA. Each part shows when you record that Mix section."
+            notice = "Split into Hook, Body, Benefit and CTA. Each part shows when you record that Sales Mix section."
             CutSellDiagnostics.log("prompter_split", ["ok": "1"])
         } catch {
-            notice = "Split for Mix isn't available right now. Your script is saved."
+            notice = "Split for Sales Mix isn't available right now. Your script is saved."
             CutSellDiagnostics.log("prompter_split", ["ok": "0", "error": String(describing: error).prefix(80).description])
         }
     }

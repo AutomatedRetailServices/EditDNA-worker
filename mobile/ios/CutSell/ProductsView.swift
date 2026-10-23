@@ -530,8 +530,8 @@ struct ProductDetailView: View {
     private var mixBanner: some View {
         let total = mix?.total ?? mixVideos.count
         let ready = mix?.ready ?? mixVideos.filter { $0.bucket != "processing" }.count
-        let text = ready >= total ? "✦  Mix ready: \(total) videos from \(mix?.clipCount ?? 0) clips"
-            : "✦  Making your Mix: \(ready) of \(total) ready"
+        let text = ready >= total ? "✦  Sales Mix ready: \(total) videos from \(mix?.clipCount ?? 0) clips"
+            : "✦  Making your Sales Mix: \(ready) of \(total) ready"
         return Text(L10n.tr(text)).font(CS.inter(13, .semibold)).foregroundStyle(.white)
             .padding(.horizontal, 12.5)
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
@@ -549,7 +549,7 @@ struct ProductDetailView: View {
         guard let detail else { return "" }
         if route.mixID != nil {
             let n = mix?.total ?? mixVideos.count
-            return [detail.brand, "Mix", "\(n) video\(n == 1 ? "" : "s")"].compactMap { $0 }.joined(separator: " · ")
+            return [detail.brand, "Sales Mix", "\(n) video\(n == 1 ? "" : "s")"].compactMap { $0 }.joined(separator: " · ")
         }
         let parts = [detail.brand, detail.category, "\(detail.videos.count) video\(detail.videos.count == 1 ? "" : "s")"]
         return parts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
@@ -581,7 +581,7 @@ struct ProductDetailView: View {
                 }
                 .overlay(alignment: .topLeading) {
                     if video.mixCode != nil {
-                        Text(L10n.tr("MIX")).font(CS.inter(9, .bold)).foregroundStyle(.white)
+                        Text(L10n.tr("SALES MIX")).font(CS.inter(9, .bold)).foregroundStyle(.white)
                             .frame(width: 34, height: 18).background(CS.brandFull, in: Capsule()).padding(7)
                             .accessibilityIdentifier("mixBadge")
                     }

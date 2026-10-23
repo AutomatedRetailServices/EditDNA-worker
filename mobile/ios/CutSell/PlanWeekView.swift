@@ -983,7 +983,7 @@ struct PlanWeekView: View {
                                     .font(CS.inter(12)).foregroundStyle(PlanStyle.muted).lineLimit(2)
                             }
                             Spacer()
-                            Button(L10n.tr("New Mix ›"), action: onNewMix).font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
+                            Button(L10n.tr("New Sales Mix ›"), action: onNewMix).font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
                                 .accessibilityIdentifier("weekNewMix")
                         }
                         .padding(.horizontal, 13).padding(.vertical, 10)
@@ -1217,7 +1217,7 @@ struct PlanDayView: View {
                 .overlay { if let image = thumbnails.image(for: slot.projectID) { Image(uiImage: image).resizable().scaledToFill() } }
                 .overlay(alignment: .topLeading) {
                     if slot.mixCode != nil {
-                        Text(L10n.tr("MIX")).font(CS.inter(9, .bold)).foregroundStyle(.white).frame(width: 34, height: 18)
+                        Text(L10n.tr("SALES MIX")).font(CS.inter(9, .bold)).foregroundStyle(.white).fixedSize().padding(.horizontal, 6).frame(height: 18)
                             .background(CS.brandFull, in: Capsule()).padding(8)
                     }
                 }

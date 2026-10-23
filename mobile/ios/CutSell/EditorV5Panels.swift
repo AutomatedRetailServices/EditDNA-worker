@@ -494,7 +494,10 @@ struct VoiceClipPanelV5: View {
     private static let cardBG = Color(hex: 0x0C1730), border = Color(hex: 0x19345F), control = Color(hex: 0x0A1326)
     private static let secondary = Color(hex: 0xAFC4E8), muted = Color(hex: 0x6F86AE), error = Color(hex: 0xFF4D67)
 
-    var body: some View {
+    // White Indigo (23 Oct): the voice over keeps its approved (dark) design.
+    var body: some View { voiceOverContent.environment(\.colorScheme, .dark) }
+
+    @ViewBuilder private var voiceOverContent: some View {
         let duck = clip?.duckVideo ?? false
         let clean = model.cleanUpOn(.audio(clipID))
         ZStack(alignment: .topLeading) {
@@ -792,7 +795,10 @@ struct VoiceOverSheetV5: View {
     private var isRecording: Bool { recorder.state == .recording }
     private var takeURL: URL? { recorder.recordedURL }
 
-    var body: some View {
+    // White Indigo (23 Oct): the voice over keeps its approved (dark) design.
+    var body: some View { voiceOverContent.environment(\.colorScheme, .dark) }
+
+    @ViewBuilder private var voiceOverContent: some View {
         VStack(spacing: 0) {
             Capsule().fill(Color(hex: 0x455987)).frame(width: 38, height: 5).padding(.top, 12)
             if step == .record { recordStep } else { reviewStep }

@@ -234,7 +234,10 @@ struct VoiceOverPanel: View {
     private var takeURL: URL? { recorder.recordedURL }
     private var isRecording: Bool { recorder.state == .recording }
 
-    var body: some View {
+    // White Indigo (23 Oct): the voice over keeps its approved (dark) design.
+    var body: some View { voiceOverContent.environment(\.colorScheme, .dark) }
+
+    @ViewBuilder private var voiceOverContent: some View {
         VStack(spacing: 0) {
             Capsule().fill(Color(hex: 0x455987)).frame(width: 38, height: 5).padding(.top, 13)
             recordSection
@@ -686,7 +689,6 @@ struct OverlayGallerySheet: View {
         .background(Color(hex: 0x0A1326).ignoresSafeArea())
         .presentationDetents(sampleTiles ? [.fraction(0.55), .large] : [.large])
         .presentationBackground(Color(hex: 0x0A1326))
-        .preferredColorScheme(.dark)
         .accessibilityIdentifier("overlayGallery")
     }
 

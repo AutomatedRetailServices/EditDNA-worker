@@ -274,7 +274,6 @@ struct EditorV4View: View {
     private func lifecycle<V: View>(_ view: V) -> some View {
         view
             .toolbar(.hidden, for: .navigationBar)
-            .preferredColorScheme(.dark)
             .task(id: previewKey) { await playback.rebuild(from: model) }
             .onChange(of: playback.currentTime) { _, time in
                 if abs(model.playheadTime - time) >= 0.1 || time == 0 { model.playheadTime = time }

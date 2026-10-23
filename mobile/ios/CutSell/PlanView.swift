@@ -67,7 +67,7 @@ struct PlanView: View {
                         .font(CS.inter(14)).foregroundStyle(Color(hex: 0x99A3BD)).padding(.top, 2)
 
                     HStack(spacing: 8) {
-                        bigButton(icon: "⊞", title: "New Mix", subtitle: "Hooks × bodies × CTAs → many videos",
+                        bigButton(icon: "⊞", title: "New Sales Mix", subtitle: "Hooks × bodies × CTAs → many videos",
                                   highlighted: true, id: "planNewMix") { showingMix = true }
                         bigButton(icon: "⇪", title: "Bulk", subtitle: "Upload many videos at once",
                                   highlighted: false, id: "planBulk") { queue.requestedCreateMode = .bulk }
@@ -85,7 +85,7 @@ struct PlanView: View {
                     VStack(spacing: 8) {
                         ForEach(mixes.active) { mix in
                             Button { openEdits(focus: mix.mixID) } label: {
-                                progressCard(tag: .mix, title: mix.product ?? "Mix",
+                                progressCard(tag: .mix, title: mix.product ?? "Sales Mix",
                                              detail: [mix.brand, "\(mix.ready) of \(mix.total) ready"].compactMap { $0 }.joined(separator: " · "),
                                              ready: mix.ready, total: mix.total,
                                              image: mix.videos.lazy.compactMap { thumbnails.image(for: $0.projectID) }.first)
@@ -103,7 +103,7 @@ struct PlanView: View {
                             .accessibilityIdentifier("planProgressBulk")
                         }
                         if mixes.active.isEmpty && queue.activeBulks.isEmpty {
-                            Text(L10n.tr("Nothing in progress. Start a Mix or a Bulk."))
+                            Text(L10n.tr("Nothing in progress. Start a Sales Mix or a Bulk."))
                                 .font(CS.inter(13)).foregroundStyle(Color(hex: 0x99A3BD))
                                 .frame(maxWidth: .infinity, minHeight: 60)
                                 .background(Color(hex: 0x0F1726), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -179,7 +179,7 @@ struct PlanView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 8) {
-                    Text(L10n.tr(tag == .mix ? "MIX" : "BULK")).font(CS.inter(9, .bold)).foregroundStyle(tag == .mix ? Color.white : Color.ink)
+                    Text(L10n.tr(tag == .mix ? "SALES MIX" : "BULK")).font(CS.inter(9, .bold)).foregroundStyle(tag == .mix ? Color.white : Color.ink)
                         .frame(width: tag == .mix ? 35 : 42, height: 18)
                         .background {
                             if tag == .mix { Capsule().fill(CS.brandFull) } else { Capsule().fill(Color(hex: 0x1F2638)) }

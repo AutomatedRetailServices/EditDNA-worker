@@ -53,18 +53,28 @@ enum CS {
     // MARK: Gradients
 
     /// Main call-to-action ("Create 1 cut", "Allow camera"...).
-    static let ctaGradient = LinearGradient(
-        colors: [Color(hex: 0x0DC7FF), Color(hex: 0x1459FF), Color(hex: 0xBF1AFF)],
+    static let ctaGradient = LinearGradient(          // White Indigo: accent #1769FF → #4A5BFF
+        colors: [Color(fixed: 0x1769FF), Color(fixed: 0x4A5BFF)],
         startPoint: .leading, endPoint: .trailing
     )
+    /// White Indigo accent (#1769FF), its soft tint (#EEF3FF) and the neutral black button (#0B1020).
+    static let accent = Color(fixed: 0x1769FF)
+    static let accentSoft = Color(fixed: 0xEEF3FF)
+    static let accentGradient = ctaGradient
+    static let neutralButton = Color(fixed: 0x0B1020)
+    static let wiSuccess = Color(fixed: 0x1FA971), wiSuccessBg = Color(fixed: 0xEAF8F1), wiReady = Color(fixed: 0x33D98C)
+    static let wiError = Color(fixed: 0xE5484D), wiErrorBg = Color(fixed: 0xFFF7F7), wiErrorBg2 = Color(fixed: 0xFDECEC)
+    static let wiWarning = Color(fixed: 0xF5A524), wiWarningBg = Color(fixed: 0xFFF4E0)
+    static let wiPage = Color(fixed: 0xFFFFFF), wiCard = Color(fixed: 0xF8F9FB), wiSurface2 = Color(fixed: 0xF3F5F9)
+    static let wiBorder = Color(fixed: 0xE6E9EF), wiInk = Color(fixed: 0x0B1020), wiSecondary = Color(fixed: 0x6B7385)
     /// Smaller primary buttons on alert screens (cyan → pink).
     static let alertButtonGradient = LinearGradient(
-        colors: [Color(hex: 0x19E6FF), Color(hex: 0x1769FF), Color(hex: 0xF01ADB)],
+        colors: [Color(fixed: 0x1769FF), Color(fixed: 0x4A5BFF)],
         startPoint: .leading, endPoint: .trailing
     )
     /// Selected segment / filter chip.
-    static let selectedGradient = LinearGradient(
-        colors: [Color(hex: 0x0DCCFF), Color(hex: 0x1459FF)],
+    static let selectedGradient = LinearGradient(     // White Indigo: the active pill is solid accent
+        colors: [Color(fixed: 0x1769FF), Color(fixed: 0x1769FF)],
         startPoint: .leading, endPoint: .trailing
     )
     /// Selected recording length chip and record ring.
@@ -103,18 +113,28 @@ enum CS {
 
     // MARK: Fonts
 
-    /// Inter, the typeface used across the Figma screens (falls back to the system font).
+    /// The app's typeface. White Indigo (23 Oct): Plus Jakarta Sans (SIL OFL, bundled) on every screen; the name
+    /// `inter` stays so every screen switches at once.
     static func inter(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
         AppFontLoader.registerIfNeeded()
         let name: String
         switch weight {
-        case .bold, .heavy, .black: name = "Inter-Bold"
-        case .semibold: name = "Inter-SemiBold"
-        case .medium: name = "Inter-Medium"
-        default: name = "Inter-Regular"
+        case .heavy, .black: name = "PlusJakartaSans-ExtraBold"
+        case .bold: name = "PlusJakartaSans-Bold"
+        case .semibold: name = "PlusJakartaSans-SemiBold"
+        case .medium: name = "PlusJakartaSans-Medium"
+        default: name = "PlusJakartaSans-Regular"
         }
         return .custom(name, fixedSize: size)
     }
+
+    /// White Indigo type scale (Figma): screen title ExtraBold 32 (-2 %), section Bold 17, card Bold 15, body Medium
+    /// 13–15, small Medium 12, pills SemiBold 13.
+    static func jakarta(_ size: CGFloat, _ weight: Font.Weight = .medium) -> Font { inter(size, weight) }
+    static let screenTitle = jakarta(32, .heavy)
+    static let screenTitleTracking: CGFloat = -0.64
+    static let sectionTitle = jakarta(17, .bold)
+    static let cardTitle = jakarta(15, .bold)
 
     /// SF Pro, used by the camera screen in Figma.
     static func sf(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
@@ -137,7 +157,7 @@ extension Color {
 enum LightPalette {
     /// Day mode switch. Off (22 Oct): every screen draws the dark CutSell look, whatever the iPhone uses.
     /// Turn on to bring back You › Preferences › Appearance and the light palette below.
-    static let enabled = false
+    static let enabled = true          // 23 Oct: White Indigo is CutSell's only look
 
     nonisolated(unsafe) private static var cache: [UInt64: UIColor] = [:]
     private static let lock = NSLock()
@@ -145,21 +165,24 @@ enum LightPalette {
     /// Day-mode rules (Figma 1146:2 / 1146:91 / 1146:178): page #F5F7FB, white cards, text #0B1020, secondary
     /// #5B6275, borders #E2E6EF. Brand colors and the gradient stay as they are; cyan used as text or a link is
     /// `CS.cyan` / `CS.link`, which turn #1769FF in day mode (never cyan on white).
-    static let page: UInt32 = 0xF5F7FB, card: UInt32 = 0xFFFFFF, ink: UInt32 = 0x0B1020,
-               secondary: UInt32 = 0x5B6275, muted: UInt32 = 0x8A91A3, border: UInt32 = 0xE2E6EF, accent: UInt32 = 0x1769FF
+    // White Indigo (PO 23 Oct, Figma 12_Prototype): page #FFFFFF, cards #F8F9FB, surface 2 #F3F5F9, borders #E6E9EF,
+    // text #0B1020 / #6B7385, accent #1769FF. Grey text keeps #6B7385 everywhere (legible on white).
+    static let page: UInt32 = 0xFFFFFF, card: UInt32 = 0xF8F9FB, surface2: UInt32 = 0xF3F5F9, ink: UInt32 = 0x0B1020,
+               secondary: UInt32 = 0x6B7385, muted: UInt32 = 0x6B7385, border: UInt32 = 0xE6E9EF, accent: UInt32 = 0x1769FF
 
     /// Hand-set light values for the foundation tokens (dark hex → light hex).
     private static let tokens: [UInt32: UInt32] = [
         // backgrounds
         0x070910: page, 0x04060E: page, 0x090B1A: page, 0x020308: page, 0x050814: page, 0x03050D: page, 0x050B1C: page,
         0x030409: page,
-        // sheets, cards and controls
-        0x03050B: card, 0x060B18: card, 0x03060F: card, 0x060E1D: card, 0x040812: card, 0x0C1730: card, 0x0F1726: card,
-        0x0D121F: card, 0x050A17: card,
-        0x0A1326: card, 0x10182A: 0xF0F3F8, 0x1F2638: 0xEEF1F7, 0x1A2236: 0xEEF1F7, 0x121A2B: 0xF0F3F8,
+        // sheets (white), cards and controls
+        0x03050B: page, 0x060B18: page, 0x03060F: card, 0x060E1D: card, 0x040812: card, 0x0C1730: card, 0x0F1726: card,
+        0x0D121F: page, 0x050A17: surface2, 0x141C2E: card, 0x141F33: page, 0x081226: surface2, 0x060B17: surface2,
+        0x0A1326: surface2, 0x10182A: surface2, 0x1F2638: surface2, 0x1A2236: surface2, 0x121A2B: surface2,
         // borders
         0x14336B: border, 0x1A335E: border, 0x1A386B: border, 0x14478C: border, 0x1F4794: border, 0x144080: border,
-        0x19345F: border, 0x143866: border, 0x26334D: border, 0x33405C: border,
+        0x19345F: border, 0x143866: border, 0x26334D: border, 0x33405C: border, 0x24529E: border, 0x3A5280: 0xD5DAE3,
+        0x4D5770: 0xD5DAE3,
         // text
         0xF7FAFF: ink, 0xF0F7FF: ink, 0xFFFFFF: ink,
         0xA3B8E0: secondary, 0xAFC4E8: secondary, 0x99A3BD: secondary, 0x9EB2E0: secondary, 0xB0C4E8: secondary,
@@ -256,8 +279,8 @@ extension View {
 private struct DayCardShadow: ViewModifier {
     @Environment(\.colorScheme) private var scheme
     func body(content: Content) -> some View {
-        content.shadow(color: LightPalette.enabled && scheme == .light ? Color(fixed: 0x0D1433, opacity: 0.08) : .clear,
-                       radius: 5, x: 0, y: 2)
+        content   // White Indigo cards are flat (1 pt border), no shadow
+
     }
 }
 
@@ -275,52 +298,47 @@ enum AppFontLoader {
             guard let url = Bundle.main.url(forResource: name, withExtension: "otf") else { continue }
             CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
         }
+        for weight in ["Regular", "Medium", "SemiBold", "Bold", "ExtraBold"] {
+            guard let url = Bundle.main.url(forResource: "PlusJakartaSans-" + weight, withExtension: "ttf") else { continue }
+            CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+        }
     }
 }
 
 // MARK: - Components
 
-/// The official CutSell.ai logo (Figma "Brand/Logo/Official", 132 × 44).
+/// The official CutSell.ai logo: Figma logo file, Logo/Horizontal 2:23 (vector PDF with its glow; "CutSell." black, "ai"
+/// with its gradient), ~172 pt wide in the headers. `width` keeps the old call sites working.
 struct BrandLogo: View {
-    var width: CGFloat = 132
-    @Environment(\.colorScheme) private var scheme
+    var width: CGFloat = 172
 
     var body: some View {
-        Group {
-            if LightPalette.enabled && scheme == .light {
-                // Figma 1147:4422-4424: the bag icon + "CutSell" dark + ".ai" with the gradient.
-                HStack(spacing: 2 * width / 132) {
-                    Image("BrandLogo").resizable().interpolation(.high)
-                        .frame(width: width, height: width / 3)
-                        .frame(width: 34 * width / 132, height: width / 3, alignment: .leading)
-                        .clipped()
-                    Text(verbatim: "CutSell")
-                        .font(CS.inter(21 * width / 132, .bold))
-                        .tracking(-0.63 * width / 132)
-                        .foregroundStyle(Color(fixed: 0x0B1020))
-                    + Text(verbatim: ".ai").font(CS.inter(21 * width / 132, .bold))
-                        .foregroundStyle(CS.brandStroke)
-                }
-                .frame(width: width, height: width / 3, alignment: .leading)
-            } else {
-                Image("BrandLogo")
-                    .resizable()
-                    .interpolation(.high)
-                    .scaledToFit()
-                    .frame(width: width, height: width / 3)
-            }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(L10n.tr("CutSell.ai"))
+        Image("LogoHorizontal")
+            .resizable()
+            .interpolation(.high)
+            .scaledToFit()
+            .frame(width: width, height: width * 425.5 / 1089)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(L10n.tr("CutSell.ai"))
+    }
+}
+
+/// The bag icon of the same logo (Logo/Icon 2:24), with its glow, no letters.
+struct BrandIcon: View {
+    var size: CGFloat = 64
+    var body: some View {
+        Image("LogoIcon").resizable().interpolation(.high).scaledToFit()
+            .frame(width: size, height: size * 421 / 410)
+            .accessibilityHidden(true)
     }
 }
 
 /// Full-width gradient button (Figma "Create 1 cut", 56 high, radius 20).
 struct PrimaryButton: View {
     let title: String
-    var height: CGFloat = 56
-    var cornerRadius: CGFloat = 20
-    var fontSize: CGFloat = 18
+    var height: CGFloat = 52
+    var cornerRadius: CGFloat = 26
+    var fontSize: CGFloat = 16
     var gradient: LinearGradient = CS.ctaGradient
     var textColor: Color = .white
     var isEnabled: Bool = true
@@ -334,7 +352,6 @@ struct PrimaryButton: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: height)
                 .background(gradient, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                .shadow(color: Color(hex: 0x1459FF, opacity: 0.35), radius: 12)
                 .opacity(isEnabled ? 1 : 0.45)
         }
         .buttonStyle(.plain)
@@ -345,22 +362,22 @@ struct PrimaryButton: View {
 /// Dark outlined secondary button (Figma "Keep Current Selection", "Remove a clip").
 struct SecondaryButton: View {
     let title: String
-    var height: CGFloat = 46
-    var cornerRadius: CGFloat = 16
-    var fontSize: CGFloat = 14
+    var height: CGFloat = 52
+    var cornerRadius: CGFloat = 26
+    var fontSize: CGFloat = 15
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Text(L10n.tr(title))
-                .font(CS.inter(fontSize, .semibold))
-                .foregroundStyle(.white)
+                .font(CS.inter(fontSize, .bold))
+                .foregroundStyle(CS.wiInk)
                 .frame(maxWidth: .infinity)
                 .frame(height: height)
-                .background(Color(hex: 0x050A17), in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .background(CS.wiPage, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .stroke(Color(hex: 0x24529E), lineWidth: 1)
+                        .stroke(CS.wiInk, lineWidth: 1.5)
                 )
         }
         .buttonStyle(.plain)
@@ -381,8 +398,8 @@ struct SegmentedPill<Option: Hashable>: View {
                     withAnimation(.easeOut(duration: 0.15)) { selection = option }
                 } label: {
                     Text(L10n.tr(title(option)))
-                        .font(CS.inter(15, isSelected ? .semibold : .medium))
-                        .foregroundStyle(.white)
+                        .font(CS.inter(13, .semibold))
+                        .foregroundStyle(isSelected ? Color.white : CS.wiInk)
                         .frame(maxWidth: .infinity)
                         .frame(height: 36)
                         .background {
@@ -414,7 +431,7 @@ struct OptionCard: View {
             VStack(spacing: 4) {
                 Text(L10n.tr(title))
                     .font(CS.inter(15, .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(CS.wiInk)
                 Text(L10n.tr(subtitle))
                     .font(CS.inter(10))
                     .foregroundStyle(CS.textMuted)
@@ -442,7 +459,7 @@ struct FilterChip: View {
         Button(action: action) {
             Text(L10n.tr(title))
                 .font(CS.inter(13, .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(isSelected ? Color.white : CS.wiInk)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
                 .frame(maxWidth: .infinity)
@@ -450,7 +467,6 @@ struct FilterChip: View {
                 .background {
                     if isSelected {
                         RoundedRectangle(cornerRadius: 19, style: .continuous).fill(CS.selectedGradient)
-                            .shadow(color: Color(hex: 0x0DCCFF, opacity: 0.35), radius: 8)
                     } else {
                         RoundedRectangle(cornerRadius: 19, style: .continuous).fill(CS.chipInactive)
                     }
@@ -468,7 +484,7 @@ struct FilterChip: View {
 
 /// Round outlined header button (Figma Edits search / more).
 struct CircleIconButton<Icon: View>: View {
-    var size: CGFloat = 34
+    var size: CGFloat = 40
     let action: () -> Void
     @ViewBuilder let icon: () -> Icon
 
@@ -476,9 +492,9 @@ struct CircleIconButton<Icon: View>: View {
         Button(action: action) {
             icon()
                 .frame(width: size, height: size)
-                // Day mode (Figma 1146:91): dark round buttons with white icons.
-                .background(Color(dark: 0x050A17, light: 0x0B1020), in: Circle())
-                .overlay(Circle().stroke(Color(dark: 0x144080, light: 0x0B1020), lineWidth: 1))
+                // White Indigo: #F3F5F9 with a 1 pt border, black icon.
+                .background(CS.wiSurface2, in: Circle())
+                .overlay(Circle().stroke(CS.wiBorder, lineWidth: 1))
         }
         .buttonStyle(.plain)
     }
@@ -505,8 +521,8 @@ struct CheckboxRow: View {
                     }
                 }
                 Text(L10n.tr(title))
-                    .font(CS.inter(13))
-                    .foregroundStyle(.white)
+                    .font(CS.inter(13, .medium))
+                    .foregroundStyle(CS.wiInk)
                 Spacer(minLength: 0)
             }
         }
@@ -525,14 +541,14 @@ struct BottomSheetOverlay<Content: View>: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             if isPresented {
-                Color.black.opacity(0.55)
+                Color.black.opacity(0.45)
                     .ignoresSafeArea()
                     .onTapGesture { isPresented = false }
                     .transition(.opacity)
                 VStack(spacing: 0) {
                     Capsule()
-                        .fill(Color(hex: 0x3A5280))
-                        .frame(width: 40, height: 4)
+                        .fill(Color(fixed: 0xD5DAE3))
+                        .frame(width: 40, height: 5)
                         .frame(maxWidth: .infinity)
                         .padding(.top, 10)
                         .padding(.bottom, 14)
@@ -548,12 +564,8 @@ struct BottomSheetOverlay<Content: View>: View {
                     content()
                 }
                 .background(alignment: .top) {
-                    UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24, style: .continuous)
-                        .fill(CS.sheet)
-                        .overlay(
-                            UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24, style: .continuous)
-                                .stroke(CS.cardBorder, lineWidth: 1)
-                        )
+                    UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28, style: .continuous)
+                        .fill(CS.wiPage)
                         .ignoresSafeArea(edges: .bottom)
                 }
                 .offset(y: drag)
@@ -567,7 +579,7 @@ struct BottomSheetOverlay<Content: View>: View {
 /// Dark full-screen background used by every redesigned screen.
 struct ScreenBackground: View {
     var body: some View {
-        CS.screenBackground.ignoresSafeArea()
+        CS.wiPage.ignoresSafeArea()
     }
 }
 

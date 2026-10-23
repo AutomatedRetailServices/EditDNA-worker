@@ -179,7 +179,7 @@ struct HomeHubView: View {
                     .background(CS.brandFull, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(CS.borderDefault, lineWidth: 1))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(L10n.tr("Mix"))
+                    Text(L10n.tr("Sales Mix"))
                         .font(CS.inter(16, .bold))
                         .foregroundStyle(CS.textPrimaryF)
                     Text(L10n.tr("Hooks × bodies × CTAs → many videos"))

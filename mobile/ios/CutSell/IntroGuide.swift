@@ -45,7 +45,7 @@ struct IntroView: View {
     private static let bodies = [
         "CutSell removes silences, mistakes and repeats for you.",
         "Add captions, zoom, sounds and your voice. Everything is editable.",
-        "Use Bulk or Mix to turn a few clips into dozens of videos.",
+        "Use Bulk or Sales Mix to turn a few clips into dozens of videos.",
         "Pick your times. We remind you and have each video ready to post.",
     ]
 
@@ -116,8 +116,6 @@ struct IntroView: View {
                 .padding(.bottom, 24)
             }
         }
-        .environment(\.colorScheme, .dark)
-        .preferredColorScheme(.dark)
         // .contain keeps each control's own id (intro_next, intro_skip).
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("introView")
@@ -362,14 +360,14 @@ struct Guide: Identifiable, Hashable {
                 GuideStep(title: "Let CutSell cut",
                           body: "Tap Create. You can tap Continue in background; the cut waits for you in My videos."),
               ], tryTitle: "Try Upload now", destination: .upload),
-        Guide(id: "mix", glyph: "⊞", gradientIcon: true, title: "Mix: many videos from a few clips", name: "Mix",
+        Guide(id: "mix", glyph: "⊞", gradientIcon: true, title: "Sales Mix: many videos from a few clips", name: "Sales Mix",
               subtitle: "Turn a few clips into many videos.", steps: [
-                GuideStep(title: "Pick your product", body: "Tap Mix in Create or New Mix in Plan, then choose the product."),
+                GuideStep(title: "Pick your product", body: "Tap Sales Mix in Create or New Sales Mix in Plan, then choose the product."),
                 GuideStep(title: "Record or add clips", body: "Add 1–10 clips to each part: Hook, Body, Benefit and CTA."),
                 GuideStep(title: "Check the count", body: "We show how many videos come out, like 3 × 2 × 2 × 2 = 24."),
                 GuideStep(title: "Pick how many", body: "Make them all or choose 6, 12 or 18. We keep them different."),
                 GuideStep(title: "Make videos", body: "They appear in My videos › Processing and move to Ready one by one."),
-              ], tryTitle: "Try Mix now", destination: .mix),
+              ], tryTitle: "Try Sales Mix now", destination: .mix),
         Guide(id: "editor", glyph: "✂", gradientIcon: false, title: "Editor basics", name: "Editor basics",
               subtitle: "Cut, fix and export a video.", steps: [
                 GuideStep(title: "Open a cut", body: "In My videos, tap a cut to open it in the editor."),
@@ -399,7 +397,7 @@ struct Guide: Identifiable, Hashable {
         Guide(id: "teleprompter", glyph: "≡", gradientIcon: false, title: "Teleprompter", name: "Teleprompter",
               subtitle: "Read your script while you record.", steps: [
                 GuideStep(title: "Write or paste",
-                          body: "In Record with CutSell, tap Script. Paste or write it; it’s saved for that product. ✦ Split for Mix sends each part to its Mix section."),
+                          body: "In Record with CutSell, tap Script. Paste or write it; it’s saved for that product. ✦ Split for Sales Mix sends each part to its Sales Mix section."),
                 GuideStep(title: "Set speed and size", body: "Choose the scroll speed and text size, and keep Start after 3·2·1 on."),
                 GuideStep(title: "Record with script",
                           body: "The text scrolls near the lens and pauses when you pause. Tap it to move, resize or edit it."),

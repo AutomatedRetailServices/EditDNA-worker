@@ -257,11 +257,11 @@ final class MixSubmitter: ObservableObject {
         }
         let clips = sections.flatMap(\.clips)
         let started = Date()
-        let project = try await Retry.run("project") { try await appState.createProject(title: "Mix · \(productName)") }
+        let project = try await Retry.run("project") { try await appState.createProject(title: "Sales Mix · \(productName)") }
         let projectID = project.projectID
         ActiveUploads.shared.insert(projectID)
         defer { ActiveUploads.shared.remove(projectID) }
-        let record = PendingCutRecord(projectID: projectID, title: "Mix · \(productName)", mode: "Mix", audioOverlap: false,
+        let record = PendingCutRecord(projectID: projectID, title: "Sales Mix · \(productName)", mode: "Mix", audioOverlap: false,
                                       autoZoom: true,
                                       videos: clips.map { PendingCutVideo(filePath: $0.video.url.path, name: $0.video.name,
                                                                           duration: $0.video.duration,
@@ -293,7 +293,7 @@ final class MixSubmitter: ObservableObject {
             }
             out.append(Section(name: section.name, clips: items))
         }
-        step = "Starting your Mix…"
+        step = "Starting your Sales Mix…"
         struct Body: Encodable {
             let user_id: String; let project_id: String; let product_id: String; let sections: [Section]; let how_many: Int?
         }
@@ -377,7 +377,7 @@ struct MixSetupView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     ZStack {
-                        Text(L10n.tr("Mix")).font(CS.inter(18, .bold)).foregroundStyle(Color.ink)
+                        Text(L10n.tr("Sales Mix")).font(CS.inter(18, .bold)).foregroundStyle(Color.ink)
                         HStack {
                             Button(action: onClose) { Text(L10n.tr("✕")).font(CS.inter(20, .medium)).foregroundStyle(Color.ink) }
                                 .accessibilityIdentifier("mixClose")
@@ -426,7 +426,7 @@ struct MixSetupView: View {
                 Color.black.opacity(0.7).ignoresSafeArea()
                 VStack(spacing: 14) {
                     ProgressView().tint(CS.cyan)
-                    Text(L10n.tr(submitter.step.isEmpty ? "Preparing your Mix…" : submitter.step))
+                    Text(L10n.tr(submitter.step.isEmpty ? "Preparing your Sales Mix…" : submitter.step))
                         .font(CS.inter(14, .semibold)).foregroundStyle(.white).multilineTextAlignment(.center)
                     Text(L10n.tr("Keep CutSell open until the audio is sent. The videos keep uploading in the background."))
                         .font(CS.inter(12)).foregroundStyle(Color(hex: 0x99A3BD)).multilineTextAlignment(.center)
@@ -671,7 +671,7 @@ struct MixSetupView: View {
             onStarted(summary)
         } catch {
             CutSellDiagnostics.log("mix_start_failed", Retry.fields(error))
-            errorMessage = "Your Mix couldn’t start. Check your connection and try again."
+            errorMessage = "Your Sales Mix couldn’t start. Check your connection and try again."
         }
     }
 }
@@ -786,7 +786,7 @@ struct MixProductPicker: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(L10n.tr("Which product is this Mix for?")).font(CS.inter(20, .bold)).foregroundStyle(.white).padding(.top, 28)
+            Text(L10n.tr("Which product is this Sales Mix for?")).font(CS.inter(20, .bold)).foregroundStyle(.white).padding(.top, 28)
             ScrollView {
                 VStack(spacing: 0) {
                     ForEach(store.allProducts, id: \.product.productID) { pair in
@@ -852,10 +852,10 @@ struct MixGroupRow: View {
         Button(action: onOpen) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
-                    Text(L10n.tr("MIX")).font(CS.inter(9, .bold)).foregroundStyle(.white)
+                    Text(L10n.tr("SALES MIX")).font(CS.inter(9, .bold)).foregroundStyle(.white)
                         .frame(width: 34, height: 18).background(CS.brandFull, in: Capsule())
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(L10n.tr("Mix · \(mix.total) video\(mix.total == 1 ? "" : "s")")).font(CS.inter(14, .semibold)).foregroundStyle(.white)
+                        Text(L10n.tr("Sales Mix · \(mix.total) video\(mix.total == 1 ? "" : "s")")).font(CS.inter(14, .semibold)).foregroundStyle(.white)
                             .accessibilityIdentifier("mixGroupTitle")
                         Text([mix.brand, mix.product].compactMap { $0 }.joined(separator: " · ")
                              + (mix.brand == nil && mix.product == nil ? "\(mix.clipCount) clips" : ""))
@@ -932,7 +932,7 @@ final class MixExporter: ObservableObject {
                 }
                 guard let link else { failed += 1; continue }
                 let (temporary, _) = try await URLSession.shared.download(from: link)
-                let file = FileManager.default.temporaryDirectory.appendingPathComponent("CutSell-Mix-\(UUID().uuidString).mp4")
+                let file = FileManager.default.temporaryDirectory.appendingPathComponent("CutSell-Sales Mix-\(UUID().uuidString).mp4")
                 try FileManager.default.moveItem(at: temporary, to: file)
                 try await PHPhotoLibrary.shared().performChanges {
                     PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: file)

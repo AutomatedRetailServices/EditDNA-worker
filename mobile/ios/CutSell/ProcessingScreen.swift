@@ -50,7 +50,6 @@ struct CutProgressView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
-        .preferredColorScheme(.dark)
         .onAppear { tracker.visibleProjectID = projectID }
         .onChange(of: projectID) { _, id in tracker.visibleProjectID = id }
         .onDisappear { if tracker.visibleProjectID == projectID { tracker.visibleProjectID = nil } }
