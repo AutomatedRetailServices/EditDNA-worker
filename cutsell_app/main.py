@@ -47,7 +47,7 @@ from cutsell_worker.draft_store import (
     undo_draft_snapshot,
 )
 from cutsell_worker.jobs import cancel_job, fetch_job_snapshot
-from cutsell_worker.queueing import enqueue_export, enqueue_flow_b, enqueue_video_followup
+from cutsell_worker.queueing import ProcessingLimitError, enqueue_export, enqueue_flow_b, enqueue_video_followup
 from cutsell_worker.serde import draft_from_dict
 from .clean_audio_routes import router as clean_audio_router
 from cutsell_worker.source_identity import stable_source_id
@@ -385,7 +385,11 @@ def submit_flow_b(payload: FlowBSubmitRequest):
     # always forwarded) drives normalization exactly as it did before D-134.
     if payload.dialogue_overlap_enabled is not None:
         processing_payload["dialogue_overlap_enabled"] = payload.dialogue_overlap_enabled
-    submission = enqueue_flow_b(processing_payload)
+    try:
+        submission = enqueue_flow_b(processing_payload)
+    except ProcessingLimitError:
+        # 23 Oct: was an unhandled 500; the app retries a 429.
+        raise HTTPException(status_code=429, detail="processing_concurrency_limit", headers={"Retry-After": "60"})
     return FlowBSubmitResponse(job_id=submission.job_id, queue=submission.queue_name)
 
 

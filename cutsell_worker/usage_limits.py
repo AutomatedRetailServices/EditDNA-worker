@@ -84,15 +84,18 @@ def _concurrency_key(user_id: str) -> str:
     return f"cutsell:v1:concurrency:{digest}"
 
 
-def reserve_processing_slot(*, user_id: str, client=None, ttl_sec: int = 7200) -> dict:
-    """Atomically reserve one processing slot for a user before enqueueing work."""
+def reserve_processing_slot(*, user_id: str, client=None, ttl_sec: int = 7200, extra: int = 0) -> dict:
+    """Atomically reserve one processing slot for a user before enqueueing work.
+
+    `extra` (23 Oct): more slots for one Bulk send -- each of its videos may wait up to 30 min in the Batch API,
+    so a Bulk of N needs N slots at once (capped by the caller)."""
     config = load_runtime_config()
     if client is None:
         if not config.redis_url:
             return {"allowed": True, "status": "not_configured", "active": None}
         from redis import Redis
         client = Redis.from_url(config.redis_url)
-    limit = max(1, int(config.max_concurrent_jobs_per_user))
+    limit = max(1, int(config.max_concurrent_jobs_per_user)) + max(0, int(extra))
     script = """
     local current = tonumber(redis.call('GET', KEYS[1]) or '0')
     local limit = tonumber(ARGV[1])

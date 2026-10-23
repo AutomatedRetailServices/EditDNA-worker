@@ -26,13 +26,33 @@ def get_queue(name: str = "cutsell"):
     return Queue(name, connection=connection)
 
 
+BULK_MAX_VIDEOS = 10
+
+
+class ProcessingLimitError(RuntimeError):
+    """The user already has as many cuts processing as allowed (API answers 429, the app retries later)."""
+
+
+def bulk_extra_slots(payload: dict) -> int:
+    """A Bulk send's videos run side by side (Batch API: up to 30 min each), so the send gets one slot per video,
+    at most BULK_MAX_VIDEOS. Single / Combine: 0."""
+    size = 0
+    for src in payload.get("sources") or []:
+        meta = (src or {}).get("metadata") or {}
+        try:
+            size = max(size, int(str(meta.get("bulk_size") or "0")))
+        except ValueError:
+            continue
+    return max(0, min(size, BULK_MAX_VIDEOS) - 1)
+
+
 def enqueue_flow_b(payload: dict, *, queue=None, timeout: int = 3600) -> QueueSubmission:
     user_id = str(payload.get("user_id") or "")
     reserved = False
     if user_id:
-        slot = reserve_processing_slot(user_id=user_id)
+        slot = reserve_processing_slot(user_id=user_id, extra=bulk_extra_slots(payload))
         if not slot.get("allowed"):
-            raise RuntimeError("processing_concurrency_limit")
+            raise ProcessingLimitError("processing_concurrency_limit")
         reserved = True
     try:
         target = queue or get_queue()

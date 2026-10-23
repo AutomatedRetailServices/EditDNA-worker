@@ -64,3 +64,21 @@ Nothing here is deployed until the Product Owner says so. Rollback of server and
 - Same cut: the request is identical; run-to-run variation of the model is the same by batch as by the normal API
   (two normal runs of the same 5 videos differed as much as normal vs batch).
 - App: a video processing for over 8 min says "Taking a little longer, we'll notify you".
+
+## 23 Oct (after the deploy) — Bulk vs the "2 cuts at once" limit
+- Each user may have 2 cuts processing at once (`CUTSELL_MAX_CONCURRENT_JOBS_PER_USER`, unchanged since before). With the
+  Batch API a Bulk video now holds its slot 10–17 min, so videos 3–5 of a Bulk would be refused (the app retries 3 times
+  in seconds). Found by the production check (an unhandled 500); no real user was affected.
+- Fix (`feat/bulk-batch-api`, not deployed yet): a Bulk send gets one slot per video (`bulk_size`, max 10); Single and
+  Combine keep the limit of 2. The limit answers 429 `processing_concurrency_limit` (Retry-After 60) instead of a 500.
+
+## 23 Oct — why the same video gets different cuts (diagnosis, no code change)
+- Where the runs split: the pass step. The engine goes MULTI-PASS (keeps only one "backbone" pass) when the model marks
+  2+ passes as complete. In the bloopers each "pass" is a different product, so one wobbly yes/no (is the 2nd pitch
+  complete?) flips the cut between "everything cleaned" (56–92 s) and "one pitch" (11–43 s).
+- Same words, 5 runs each: Bloppers5 58–71 s ×4 and 11 s ×1; Bloppers2 88 s ×1 and 43 s ×4; Bloppers3 35 s ×5.
+  Pass step at full thinking (instead of medium): Bloppers5 56–62 s ×5 (stable); Bloppers2 still 43 s ×4, 92 s ×1.
+- The two "complete passes" of Bloppers2 share only 15–20 % of their words (lip gloss vs perfume): different pitches,
+  not retakes.
+- Proposed (needs a Gold check before turning on): (1) pass step back to full thinking; (2) MULTI-PASS only when 2+
+  complete passes are retakes of the same pitch (word overlap above a threshold measured on the Gold), else SINGLE PASS.
