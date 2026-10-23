@@ -532,7 +532,7 @@ struct ProductDetailView: View {
             .padding(.horizontal, 12.5)
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .background(Color(hex: 0x121A2B), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color(hex: 0x19E5FF), lineWidth: 1.5))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(CS.accent, lineWidth: 1.5))
             .accessibilityIdentifier("mixBanner")
     }
 

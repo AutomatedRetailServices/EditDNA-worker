@@ -87,9 +87,8 @@ struct ExportSettingsView: View {
         }
         .frame(width: 118, height: 210)
         .clipShape(RoundedRectangle(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color(hex: 0x19E6FF, opacity: 0.8), lineWidth: 1.5))
-        .shadow(color: Color(hex: 0x7C3AED, opacity: 0.22), radius: 12, y: 5)
-        .shadow(color: Color(hex: 0x19E6FF, opacity: 0.28), radius: 9)
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color(fixed: 0xFFFFFF), lineWidth: 3))
+        .shadow(color: Color(fixed: 0x1769FF, opacity: 0.28), radius: 16, y: 12)       // White Indigo video frame
         .padding(.top, 34)
     }
 
@@ -180,7 +179,7 @@ struct ExportSettingsView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(verbatim: "✦  " + (is4K ? L10n.tr("4K export selected")
                                          : info.originals ? L10n.tr("Original quality detected") : L10n.tr("1080p copy (original not found)")))
-                .font(CS.inter(13, .semibold)).foregroundStyle(Color(hex: 0x19E6FF))
+                .font(CS.inter(13, .semibold)).foregroundStyle(CS.accent)
             Text(verbatim: "\(info.width) × \(info.height)  •  \(info.fps) fps  •  \(info.codec)  •  \(info.hdr ? "HDR" : "SDR")")
                 .font(CS.inter(12)).foregroundStyle(CS.textSecondaryF)
         }

@@ -632,7 +632,7 @@ struct EditsFilterChip: View {
     var body: some View {
         Button(action: action) {
             Text(L10n.tr(title))
-                .font(CS.sf(12, .semibold))
+                .font(CS.inter(12, .semibold))
                 .foregroundStyle(Color(hex: 0xF0F7FF))
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)

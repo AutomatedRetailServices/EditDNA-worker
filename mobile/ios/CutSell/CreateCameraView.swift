@@ -174,7 +174,7 @@ struct CreateCameraView: View {
 
                 if let error = camera.errorMessage {
                     Text(L10n.tr(error))
-                        .font(CS.sf(13, .medium))
+                        .font(CS.inter(13, .medium))
                         .foregroundStyle(.white)
                         .multilineTextAlignment(.center)
                         .padding(12)
@@ -242,7 +242,7 @@ struct CreateCameraView: View {
                         .foregroundStyle(camera.mirrorOn ? CS.cyan : .white)
                         .frame(width: 36, height: 36)
                     Text(L10n.tr("Mirror"))
-                        .font(CS.sf(13, .semibold))
+                        .font(CS.inter(13, .semibold))
                         .lineLimit(1).minimumScaleFactor(0.75)
                         .foregroundStyle(camera.mirrorOn ? CS.cyan : .white)
                 }
@@ -269,12 +269,12 @@ struct CreateCameraView: View {
                 Text(verbatim: "≡").font(CS.inter(16, .bold)).foregroundStyle(.white)
                     .frame(width: 36, height: 36)
                     .background {
-                        if on { RoundedRectangle(cornerRadius: 10, style: .continuous).fill(CS.brandStroke) }
+                        if on { RoundedRectangle(cornerRadius: 10, style: .continuous).fill(CS.accentGradient) }
                         else { RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.black.opacity(0.5))
                                 .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.white.opacity(0.25), lineWidth: 1)) }
                     }
                 Text(L10n.tr("Script")).font(CS.inter(12, .semibold))
-                    .foregroundStyle(on ? Color(fixed: 0x19E6FF) : .white)
+                    .foregroundStyle(on ? Color(fixed: 0x4A8BFF) : .white)
                     .lineLimit(1).minimumScaleFactor(0.8)
             }
             .frame(width: 62)
@@ -322,7 +322,7 @@ struct CreateCameraView: View {
             VStack(spacing: 4) {
                 Image(image).resizable().frame(width: size.width, height: size.height)
                 Text(L10n.tr(title))
-                    .font(CS.sf(13, .semibold))
+                    .font(CS.inter(13, .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
@@ -340,12 +340,12 @@ struct CreateCameraView: View {
                     preset = item
                 } label: {
                     Text(L10n.tr(item.title))
-                        .font(CS.sf(isSelected ? 16 : 15, isSelected ? .bold : .semibold))
+                        .font(CS.inter(isSelected ? 16 : 15, isSelected ? .bold : .semibold))
                         .foregroundStyle(.white)
                         .frame(width: isSelected ? 84 : 54, height: 42)
                         .background {
                             if isSelected {
-                                Capsule().fill(CS.brandGradient)
+                                Capsule().fill(CS.accentGradient)
                                     .shadow(color: Color(hex: 0x1769FF, opacity: 0.28), radius: 6)
                             }
                         }
@@ -364,7 +364,7 @@ struct CreateCameraView: View {
         } label: {
             ZStack {
                 Circle().fill(Color(hex: 0x45474F)).frame(width: 104, height: 104)
-                Circle().fill(CS.brandGradient).frame(width: 90, height: 90)
+                Circle().fill(CS.accentGradient).frame(width: 90, height: 90)
                     .shadow(color: Color(hex: 0x1769FF, opacity: 0.45), radius: 9)
                 Circle().fill(CS.background).frame(width: 78, height: 78)
                 if camera.isRecording {
@@ -392,7 +392,7 @@ struct CreateCameraView: View {
                     .overlay(RoundedRectangle(cornerRadius: 9).stroke(CS.cyan, lineWidth: 2))
                     .shadow(color: CS.cyan.opacity(0.24), radius: 5)
                 Text(L10n.tr("Upload"))
-                    .font(CS.sf(14, .bold))
+                    .font(CS.inter(14, .bold))
                     .foregroundStyle(.white)
             }
         }

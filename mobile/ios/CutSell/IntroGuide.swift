@@ -490,7 +490,7 @@ struct GuidePage: View {
     private func row(_ guide: Guide) -> some View {
         Button { withAnimation(.easeOut(duration: 0.2)) { open = guide } } label: {
             HStack(spacing: 10) {
-                Text(verbatim: guide.glyph).font(.system(size: 15, weight: .bold)).foregroundStyle(guide.gradientIcon ? Color.white : Color.ink)
+                Text(verbatim: guide.glyph).font(CS.inter(15, .bold)).foregroundStyle(guide.gradientIcon ? Color.white : Color.ink)
                     .frame(width: 36, height: 36)
                     .background {
                         if guide.gradientIcon {
@@ -564,7 +564,7 @@ struct GuideDetailPage: View {
                     dismiss()
                 } label: {
                     Text(L10n.tr(guide.tryTitle))
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(CS.inter(15, .semibold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .frame(height: 50)

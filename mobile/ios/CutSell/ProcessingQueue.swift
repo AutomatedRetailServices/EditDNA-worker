@@ -490,15 +490,11 @@ struct BulkStartedSheet: View {
                 .padding(.top, 16)
             Button(action: onGoToEdits) {
                 Text(L10n.tr("Go to Edits"))
-                    .font(CS.sf(15, .semibold))
+                    .font(CS.inter(16, .bold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 50)
-                    .background(LinearGradient(stops: [.init(color: Color(hex: 0x1969FF), location: 0),
-                                                       .init(color: Color(hex: 0x7C3AED), location: 0.55),
-                                                       .init(color: Color(hex: 0x19E6FF), location: 1)],
-                                               startPoint: .leading, endPoint: .trailing), in: Capsule())
-                    .shadow(color: Color(hex: 0x1969FF, opacity: 0.25), radius: 9, y: 6)
+                    .frame(height: 52)
+                    .background(CS.accentGradient, in: Capsule())
             }
             .buttonStyle(.plain)
             .padding(.top, 18)
@@ -544,8 +540,7 @@ struct BulkStartedSheet: View {
         .overlay {
             if highlighted {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(LinearGradient(colors: [Color(hex: 0x19E5FF), Color(hex: 0xFF21D7)],
-                                           startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.5)
+                    .stroke(CS.accent, lineWidth: 1.5)
             } else {
                 RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color(hex: 0x33405C), lineWidth: 1)
             }

@@ -714,11 +714,11 @@ struct PlanGoalView: View {
 
                     Button { Task { await build() } } label: {
                         Group {
-                            if building { ProgressView().tint(.white) } else { Text(L10n.tr("Build my plan")).font(CS.sf(15, .semibold)) }
+                            if building { ProgressView().tint(.white) } else { Text(L10n.tr("Build my plan")).font(CS.inter(15, .semibold)) }
                         }
                         .foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 50)
                         .background(Capsule().fill(PlanStyle.cta))
-                        .shadow(color: Color(hex: 0x1969FF).opacity(0.25), radius: 9, y: 6)
+                        
                     }
                     .disabled(building || ready == 0)
                     .padding(.top, 18)
@@ -1130,7 +1130,7 @@ struct MoveSlotSheet: View {
                     } catch { errorMessage = "Couldn’t move it. Please try again." }
                 }
             } label: {
-                Text(L10n.tr("Move")).font(CS.sf(15, .semibold)).foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 50)
+                Text(L10n.tr("Move")).font(CS.inter(15, .semibold)).foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 50)
                     .background(Capsule().fill(PlanStyle.cta))
             }
             .accessibilityIdentifier("moveSave")

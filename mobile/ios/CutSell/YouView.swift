@@ -322,10 +322,10 @@ struct YouScreen<Content: View>: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel(L10n.tr("Back"))
                     .accessibilityIdentifier("youBack")
-                    Text(L10n.tr(title)).font(.system(size: 22, weight: .semibold)).foregroundStyle(YouStyle.primary)
+                    Text(L10n.tr(title)).font(CS.inter(22, .semibold)).foregroundStyle(YouStyle.primary)
                 }
                 .padding(.leading, -16)
-                Text(L10n.tr(subtitle)).font(.system(size: 13)).foregroundStyle(YouStyle.secondary).padding(.top, 11)
+                Text(L10n.tr(subtitle)).font(CS.inter(13, .medium)).foregroundStyle(YouStyle.secondary).padding(.top, 11)
                 content()
             }
             .padding(.horizontal, 24)
@@ -340,7 +340,7 @@ struct YouSection<Content: View>: View {
     @ViewBuilder var content: () -> Content
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(L10n.tr(label)).font(.system(size: 12, weight: .semibold)).foregroundStyle(CS.cyan)
+            Text(L10n.tr(label)).font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan)
             VStack(spacing: 0) { content() }
                 .padding(.horizontal, 15)
                 .youCard(radius: 18)
@@ -370,19 +370,19 @@ struct YouRow: View {
                 HStack(alignment: .center, spacing: 10) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(L10n.tr(title)).font(.system(size: bold ? 17 : 14, weight: bold && !weightRegular ? .semibold : .regular)).foregroundStyle(titleColor)
-                        if let detail { Text(L10n.tr(detail)).font(.system(size: 11)).foregroundStyle(YouStyle.muted) }
+                        if let detail { Text(L10n.tr(detail)).font(CS.inter(11, .medium)).foregroundStyle(YouStyle.muted) }
                     }
                     Spacer(minLength: 8)
                     if let badge {
-                        Text(L10n.tr(badge)).font(.system(size: 9, weight: .bold)).foregroundStyle(Color(hex: 0xFFB020))
+                        Text(L10n.tr(badge)).font(CS.inter(9, .bold)).foregroundStyle(Color(hex: 0xFFB020))
                             .padding(.horizontal, 9).frame(height: 18)
                             .background(Capsule().fill(Color(hex: 0xFFB020, opacity: 0.12)))
                             .overlay(Capsule().stroke(Color(hex: 0xFFB020, opacity: 0.8), lineWidth: 1))
                     }
                     if let value {
-                        Text(verbatim: L10n.tr(value) + (chevron ? "  ›" : "")).font(.system(size: 12)).foregroundStyle(YouStyle.secondary)
+                        Text(verbatim: L10n.tr(value) + (chevron ? "  ›" : "")).font(CS.inter(12, .medium)).foregroundStyle(YouStyle.secondary)
                     } else if chevron {
-                        Text(verbatim: "›").font(.system(size: 20)).foregroundStyle(YouStyle.muted)
+                        Text(verbatim: "›").font(CS.inter(20, .medium)).foregroundStyle(YouStyle.muted)
                     }
                 }
                 .frame(minHeight: 50)
@@ -407,13 +407,13 @@ struct YouToggleRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text(L10n.tr(title)).font(.system(size: 14)).foregroundStyle(YouStyle.primary)
+                Text(L10n.tr(title)).font(CS.inter(14, .medium)).foregroundStyle(YouStyle.primary)
                 Spacer()
                 Toggle("", isOn: $isOn).labelsHidden().tint(Color(hex: 0x1769FF)).accessibilityIdentifier(id)
             }
             .frame(minHeight: 50)
             if let note {
-                Text(L10n.tr(note)).font(.system(size: 11)).foregroundStyle(YouStyle.muted)
+                Text(L10n.tr(note)).font(CS.inter(11, .medium)).foregroundStyle(YouStyle.muted)
                     .fixedSize(horizontal: false, vertical: true).padding(.bottom, 14).padding(.trailing, 60)
             }
             if divider { Rectangle().fill(YouStyle.border).frame(height: 1) }
@@ -436,7 +436,7 @@ struct YouChoiceRow: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 5) {
                         Text(verbatim: title).font(.system(size: 17, weight: chosen ? .semibold : .regular)).foregroundStyle(YouStyle.primary)
-                        Text(verbatim: detail).font(.system(size: 11)).foregroundStyle(YouStyle.muted)
+                        Text(verbatim: detail).font(CS.inter(11, .medium)).foregroundStyle(YouStyle.muted)
                     }
                     Spacer()
                     ZStack {
@@ -460,9 +460,9 @@ struct YouNoteCard: View {
     let lines: [String]
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(L10n.tr(title)).font(.system(size: 15, weight: .semibold)).foregroundStyle(YouStyle.primary)
+            Text(L10n.tr(title)).font(CS.inter(15, .semibold)).foregroundStyle(YouStyle.primary)
             ForEach(lines, id: \.self) { line in
-                Text(L10n.tr(line)).font(.system(size: 11.5)).foregroundStyle(YouStyle.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(L10n.tr(line)).font(CS.inter(11.5, .medium)).foregroundStyle(YouStyle.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(15)
@@ -594,9 +594,9 @@ struct StoragePage: View {
     var body: some View {
         YouScreen(title: "Storage", subtitle: "On this iPhone", back: back) {
             VStack(spacing: 6) {
-                Text(verbatim: StorageUsage.format(total)).font(.system(size: 34, weight: .bold)).foregroundStyle(YouStyle.primary)
+                Text(verbatim: StorageUsage.format(total)).font(CS.inter(34, .bold)).foregroundStyle(YouStyle.primary)
                     .accessibilityIdentifier("storageTotal")
-                Text(L10n.tr("On this iPhone")).font(.system(size: 13)).foregroundStyle(YouStyle.muted)
+                Text(L10n.tr("On this iPhone")).font(CS.inter(13, .medium)).foregroundStyle(YouStyle.muted)
             }
             .frame(maxWidth: .infinity)
             .padding(.top, 28)
@@ -616,7 +616,7 @@ struct StoragePage: View {
             } label: {
                 HStack(spacing: 8) {
                     if freeing { ProgressView().tint(.white) }
-                    Text(L10n.tr("Free up space")).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white)
+                    Text(L10n.tr("Free up space")).font(CS.inter(16, .semibold)).foregroundStyle(.white)
                 }
                 .frame(maxWidth: .infinity).frame(height: 52)
                 .background(Color(hex: 0x1769FF), in: RoundedRectangle(cornerRadius: 16))
@@ -626,7 +626,7 @@ struct StoragePage: View {
             .padding(.top, 20)
             .accessibilityIdentifier("storageFree")
             if let freed {
-                Text(L10n.tr("Freed \(StorageUsage.format(freed))")).font(.system(size: 13)).foregroundStyle(YouStyle.muted)
+                Text(L10n.tr("Freed \(StorageUsage.format(freed))")).font(CS.inter(13, .medium)).foregroundStyle(YouStyle.muted)
                     .frame(maxWidth: .infinity).padding(.top, 8).accessibilityIdentifier("storageFreed")
             }
             YouNoteCard(title: "Storage", lines: [
@@ -664,7 +664,7 @@ struct LanguagePage: View {
                 "Privacy and legal pages open in the selected language when available.",
             ])
             Text(L10n.tr("Video filenames and technical metadata remain unchanged."))
-                .font(.system(size: 11)).foregroundStyle(YouStyle.muted).padding(.top, 34)
+                .font(CS.inter(11, .medium)).foregroundStyle(YouStyle.muted).padding(.top, 34)
         }
     }
 
@@ -765,11 +765,11 @@ struct HelpPage: View {
                 "No video, audio or transcript is sent unless you choose it in the report.",
             ])
             if let notice {
-                Text(L10n.tr(notice)).font(.system(size: 12, weight: .semibold)).foregroundStyle(CS.cyan).padding(.top, 14)
+                Text(L10n.tr(notice)).font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan).padding(.top, 14)
                     .accessibilityIdentifier("helpNotice")
             }
             Text(verbatim: YouStyle.versionLine)
-                .font(.system(size: 12)).foregroundStyle(YouStyle.muted).padding(.top, 34)
+                .font(CS.inter(12, .medium)).foregroundStyle(YouStyle.muted).padding(.top, 34)
                 .contentShape(Rectangle())
                 .onTapGesture { versionTapped() }
                 .accessibilityIdentifier("appVersion")
@@ -836,7 +836,7 @@ struct AccountPage: View {
                 } else {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(L10n.tr("Sign in with Apple to keep your projects on every iPhone you use."))
-                            .font(.system(size: 12)).foregroundStyle(YouStyle.secondary).fixedSize(horizontal: false, vertical: true)
+                            .font(CS.inter(12, .medium)).foregroundStyle(YouStyle.secondary).fixedSize(horizontal: false, vertical: true)
                         AppleSignInButton()
                     }
                     .padding(.vertical, 14)
@@ -844,9 +844,9 @@ struct AccountPage: View {
             }
             if let userID = session?.userID {
                 Text(verbatim: L10n.tr("Account ID") + "  •  " + YouStyle.masked(userID))
-                    .font(.system(size: 11)).foregroundStyle(YouStyle.muted).padding(.top, 24)
+                    .font(CS.inter(11, .medium)).foregroundStyle(YouStyle.muted).padding(.top, 24)
                 Text(L10n.tr("This ID links your projects across iPhone and web."))
-                    .font(.system(size: 11.5)).foregroundStyle(YouStyle.secondary).padding(.top, 10)
+                    .font(CS.inter(11.5, .medium)).foregroundStyle(YouStyle.secondary).padding(.top, 10)
             }
             VStack(spacing: 0) {
                 YouRow(title: "Delete account", detail: "Permanently removes account and eligible data", titleColor: CS.error,
@@ -908,13 +908,13 @@ struct PrivacyPage: View {
                 }
             }
             Button { legal = .privacy } label: {
-                Text(verbatim: L10n.tr("Privacy Policy") + "  ›").font(.system(size: 13, weight: .semibold)).foregroundStyle(CS.cyan)
+                Text(verbatim: L10n.tr("Privacy Policy") + "  ›").font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
             }
             .buttonStyle(.plain)
             .padding(.top, 30)
             .accessibilityIdentifier("privacyPolicyLink")
             Button { legal = .terms } label: {
-                Text(verbatim: L10n.tr("Terms of Use") + "  ›").font(.system(size: 13, weight: .semibold)).foregroundStyle(CS.cyan)
+                Text(verbatim: L10n.tr("Terms of Use") + "  ›").font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
             }
             .buttonStyle(.plain)
             .padding(.top, 14)
@@ -937,9 +937,9 @@ struct PlanUsagePage: View {
             YouSection(label: "THIS MONTH") {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
-                        Text(L10n.tr("Edits processed")).font(.system(size: 14, weight: .semibold)).foregroundStyle(YouStyle.primary)
+                        Text(L10n.tr("Edits processed")).font(CS.inter(14, .semibold)).foregroundStyle(YouStyle.primary)
                         Spacer()
-                        Text(verbatim: "\(used) / \(limit)").font(.system(size: 14, weight: .semibold)).foregroundStyle(YouStyle.primary)
+                        Text(verbatim: "\(used) / \(limit)").font(CS.inter(14, .semibold)).foregroundStyle(YouStyle.primary)
                     }
                     ZStack(alignment: .leading) {
                         RoundedRectangle(cornerRadius: 3).fill(YouStyle.control).frame(height: 6)
@@ -956,7 +956,7 @@ struct PlanUsagePage: View {
                        divider: false)
             }
             Text(L10n.tr("Resets \(YouStyle.nextMonthStart())"))
-                .font(.system(size: 11)).foregroundStyle(YouStyle.muted).padding(.top, 20)
+                .font(CS.inter(11, .medium)).foregroundStyle(YouStyle.muted).padding(.top, 20)
         }
     }
 }

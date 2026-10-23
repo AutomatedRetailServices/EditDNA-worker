@@ -609,10 +609,10 @@ struct MixSetupView: View {
             .padding(.top, 16)
             Button { Task { await make(howMany: total > MixCenter.maxVideos ? MixCenter.maxVideos : nil) } } label: {
                 Text(L10n.tr("Make \(min(total, MixCenter.maxVideos)) video\(total == 1 ? "" : "s")"))
-                    .font(CS.sf(15, .semibold)).foregroundStyle(.white)
+                    .font(CS.inter(15, .semibold)).foregroundStyle(.white)
                     .frame(maxWidth: .infinity).frame(height: 50)
                     .background(Capsule().fill(MixStyle.cta))
-                    .shadow(color: Color(hex: 0x1969FF).opacity(0.25), radius: 9, y: 6)
+                    
             }
             .disabled(!filled || sending)
             .opacity(filled ? 1 : 0.5)
@@ -736,10 +736,10 @@ struct MixHowManySheet: View {
                 .padding(.top, 14)
             Button { onMake(choice ?? (total > MixCenter.maxVideos ? MixCenter.maxVideos : nil)) } label: {
                 Text(L10n.tr("Make \(count) video\(count == 1 ? "" : "s")"))
-                    .font(CS.sf(15, .semibold)).foregroundStyle(.white)
+                    .font(CS.inter(15, .semibold)).foregroundStyle(.white)
                     .frame(maxWidth: .infinity).frame(height: 50)
                     .background(Capsule().fill(MixStyle.cta))
-                    .shadow(color: Color(hex: 0x1969FF).opacity(0.25), radius: 9, y: 6)
+                    
             }
             .padding(.top, 16)
             .accessibilityIdentifier("mixHowManyMake")
