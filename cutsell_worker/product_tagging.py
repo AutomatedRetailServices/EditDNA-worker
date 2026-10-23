@@ -304,6 +304,21 @@ def album_hint_of(sources) -> str | None:
     return None
 
 
+def given_product(sources) -> dict | None:
+    """23 Oct (PO): the brand / product the creator chose in the app ("What are you promoting?"), sent in the source
+    metadata (product_id and / or brand + product). None when she did not choose (Bulk "Detect for me", old app)."""
+    for source in sources or []:
+        meta = getattr(source, "metadata", None) if not isinstance(source, dict) else source.get("metadata")
+        if not isinstance(meta, dict):
+            continue
+        product_id = str(meta.get("product_id") or "").strip()
+        brand = str(meta.get("brand") or "").strip()
+        product = str(meta.get("product") or "").strip()
+        if product_id or (brand and product):
+            return {"product_id": product_id or None, "brand": brand[:80] or None, "product": product[:80] or None}
+    return None
+
+
 def enabled() -> bool:
     """CUTSELL_PRODUCT_TAGGING=0 turns the step off (rollback without a redeploy)."""
     return os.environ.get("CUTSELL_PRODUCT_TAGGING", "1").strip() != "0"
@@ -316,6 +331,24 @@ def tag_and_record(*, user_id: str, project_id: str, draft: dict, sources, video
         return {"status": "off"}
     try:
         from . import product_catalog
+        # The creator already said what she is promoting: no Haiku (text or photo) detection; her choice is placed.
+        given = given_product(sources)
+        if given:
+            placed = None
+            if given["product_id"]:
+                try:
+                    placed = product_catalog.assign(user_id, [project_id], product_id=given["product_id"], client=client)
+                except KeyError:
+                    placed = None                       # an id this server does not know: fall back to the names
+            if placed is None and given["brand"] and given["product"]:
+                placed = product_catalog.assign(user_id, [project_id], brand=given["brand"], product=given["product"],
+                                                client=client)
+            if placed is not None:
+                return {"status": "given", "product_id": placed.get("product_id"), "cost_usd": 0.0}
+        entry = product_catalog.video_entry(user_id, project_id, client=client) or {}
+        if entry.get("source") == "user" and entry.get("product_id"):
+            # Placed by hand before the cut finished (the app assigns right after the upload): nothing to detect.
+            return {"status": "given", "product_id": entry.get("product_id"), "cost_usd": 0.0}
         known = product_catalog.known_names(product_catalog.load(user_id, client=client))
         result = tag(draft, known, video_path=video_path, duration=duration, album_hint=album_hint_of(sources))
         entry = product_catalog.record_ai_result(user_id, project_id, result, client=client)
