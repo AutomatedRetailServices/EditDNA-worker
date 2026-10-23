@@ -129,13 +129,22 @@ jobs:
             set +e
             TEST_RUNNER_CUTSELL_PROBE_TOKEN="$PROBE_TOKEN" TEST_RUNNER_CUTSELL_PROBE_USER="$PROBE_USER" \
             TEST_RUNNER_CUTSELL_PROBE_API="https://cutsell-api.onrender.com" TEST_RUNNER_B24_OUT="$RUNNER_TEMP/b24" TEST_RUNNER_CUTSELL_SIM_APPEARANCE="${{ inputs.appearance || 'dark' }}" \
-            TEST_RUNNER_CUTSELL_PLAN_FIXTURE="${{ inputs.plan_fixture }}" \
+            TEST_RUNNER_CUTSELL_PLAN_FIXTURE="${{ inputs.plan_fixture }}" TEST_RUNNER_CUTSELL_COMPARE_SERVER_EXPORT="1" \
               xcodebuild test-without-building -project CutSell.xcodeproj -scheme CutSellUITests -sdk iphonesimulator \
                 -destination "id=$SIM_UDID" -derivedDataPath build -only-testing:CutSellUITests/Build24UITests/$t \
                 CODE_SIGNING_ALLOWED=NO > "$RUNNER_TEMP/test_$t.log" 2>&1
             [ $? -ne 0 ] && status=1
             set -e
             grep -E "B24UI|error:|failed|passed" "$RUNNER_TEMP/test_$t.log" | grep -v Bearer | tail -60 > "$RUNNER_TEMP/b24/xctest_$t.txt" || true
+            if [ "$t" = "testDeviceExport" ]; then
+              data=$(xcrun simctl get_app_container "$SIM_UDID" ai.cutsell.app data 2>/dev/null || true)
+              n=0
+              for f in $(ls -t "$data"/tmp/CutSell-*.mp4 2>/dev/null | head -2); do
+                n=$((n+1))
+                ffprobe -v error -show_entries stream=codec_name,width,height,r_frame_rate,bit_rate:format=duration,size -of compact "$f" > "$RUNNER_TEMP/b24/export_file_$n.txt" 2>&1 || true
+                for s in 1 3 6; do ffmpeg -loglevel error -y -ss $s -i "$f" -frames:v 1 -vf scale=360:-2 "$RUNNER_TEMP/b24/export_file_${n}_${s}s.png" || true; done
+              done
+            fi
             xcrun simctl spawn "$SIM_UDID" log show --start "$start" --style compact \
               --predicate 'subsystem == "ai.cutsell.app"' 2>/dev/null | grep -oE '(prepare_|upload_|job_|processing_|audio_|server_step|editor_opened|video_|clip_|combine_|continue_in_background|follow_|cut_ready|queue_|bulk|asset_|export_|caption_font|save_to_photos|result_received).*' \
               | cut -c1-300 > "$RUNNER_TEMP/b24/app_events_$t.txt" || true

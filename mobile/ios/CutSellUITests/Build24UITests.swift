@@ -330,6 +330,17 @@ final class Build24UITests: XCTestCase {
               String(format: "%.0f s", Date().timeIntervalSince(started)))
         shot("export_done")
         if element("exportDone").exists { element("exportDone").tap(); pause(1) }
+        // The same cut exported by the server, to compare the two files frame by frame (the workflow does it).
+        if ProcessInfo.processInfo.environment["CUTSELL_COMPARE_SERVER_EXPORT"] == "1" {
+            element("editorExport").tap()
+            check(element("exportMore").waitForExistence(timeout: 10), "export settings again")
+            element("exportMore").tap(); pause(0.8)
+            app.buttons["Export on our server (1080p)"].firstMatch.tap()
+            let ready = wait(600) { self.app.staticTexts["Your video is ready."].exists }
+            check(ready, "server export finished")
+            check(app.buttons["Save"].firstMatch.waitForExistence(timeout: 120), "server export downloaded")
+            pause(2)
+        }
         log("FAILURES: \(failures.isEmpty ? "none" : failures.joined(separator: " | "))")
     }
 
