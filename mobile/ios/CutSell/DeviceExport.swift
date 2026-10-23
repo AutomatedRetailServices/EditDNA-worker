@@ -300,6 +300,9 @@ final class DeviceExport: ObservableObject {
         videoComposition.customVideoCompositorClass = ExportCompositor.self
         videoComposition.renderSize = size
         videoComposition.frameDuration = CMTime(value: 1, timescale: CMTimeScale(fps))
+        videoComposition.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
+        videoComposition.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
+        videoComposition.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
         let instruction = ExportInstruction(timeRange: CMTimeRange(start: .zero, duration: built.composition.duration),
                                             trackID: built.videoTrackID, renderer: renderer)
         videoComposition.instructions = [instruction]
@@ -351,6 +354,12 @@ final class DeviceExport: ObservableObject {
             AVVideoCodecKey: AVVideoCodecType.hevc,
             AVVideoWidthKey: Int(size.width),
             AVVideoHeightKey: Int(size.height),
+            // 22 Oct: tagged BT.709 like the server's file, so players show the same colours.
+            AVVideoColorPropertiesKey: [
+                AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+                AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+                AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
+            ],
             AVVideoCompressionPropertiesKey: [
                 AVVideoAverageBitRateKey: Int(videoBits),
                 AVVideoExpectedSourceFrameRateKey: fps,
@@ -695,7 +704,7 @@ final class ExportFrameRenderer: @unchecked Sendable {
     let plan: ExportFramePlan
     private weak var model: DraftEditorViewModel?
     private let context = CIContext(options: [.cacheIntermediates: false])
-    private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+    private let colorSpace = CGColorSpace(name: CGColorSpace.itur_709)!
     private var layerKey = ""
     private var layerImage: CIImage?
     private var overlayFrames: [String: UIImage] = [:]
