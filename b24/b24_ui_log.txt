@@ -1,0 +1,7 @@
+B24UI    44.8 Photos access allowed
+B24UI    46.5 gallery CTA: Create 1 cut
+B24UI    87.4 PASS the cut is ready
+B24UI    92.6 PASS editor open
+B24UI   102.1 quality menu: ["4K Ultra HD", "Your video was recorded in 1080p", "1080p HD", "Export quality: 1080p"]
+B24UI   107.5 PASS export settings open
+B24UI   114.4 detected: ? · hint: ? · estimate: ?
