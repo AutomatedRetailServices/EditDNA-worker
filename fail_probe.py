@@ -24,7 +24,7 @@ def audit():
     from cutsell_worker import simple_engine_adapter as ad
     r = Redis.from_url(os.environ["REDIS_URL"], socket_timeout=15)
     out = {}
-    for jid in ("ca083ad4-03cc-49f3-afe1-4df1d580e4f5", "22b4a041"):
+    for jid in ("ca083ad4-03cc-49f3-afe1-4df1d580e4f5",):
         try:
             if len(jid) < 36:
                 jid = next(k.decode().split(":")[-1] for k in r.scan_iter(f"rq:job:{jid}*", count=1000) if k.decode().count(":") == 2)
@@ -44,7 +44,7 @@ def audit():
                 row["file_ext"] = Path(uri).suffix
                 p = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration:stream=codec_name,sample_rate,channels",
                                     "-of", "compact", local], capture_output=True, text=True)
-                row["probe"] = p.stdout.strip()[:300]
+                row["probe"] = "\n".join(l for l in p.stdout.splitlines() if "location" not in l.lower())[:1200]
                 mp3 = asr.extract_audio(local, str(Path(d) / "x.mp3"))
                 row["mean_db"] = ad._mean_volume_db(mp3)
                 heard = asr.transcribe_words(mp3)
