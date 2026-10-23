@@ -50,6 +50,7 @@ struct ExportSettingsView: View {
             .ignoresSafeArea(edges: .bottom)
         }
         .task { await exporter.detect(model: model) }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("exportSettings")
     }
 

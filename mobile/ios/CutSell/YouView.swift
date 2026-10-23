@@ -620,6 +620,7 @@ struct StoragePage: View {
             ])
         }
         .task { parts = await StorageUsage.measure() }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("youStorage")
     }
 }
