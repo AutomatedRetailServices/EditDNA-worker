@@ -56,6 +56,35 @@ def _heard_in_her_language(heard: dict, audio_path: str, transcribe, language_hi
     return best
 
 
+# PO 22 Oct (IMG_9661): a quiet voice in the background (another person, a TV) with only a few words is not her talking
+# to the camera, whatever the clip's length: no cut is made from it.
+BACKGROUND_MEAN_DB = -25.0
+BACKGROUND_MAX_WORDS = 15
+
+
+def _mean_volume_db(audio_path: str) -> float | None:
+    import subprocess
+    try:
+        err = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(audio_path), "-af", "volumedetect", "-f", "null", "-"],
+                             capture_output=True, text=True, timeout=120).stderr
+    except Exception:
+        return None
+    for line in err.splitlines():
+        if "mean_volume:" in line:
+            try:
+                return float(line.split("mean_volume:")[1].split("dB")[0])
+            except ValueError:
+                return None
+    return None
+
+
+def _only_background_voice(words: list, audio_path: str, *, mean_db=None) -> bool:
+    if len(words) >= BACKGROUND_MAX_WORDS:
+        return False                     # a real talk has more words than this: never measured, never changed
+    level = _mean_volume_db(audio_path) if mean_db is None else mean_db
+    return level is not None and level < BACKGROUND_MEAN_DB
+
+
 def _nobody_talking(words: list, duration: float) -> bool:
     if duration < 20:
         return False          # a short clip: any words count
@@ -218,7 +247,7 @@ def process_with_simple_engine(
             heard = transcribe(audio_path, language_hint=request.language_hint)
             heard = _heard_in_her_language(heard, audio_path, transcribe, request.language_hint)
             words = [w for w in heard.get("words", []) if float(w["e"]) > float(w["s"])]
-            if not words or _nobody_talking(words, duration):
+            if not words or _nobody_talking(words, duration) or _only_background_voice(words, audio_path):
                 raise NoSpeechError(f"no speech found in source {source.source_asset_id}")
 
             notify("analyzing", base + int(30 / total))

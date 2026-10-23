@@ -117,3 +117,24 @@ def test_nine_stray_words_in_five_minutes_is_nobody_talking():
     from cutsell_worker.simple_engine_adapter import _nobody_talking
     w = [{"w": "x", "s": 0, "e": 0.3}] * 9
     assert _nobody_talking(w, 322.0) and not _nobody_talking(w, 3.0) and not _nobody_talking(w * 20, 60.0)
+
+
+def test_a_few_quiet_words_in_the_background_are_not_her_talking():
+    from cutsell_worker.simple_engine_adapter import _only_background_voice
+    seven = [{"w": "x", "s": 0, "e": 0.3}] * 7                      # IMG_9661: 7 words of a voice far away
+    assert _only_background_voice(seven, "a.mp3", mean_db=-29.1)
+    assert not _only_background_voice(seven, "a.mp3", mean_db=-18.0)   # a short clip said close to the phone
+    assert not _only_background_voice(seven * 3, "a.mp3", mean_db=-31.0)  # 21 words: a real talk, never measured
+
+
+def test_the_gold_never_meets_the_no_voice_rules():
+    """The Gold cut cannot change: no Gold video has fewer than 15 words or fewer than 15 words a minute, so neither
+    the background-voice rule nor the nobody-talking rule can apply to it (they never even measure the sound)."""
+    import json
+    from pathlib import Path
+    from cutsell_worker.simple_engine_adapter import BACKGROUND_MAX_WORDS, _nobody_talking
+    gold = json.loads((Path(__file__).resolve().parents[1] / "benchmarks/simple_engine_gold/gold_v1.json").read_text())
+    for video in gold["videos"]:
+        words = [w for w in video["words"] if float(w["e"]) > float(w["s"])]
+        assert len(words) >= BACKGROUND_MAX_WORDS, video["id"]
+        assert not _nobody_talking(words, float(video["duration"])), video["id"]
