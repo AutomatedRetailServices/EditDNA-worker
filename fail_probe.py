@@ -7,12 +7,13 @@ app = modal.App("cutsell-fail-probe")
 secret = modal.Secret.from_name("cutsell-worker")
 image = (
     modal.Image.debian_slim(python_version="3.11")
+    .apt_install("ffmpeg")
     .pip_install_from_requirements("requirements.cutsell.worker.cpu.txt")
     .add_local_dir("cutsell_worker", remote_path="/root/cutsell_worker", ignore=["**/__pycache__/**", "**/*.pyc"])
 )
 
 
-@app.function(image=image.apt_install("ffmpeg"), secrets=[secret], timeout=600)
+@app.function(image=image, secrets=[secret], timeout=600)
 def audit():
     import os, tempfile, subprocess
     from pathlib import Path
