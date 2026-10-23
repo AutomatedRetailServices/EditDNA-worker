@@ -158,12 +158,11 @@ struct PostToTikTokButton: View {
                 if UIImage(named: "TikTokLogo") != nil {
                     Image("TikTokLogo").resizable().scaledToFit().frame(height: 22)
                 }
-                Text(L10n.tr(title)).font(CS.sf(16, .semibold))
+                Text(L10n.tr(title)).font(CS.inter(16, .bold))
             }
             .foregroundStyle(.white)
-            .frame(maxWidth: .infinity).frame(height: 54)
-            .background(Capsule().fill(Color.black))
-            .overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 1))
+            .frame(maxWidth: .infinity).frame(height: 52)
+            .background(Capsule().fill(CS.accentGradient))     // White Indigo primary (Figma 1209:170)
         }
         .accessibilityIdentifier("postToTikTok")
     }

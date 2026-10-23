@@ -29,14 +29,20 @@ struct PlanView: View {
         NavigationStack(path: $path) {
             home
                 .navigationDestination(for: PlanRoute.self) { route in
-                    switch route {
-                    case .goal:
-                        PlanGoalView(onBuilt: { path = [.week] }).environmentObject(appState)
-                    case .week:
-                        PlanWeekView(onNewMix: { showingMix = true }, onSettings: { path.append(.goal) },
-                                     onOpenDay: { path.append(.day($0)) }).environmentObject(appState)
-                    case .day(let day):
-                        PlanDayView(day: day).environmentObject(appState)
+                    Group {
+                        switch route {
+                        case .goal:
+                            PlanGoalView(onBuilt: { path = [.week] }).environmentObject(appState)
+                        case .week:
+                            PlanWeekView(onNewMix: { showingMix = true }, onSettings: { path.append(.goal) },
+                                         onOpenDay: { path.append(.day($0)) }).environmentObject(appState)
+                        case .day(let day):
+                            PlanDayView(day: day).environmentObject(appState)
+                        }
+                    }
+                    // White Indigo (Figma 1209:2 / 70 / 170): the bottom bar stays on Plan's own screens.
+                    .safeAreaInset(edge: .bottom) {
+                        CSTabBar(current: .plan, select: { tab in if tab == .plan { path = [] } else { selectTab(tab) } })
                     }
                 }
         }

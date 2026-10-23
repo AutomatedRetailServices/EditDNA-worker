@@ -693,7 +693,13 @@ struct PlanGoalView: View {
                         Text(L10n.tr("Remind me at each time")).font(CS.inter(14, .semibold)).foregroundStyle(Color.ink)
                         Spacer()
                         Button { remind.toggle() } label: {
-                            Image(remind ? "PlanToggleOn" : "PlanToggleOff").resizable().frame(width: 44, height: 26)
+                            // White Indigo switch: blue when on, grey when off, white knob.
+                            Capsule().fill(remind ? CS.accent : Color(fixed: 0xD5DAE3)).frame(width: 46, height: 28)
+                                .overlay(alignment: remind ? .trailing : .leading) {
+                                    Circle().fill(Color(fixed: 0xFFFFFF)).frame(width: 24, height: 24).padding(2)
+                                        .shadow(color: Color(fixed: 0x0B1020, opacity: 0.15), radius: 2, y: 1)
+                                }
+                                .animation(.easeOut(duration: 0.15), value: remind)
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("goalRemind")
@@ -806,7 +812,7 @@ struct PlanGoalView: View {
         .padding(.horizontal, 13).padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(hex: 0x121A2B), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color(hex: 0x19E5FF), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(CS.accent, lineWidth: 1))
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("goalSummary")
     }
@@ -1064,7 +1070,7 @@ struct PlanWeekView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(PlanStyle.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(isToday ? Color(hex: 0x19E5FF) : PlanStyle.border, lineWidth: isToday ? 1.5 : 1))
+                .stroke(isToday ? CS.accent : PlanStyle.border, lineWidth: isToday ? 1.5 : 1))
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .contain)

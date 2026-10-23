@@ -211,9 +211,11 @@ struct ProjectsView: View {
             }
             .navigationDestination(for: ProductRoute.self) { route in
                 ProductDetailView(route: route).environmentObject(appState)
+                    .safeAreaInset(edge: .bottom) { CSTabBar(current: .edits, select: selectTab) }   // Figma 1213:191
             }
             .navigationDestination(item: $mixRoute) { route in
                 ProductDetailView(route: route).environmentObject(appState)
+                    .safeAreaInset(edge: .bottom) { CSTabBar(current: .edits, select: selectTab) }
             }
             .task { await mixCenter.refresh(session: appState.session) }
             // A Mix video just got made: it joins Ready (and its group moves on).
