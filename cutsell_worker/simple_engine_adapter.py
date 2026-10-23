@@ -254,7 +254,8 @@ def process_with_simple_engine(
             # The silence refine reads the audio decoded from the source file itself (what it was calibrated on).
             # A voice-only source (audio first) has no picture yet: no shot-change snap for its first cut.
             voice_only = bool(audio_only) and source.source_asset_id in audio_only
-            with _llm.cache_scope(True, ttl=cache_ttl):
+            # Bulk (PO 2026-10-23): the calls go through the Batch API (50 %), never more than 30 min of waiting.
+            with _llm.cache_scope(True, ttl=cache_ttl), _llm.batch_scope(bulk):
                 out = _process(words, duration, path, video_path=None if voice_only else path,
                                scene_cut_list=[] if voice_only else None, llm=llm)
             notify("composing", base + int(70 / total))

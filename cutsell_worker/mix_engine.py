@@ -173,13 +173,19 @@ def call_anthropic(body: dict, *, attempts: int = 4) -> tuple[str, dict]:
         raise RuntimeError("ANTHROPIC_API_KEY missing")
     headers = {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
     last: Exception | None = None
+    note = None
+    if _llm.batch_deadline() is not None:      # a Mix goes through the Batch API (PO 2026-10-23), 30 min at most
+        message, note = _llm.via_batch(body, headers)
+        if message is not None:
+            text = "".join(b.get("text", "") for b in message.get("content", []) if b.get("type") == "text")
+            return text, {**dict(message.get("usage") or {}), "batch": True, "batch_wait_s": message.get("_batch_wait_s")}
     for attempt in range(attempts):
         try:
             response = requests.post(API_URL, json=body, headers=headers, timeout=(20, 600))
             if response.status_code == 200:
                 data = response.json()
                 text = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
-                return text, dict(data.get("usage") or {})
+                return text, {**dict(data.get("usage") or {}), **({"batch_fallback": note} if note else {})}
             if response.status_code in (400, 401, 403, 404):
                 raise RuntimeError(f"Anthropic HTTP {response.status_code}")
             last = RuntimeError(f"Anthropic HTTP {response.status_code}")
@@ -221,7 +227,8 @@ def ask(clips: list[dict], *, call: Optional[LLMCall] = None, model: Optional[st
     last = None
     for attempt in range(3):                       # an unreadable answer is asked again, never guessed
         try:
-            answer_text, u = call(body)
+            with _llm.batch_scope(attempt == 0):    # the first ask by batch; a second ask (unreadable answer) at once
+                answer_text, u = call(body)
             usage["calls"] += 1
             usage["input_tokens"] += int(u.get("input_tokens") or 0)
             usage["output_tokens"] += int(u.get("output_tokens") or 0)
