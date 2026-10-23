@@ -36,27 +36,31 @@ def wait(job, limit=2400):
 
 out = {}
 jobs = {}
-for name, path, meta in (("single", "talk.mp4", None),
-                         ("bulk_a", "talk.mp4", {"bulk_size": "2", "bulk_id": "prodcheck-" + uuid.uuid4().hex[:6]}),
-                         ("bulk_b", "talk.mp4", None),
-                         ("quiet", "quiet.mp4", None)):
-    pid = project("Prod check " + name)
-    uri, size = upload(pid, path)
-    if name == "bulk_b":
-        meta = jobs["bulk_a"]["meta"]
-    jobs[name] = {"pid": pid, "uri": uri, "meta": meta, "job": start(pid, uri, path, meta), "started": time.time()}
-for name, j in jobs.items():
-    res, secs = wait(j["job"])
-    row = {"state": res.get("state"), "error": res.get("error"), "seconds": round(time.time() - j["started"])}
-    if res.get("state") == "finished":
-        d = requests.get(B + f"/v1/projects/{j['pid']}/draft", params={"user_id": U}, headers=H, timeout=60).json()
-        src = (d.get("draft", {}).get("diagnostics", {}).get("simple_engine", {}).get("sources") or [{}])[0]
-        pc = src.get("prompt_cache") or {}
-        row.update({"cut_s": src.get("cut_duration_sec"), "kept_clips": len(d.get("draft", {}).get("selected") or []),
-                    "available_flag": [x.get("available") for x in d.get("sources", [])],
-                    "cache": {k: pc.get(k) for k in ("cache_on", "ttl", "cache_used", "usd", "usd_normal_api", "batch_calls",
-                                                     "batch_fallbacks", "batch_wait_s", "read_tokens", "write_1h_tokens")}})
-    out[name] = row
+
+def run_phase(items):
+    started = {}
+    for name, path, meta in items:
+        pid = project("Prod check " + name)
+        uri, size = upload(pid, path)
+        jobs[name] = {"pid": pid, "uri": uri, "meta": meta, "job": start(pid, uri, path, meta), "started": time.time()}
+        started[name] = jobs[name]
+    for name, j in started.items():
+        res, secs = wait(j["job"])
+        row = {"state": res.get("state"), "error": res.get("error"), "seconds": round(time.time() - j["started"])}
+        if res.get("state") == "finished":
+            d = requests.get(B + f"/v1/projects/{j['pid']}/draft", params={"user_id": U}, headers=H, timeout=60).json()
+            src = (d.get("draft", {}).get("diagnostics", {}).get("simple_engine", {}).get("sources") or [{}])[0]
+            pc = src.get("prompt_cache") or {}
+            row.update({"cut_s": src.get("cut_duration_sec"), "kept_clips": len(d.get("draft", {}).get("selected") or []),
+                        "available_flag": [x.get("available") for x in d.get("sources", [])],
+                        "cache": {k: pc.get(k) for k in ("cache_on", "ttl", "cache_used", "usd", "usd_normal_api", "batch_calls",
+                                                         "batch_fallbacks", "batch_wait_s", "read_tokens", "write_1h_tokens")}})
+        out[name] = row
+
+# Today's server allows 2 cuts at once per user: Single + quiet first, then a Bulk of 2.
+run_phase((("single", "talk.mp4", None), ("quiet", "quiet.mp4", None)))
+bulk = {"bulk_size": "2", "bulk_id": "prodcheck-" + uuid.uuid4().hex[:6]}
+run_phase((("bulk_a", "talk.mp4", bulk), ("bulk_b", "talk.mp4", bulk)))
 # restore guard: a copy that is still stored must be refused (409)
 r = requests.post(B + "/v1/uploads/multipart/start", json={"project_id": jobs["single"]["pid"], "user_id": U, "original_name": "talk.mp4",
                   "content_type": "video/mp4", "size_bytes": 15258086, "restore_uri": jobs["single"]["uri"]}, headers=H, timeout=60)
