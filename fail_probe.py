@@ -35,7 +35,14 @@ def hear(key: str):
 
 @app.function(image=image, secrets=[secret], timeout=600, cpu=1.0, memory=2048)
 def run_once(heard: dict, run: int):
+    import tempfile
+    from pathlib import Path
+    from cutsell_worker import storage_routing as sr
     from cutsell_worker.simple_engine import engine, llm
+    fb = sr.fallback_storage()
+    tmp = tempfile.mkdtemp()
+    path = str(Path(tmp) / "v.mp4")
+    sr._make_fallback_client(fb).download_file(fb.bucket, heard["key"], path)
     answers = []
 
     def call(prompt, **kw):
@@ -45,7 +52,7 @@ def run_once(heard: dict, run: int):
         return text, usage
 
     with llm.cache_scope(True, ttl="1h"):
-        out = engine.process(heard["words"], heard["duration"], "/dev/null", video_path=None, scene_cut_list=[], llm=call)
+        out = engine.process(heard["words"], heard["duration"], path, video_path=None, scene_cut_list=[], llm=call)
     report = llm.cache_report(out["usage"])
     return {"key": heard["key"], "run": run, "cut_s": out["cut_duration"], "passes": out.get("passes"),
             "kept": [(round(x["start"], 2), round(x["end"], 2)) for x in out["splits"] if x["visible"]],
