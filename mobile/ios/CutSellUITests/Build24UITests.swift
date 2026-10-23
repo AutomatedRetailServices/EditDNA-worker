@@ -301,6 +301,7 @@ final class Build24UITests: XCTestCase {
         let review = element("readyReviewButton")
         check(review.waitForExistence(timeout: 600), "the cut is ready")
         review.tap()
+        if !element("timelineV4").waitForExistence(timeout: 30), review.exists { review.tap() }   // a tap during the screen's animation
         check(element("timelineV4").waitForExistence(timeout: 120), "editor open")
         pause(3)
         shot("export_header_quality")
