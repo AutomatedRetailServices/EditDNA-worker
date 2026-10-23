@@ -1,2 +1,11 @@
-{"label": "stability: 3 videos x 5 runs, same words, normal API", "runs": 5,
- "videos": ["Editdna bloopers videos/Bloppers5.mp4", "Editdna bloopers videos/Bloppers2.mp4", "Editdna bloopers videos/Bloppers3.mp4"]}
+{
+ "label": "stability: pass step at full thinking (high), 2 videos x 5 runs",
+ "runs": 5,
+ "env": {
+  "CUTSELL_SIMPLE_ENGINE_EFFORT": "haul_review=low"
+ },
+ "videos": [
+  "Editdna bloopers videos/Bloppers5.mp4",
+  "Editdna bloopers videos/Bloppers2.mp4"
+ ]
+}

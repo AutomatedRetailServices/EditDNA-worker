@@ -34,8 +34,10 @@ def hear(key: str):
 
 
 @app.function(image=image, secrets=[secret], timeout=600, cpu=1.0, memory=2048)
-def run_once(heard: dict, run: int):
+def run_once(heard: dict, run: int, env: dict = None):
+    import os
     import tempfile
+    os.environ.update(env or {})
     from pathlib import Path
     from cutsell_worker import storage_routing as sr
     from cutsell_worker.simple_engine import engine, llm
@@ -56,14 +58,15 @@ def run_once(heard: dict, run: int):
     report = llm.cache_report(out["usage"])
     return {"key": heard["key"], "run": run, "cut_s": out["cut_duration"], "passes": out.get("passes"),
             "kept": [(round(x["start"], 2), round(x["end"], 2)) for x in out["splits"] if x["visible"]],
-            "usd": report["usd"], "answers": answers, "log": str(out.get("log"))[:3000]}
+            "usd": report["usd"], "answers": answers,
+            "lines": [" ".join(heard["words"][k]["w"] for k in u) for u in engine.lines_of(heard["words"])], "log": str(out.get("log"))[:3000]}
 
 
 @app.local_entrypoint()
 def main():
     plan = json.load(open("cache_plan.json"))
     heard = list(hear.map(plan["videos"]))
-    args = [(h, r) for h in heard for r in range(plan.get("runs", 5))]
+    args = [(h, r, plan.get("env") or {}) for h in heard for r in range(plan.get("runs", 5))]
     rows = list(run_once.starmap(args, return_exceptions=True))
     rows = [r if isinstance(r, dict) else {"error": str(r)[:300]} for r in rows]
     with open("engine_check.json", "w") as f:
