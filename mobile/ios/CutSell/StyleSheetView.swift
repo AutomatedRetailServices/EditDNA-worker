@@ -41,7 +41,7 @@ struct CSSwitch: View {
             withAnimation(.easeInOut(duration: 0.15)) { isOn.toggle() }
         } label: {
             ZStack(alignment: isOn ? .trailing : .leading) {
-                Capsule().fill(isOn ? CS.cyan : Color(hex: 0x2A3A5C))
+                Capsule().fill(isOn ? CS.accent : Color(fixed: 0xD5DAE3))
                 Circle().fill(.white).frame(width: 27, height: 27).padding(2)
             }
             .frame(width: 51, height: 31)
@@ -61,8 +61,8 @@ struct StyleToggleRow: View {
     var body: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 5) {
-                Text(L10n.tr(title)).font(.system(size: 15, weight: .semibold)).foregroundStyle(CS.textPrimaryF)
-                Text(L10n.tr(subtitle)).font(.system(size: 12)).foregroundStyle(CS.textMutedF)
+                Text(L10n.tr(title)).font(CS.cardTitle).foregroundStyle(CS.wiInk)
+                Text(L10n.tr(subtitle)).font(CS.inter(12, .medium)).foregroundStyle(CS.wiSecondary)
                     .lineLimit(1).minimumScaleFactor(0.85)
             }
             Spacer(minLength: 0)
@@ -83,22 +83,21 @@ struct StyleSheetView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(L10n.tr("Choose your style"))
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(Color(hex: 0xF2F7FF))
+                .font(CS.inter(22, .heavy))
+                .foregroundStyle(CS.wiInk)
             Text(L10n.tr("You can change this later in the editor."))
-                .font(.system(size: 13))
-                .foregroundStyle(CS.textSecondaryF)
-                .padding(.top, 6)
+                .font(CS.inter(13, .medium))
+                .foregroundStyle(CS.wiSecondary)
+                .padding(.top, 4)
 
             VStack(spacing: 0) {
                 StyleToggleRow(title: "Overlap audio", subtitle: "Smooth audio between cuts, no abrupt jumps.",
                                isOn: $choice.overlapAudio, identifier: "styleOverlapToggle")
-                Rectangle().fill(CS.borderDefault).frame(height: 1).padding(.horizontal, 15)
+                Rectangle().fill(CS.wiBorder).frame(height: 1).padding(.horizontal, 15)
                 StyleToggleRow(title: "Auto Zoom AI", subtitle: "Zooms in on key moments automatically.",
                                isOn: $choice.autoZoom, identifier: "styleAutoZoomToggle")
             }
-            .background(CS.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(CS.cardBorder, lineWidth: 1))
+            .wiCard(radius: 16, shadow: false)
             .padding(.top, 18)
 
             CheckboxRow(title: "Use this style for my next videos", isOn: $remember)
@@ -113,8 +112,10 @@ struct StyleSheetView: View {
             }
             .accessibilityIdentifier("styleCreateButton")
         }
-        .padding(.horizontal, 19)
+        .padding(.horizontal, 20)
         .padding(.bottom, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
+        // White Indigo: always the light look (also when shown over the dark camera).
+        .environment(\.colorScheme, .light)
     }
 }

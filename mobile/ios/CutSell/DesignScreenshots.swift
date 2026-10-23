@@ -25,6 +25,7 @@ enum DesignScreenshots {
 
     /// White Indigo review set (Figma 12_Prototype): the screens the Product Owner asked to see.
     static let whiteIndigo = [
+        "camera_style", "mix_setup", "you_account", "you_prefs", "you_plan", "you_help", "ai_consent",
         "hub", "promoting_sheet", "promoting_bulk", "edits_ready", "product_detail", "assign", "plan_goal", "plan_week", "plan_today", "edits", "edits_products", "edits_processing", "plan", "you", "processing", "processing_failed", "ready",
         "err_too_long", "err_unsupported", "err_could_not_add", "perm_camera", "gallery_single", "gallery_access", "style",
         "camera", "editor_v4_base", "editor_v4_vo_record", "welcome",
@@ -99,6 +100,24 @@ struct DesignScreenshotRoot: View {
         case "plan_today":
             NavigationStack { PlanDayView(day: PlanDay.iso.string(from: Date())) }
                 .task { try? await PlanWeekStore.shared.build(session: nil) }
+        case "camera_style":
+            ZStack {
+                CreateCameraView(onBack: {}, onUpload: {}, onRecorded: { _ in }, previewMode: true)
+                BottomSheetOverlay(isPresented: .constant(true)) {
+                    StyleSheetView(ctaTitle: CreateMode.single.ctaTitle(1)) { _ in }
+                }
+            }
+            .preferredColorScheme(.dark)
+        case "mix_setup":
+            MixSetupView(onClose: {}, onStarted: { _ in })
+        case "you_account", "you_prefs", "you_plan", "you_help":
+            YouPagesView(start: ["you_account": YouPage.account, "you_prefs": .preferences, "you_plan": .plan,
+                                 "you_help": .help][screen] ?? .account)
+        case "ai_consent":
+            ZStack(alignment: .bottom) {
+                Color(fixed: 0x0B1020, opacity: 0.45).ignoresSafeArea()
+                AIConsentSheet().padding(20).background(CS.wiPage, in: UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28))
+            }
         case "welcome":
             WelcomeView()
         case "edits_products":

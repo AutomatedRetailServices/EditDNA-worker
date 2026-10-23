@@ -124,7 +124,7 @@ struct CreateCameraView: View {
 
             VStack(spacing: 0) {
                 ZStack {
-                    BrandLogo()
+                    // 23 Oct (PO): no logo on the camera screen.
                     HStack {
                         Button {
                             onBack()

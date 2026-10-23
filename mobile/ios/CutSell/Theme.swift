@@ -555,6 +555,7 @@ struct BottomSheetOverlay<Content: View>: View {
                         )
                     content()
                 }
+                .environment(\.colorScheme, .light)      // White Indigo sheets, also over the dark camera
                 .background(alignment: .top) {
                     UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28, style: .continuous)
                         .fill(CS.wiPage)
