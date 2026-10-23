@@ -315,7 +315,8 @@ final class CutSubmitter: ObservableObject {
             stage("Starting your cut")
             let jobID = try await Self.startJob(projectID: projectID, session: session, sources: sources,
                                                 audioOverlap: audioOverlap, autoZoom: autoZoom,
-                                                onRetry: { [weak self] error in self?.retried(error) })
+                                                onRetry: { [weak self] error in self?.retried(error) },
+                                                onWaiting: { [weak self] in self?.waitingForSlot() })
             lastJobID = jobID
             for video in uploadVideos { await MultipartUploadManager.shared.finished(fileURL: video.url, projectID: projectID) }
             await PendingCutStore.shared.remove(projectID: projectID, deleteLocalFiles: true)
@@ -376,7 +377,8 @@ extension CutSubmitter {
         stage("Cutting your video…")
         let jobID = try await Self.startJob(projectID: projectID, session: session, sources: sources,
                                             audioOverlap: audioOverlap, autoZoom: autoZoom,
-                                            onRetry: { [weak self] error in self?.retried(error) })
+                                            onRetry: { [weak self] error in self?.retried(error) },
+                                            onWaiting: { [weak self] in self?.waitingForSlot() })
         await PendingCutStore.shared.markStarted(projectID: projectID, jobID: jobID)
         if let record = await PendingCutStore.shared.record(projectID: projectID) {
             BackgroundVideoUploads.shared.start(record: record, session: session)
@@ -392,10 +394,23 @@ extension CutSubmitter {
         return Retry.retriable(error)
     }
 
+    /// How often a Queued video asks again for room (the server suggests 60 s).
+    nonisolated static let slotRetrySeconds: UInt64 = 60
+
+    /// The cut is waiting for room on the server: Queued, never an error.
+    func waitingForSlot() {
+        stageTitle = "Queued · it starts by itself when there's room"
+        stagePercent = nil
+        lastError = nil
+        touch()
+        ProcessingQueue.shared.update(queueItem, state: .queued)
+    }
+
     /// Starts the AI cut on the server for sources already on R2. Logs processing_started, then
     /// job_submitted or job_submit_failed with the real code and message.
     static func startJob(projectID: String, session: CutSellSession, sources: [SourceInput], audioOverlap: Bool,
-                         autoZoom: Bool, onRetry: ((String) -> Void)? = nil) async throws -> String {
+                         autoZoom: Bool, onRetry: ((String) -> Void)? = nil,
+                         onWaiting: (() -> Void)? = nil) async throws -> String {
         struct Body: Encodable {
             let project_id: String
             let user_id: String
@@ -407,21 +422,40 @@ extension CutSubmitter {
             let auto_zoom_enabled: Bool
         }
         CutSellDiagnostics.log("processing_started", ["sources": String(sources.count)])
-        do {
-            let response: FlowBSubmitResponse = try await Retry.run("start cut", onRetry: { _, error in
-                onRetry?(Retry.short(error))
-            }) { try await APIClient.shared.request(
-                "/v1/flow-b/jobs",
-                method: "POST",
-                body: Body(project_id: projectID, user_id: session.userID, sources: sources, language_hint: nil,
-                           audio_overlap: audioOverlap, dialogue_overlap_enabled: audioOverlap, auto_zoom_enabled: autoZoom),
-                timeout: 30
-            ) }
-            CutSellDiagnostics.log("job_submitted", ["job_id": response.jobID])
-            return response.jobID
-        } catch {
-            CutSellDiagnostics.log("job_submit_failed", Retry.fields(error))
-            throw error
+        // 23 Oct (PO): "busy" (429: the user already has as many cuts being made as allowed) is never an error:
+        // the video waits as Queued and is sent again by itself every minute until there is room.
+        var waitingSince: Date?
+        while true {
+            do {
+                let response: FlowBSubmitResponse = try await Retry.run("start cut", onRetry: { _, error in
+                    if case APIError.http(429, let detail) = error, detail.contains("processing_concurrency_limit") { return }
+                    onRetry?(Retry.short(error))
+                }) {
+                    if FakeBusy.take() { throw APIError.http(429, "processing_concurrency_limit") }
+                    return try await APIClient.shared.request(
+                    "/v1/flow-b/jobs",
+                    method: "POST",
+                    body: Body(project_id: projectID, user_id: session.userID, sources: sources, language_hint: nil,
+                               audio_overlap: audioOverlap, dialogue_overlap_enabled: audioOverlap, auto_zoom_enabled: autoZoom),
+                    timeout: 30
+                ) }
+                if let since = waitingSince {
+                    CutSellDiagnostics.log("job_slot_free", ["waited_s": String(format: "%.0f", Date().timeIntervalSince(since))])
+                }
+                CutSellDiagnostics.log("job_submitted", ["job_id": response.jobID])
+                return response.jobID
+            } catch APIError.http(429, let detail) where detail.contains("processing_concurrency_limit") {
+                // Only "busy" waits; another 429 (e.g. the plan's monthly minutes are used up) is shown as before.
+                if waitingSince == nil {
+                    waitingSince = Date()
+                    CutSellDiagnostics.log("job_waiting_for_slot", [:])
+                    onWaiting?()
+                }
+                try await Task.sleep(nanoseconds: FakeBusy.waitSeconds(Self.slotRetrySeconds) * 1_000_000_000)
+            } catch {
+                CutSellDiagnostics.log("job_submit_failed", Retry.fields(error))
+                throw error
+            }
         }
     }
 }
@@ -446,4 +480,29 @@ struct CutSubmitError: LocalizedError {
     var projectID: String? = nil
 
     var errorDescription: String? { underlying.localizedDescription }
+}
+
+
+/// Simulator probe only: `-CutSellFakeBusy N` answers "busy" (429) to the first N cut starts, and
+/// `-CutSellSlotWait S` asks again after S seconds, to check the Queued path without loading the server.
+enum FakeBusy {
+    nonisolated(unsafe) private static var left: Int = {
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: "-CutSellFakeBusy"), i + 1 < args.count else { return 0 }
+        return Int(args[i + 1]) ?? 0
+    }()
+    private static let lock = NSLock()
+
+    nonisolated static func take() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard left > 0 else { return false }
+        left -= 1
+        return true
+    }
+
+    nonisolated static func waitSeconds(_ normal: UInt64) -> UInt64 {
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: "-CutSellSlotWait"), i + 1 < args.count, let s = UInt64(args[i + 1]) else { return normal }
+        return s
+    }
 }

@@ -105,21 +105,21 @@ final class Build24UITests: XCTestCase {
         _ = element("hubUpload").waitForExistence(timeout: 60)
     }
 
-    private func pickAndCreate(mode: String, count: Int) -> Bool {
+    private func pickAndCreate(mode: String, count: Int, first: Int = 0) -> Bool {
         // A mode chip on the Home Hub opens the gallery in that mode.
         let modeChip = element("hubMode_\(mode)")
         if modeChip.waitForExistence(timeout: 10) { modeChip.tap() } else { element("hubUpload").tap() }
         allowPhotos()
         let tiles = app.descendants(matching: .any).matching(identifier: "galleryTile")
-        _ = wait(30) { tiles.count >= count }
-        guard tiles.count >= count else { check(false, "\(count) videos in the gallery", "\(tiles.count)"); return false }
+        _ = wait(30) { tiles.count >= first + count }
+        guard tiles.count >= first + count else { check(false, "\(count) videos in the gallery", "\(tiles.count)"); return false }
         if mode != "single" {
             // The chip must open the gallery in its own mode (Single's helper is "One video → one edit.").
             let openedInSingle = app.staticTexts["One video → one edit."].exists
             check(!openedInSingle, "the \(mode) chip opened the gallery in \(mode)")
             if openedInSingle { app.buttons[mode.capitalized].firstMatch.tap(); pause(0.5) }
         }
-        for index in 0..<count { tiles.element(boundBy: index).tap(); pause(0.8) }
+        for index in first..<(first + count) { tiles.element(boundBy: index).tap(); pause(0.8) }
         let create = element("galleryCreateButton")
         log("gallery CTA: \(create.label)")
         shot("gallery_\(mode)")
@@ -243,6 +243,44 @@ final class Build24UITests: XCTestCase {
         let ready = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Ready ('")).firstMatch
         log("ready chip: \(ready.exists ? ready.label : "?")")
         shot("ready_tab")
+        log("FAILURES: \(failures.isEmpty ? "none" : failures.joined(separator: " | "))")
+    }
+
+    /// 23 Oct: "busy" (429 processing_concurrency_limit: the user already has as many cuts being made as allowed) must
+    /// show QUEUED -- never FAILED or an error -- and the cut must start by itself. The app is told "busy" for the
+    /// first starts (-CutSellFakeBusy; Retry asks 3 times per round, so 4 = two rounds) and asks again every 5 s.
+    func testBusyStaysQueued() throws {
+        launchApp(fresh: true, extra: ["-CutSellFakeBusy", "4", "-CutSellSlotWait", "5"])
+        guard pickAndCreate(mode: "single", count: 1) else { return }
+        let cont = element("continueInBackground")
+        check(cont.waitForExistence(timeout: 45), "Processing screen")
+        var sawQueuedText = false
+        for _ in 0..<40 {
+            if app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Queued'")).firstMatch.exists {
+                sawQueuedText = true; shot("busy_processing_screen"); break
+            }
+            pause(0.5)
+        }
+        log("Processing screen said Queued: \(sawQueuedText)")
+        if cont.exists { cont.tap(); pause(1) }
+        openEdits()
+        var seenQueued = false, failed = "", last = ""
+        let deadline = Date().addingTimeInterval(8 * 60)
+        while Date() < deadline {
+            let rows = rowStatuses()
+            let now = rows.joined(separator: ", ")
+            if now != last { last = now; log("busy rows: [\(now)]"); shot("busy_rows") }
+            if rows.contains("QUEUED") { seenQueued = true }
+            if rows.contains("FAILED") { failed = "FAILED"; shot("busy_failed") }
+            if !element("editsFilterProcessing").exists { break }
+            if !element("editsProcessingList").exists, element("editsFilterProcessing").isHittable {
+                element("editsFilterProcessing").tap()
+            }
+            pause(1)
+        }
+        check(sawQueuedText || seenQueued, "busy shows Queued")
+        check(failed.isEmpty, "busy is never FAILED", failed)
+        check(!element("editsFilterProcessing").exists, "the cut started by itself and finished")
         log("FAILURES: \(failures.isEmpty ? "none" : failures.joined(separator: " | "))")
     }
 

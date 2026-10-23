@@ -183,11 +183,11 @@ final class DeviceExport: ObservableObject {
                 if first {
                     found.width = asset.pixelWidth
                     found.height = asset.pixelHeight
-                    if let resource = PHAssetResource.assetResources(for: asset).first(where: { $0.type == .video }),
+                    if let resource = GalleryExport.shown(asset),
                        (resource.originalFilename as NSString).pathExtension.lowercased() == "mp4" { found.codec = "H.264" }
                 }
                 if await GalleryExport.isOnlyInCloud(asset),
-                   let bytes = PHAssetResource.assetResources(for: asset).first(where: { $0.type == .video })
+                   let bytes = GalleryExport.shown(asset)
                     .flatMap({ $0.value(forKey: "fileSize") as? NSNumber })?.int64Value {
                     cloud += bytes
                 }
@@ -473,7 +473,7 @@ final class DeviceExport: ObservableObject {
             let options = PHVideoRequestOptions()
             options.isNetworkAccessAllowed = true
             options.deliveryMode = .highQualityFormat
-            options.version = .original
+            options.version = .current          // 23 Oct: with her edits (a song added, a trim), as she sees it
             options.progressHandler = { value, _, _, _ in progress(value) }
             PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { avAsset, _, _ in
                 continuation.resume(returning: avAsset)
