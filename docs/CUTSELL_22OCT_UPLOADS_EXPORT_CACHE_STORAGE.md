@@ -54,3 +54,13 @@ Nothing here is deployed until the Product Owner says so. Rollback of server and
 - 19 failing tests on `fd2b3e5`: 2 needed sqlalchemy locally (pass); 10 need mediapipe 0.10.21's legacy API (skip
   with the reason when it's missing); 7 legacy-stack tests failing since the 28 Sep restore (xfail with the reason;
   users are cut by the simple engine). None deleted.
+
+## 23 Oct — Bulk and Mix through the Batch API
+- Bulk videos and Mix send their Claude calls through the Message Batches API (50 % of every price, the cache prices
+  too; same request body). Each video waits at most 30 min in all; past it the pending batch is cancelled and the
+  normal API answers at once. Single and Combine unchanged. `CUTSELL_ENGINE_BATCH=0` turns it off (no redeploy).
+- Test (QA bloopers): 15 videos by batch, 0 fallbacks; each call ~1.5–3.5 min in the batch, a video 7–17 min in all
+  (normal: 17–39 s). Cost 0.46 USD vs 0.92 USD at normal prices (−50 %).
+- Same cut: the request is identical; run-to-run variation of the model is the same by batch as by the normal API
+  (two normal runs of the same 5 videos differed as much as normal vs batch).
+- App: a video processing for over 8 min says "Taking a little longer, we'll notify you".
