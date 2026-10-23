@@ -115,14 +115,15 @@ enum GalleryExport {
     static func export(_ asset: PHAsset, name: String?, progress: (@Sendable (Double) -> Void)? = nil,
                        copied: (@Sendable (Int64) -> Void)? = nil) async throws -> LocalVideo {
         let resources = PHAssetResource.assetResources(for: asset)
-        // Build 22: the ORIGINAL file as recorded (copied byte for byte, never re-encoded). Before, an
-        // edited render ("fullSizeVideo") came first: Swanny's 72 MB video was uploaded as 101 MB.
+        // 23 Oct: the version she SEES in Photos. An edited video (a song added, a trim, a filter -- saved by Photos,
+        // CapCut, Dreamina...) keeps its edits only in the edited render ("fullSizeVideo"); the original underneath
+        // can be silent. Build 22 took the original to save bytes (72 -> 101 MB); a heavy file is made lighter anyway.
         let original = resources.first(where: { $0.type == .video })
         let edited = resources.first(where: { $0.type == .fullSizeVideo })
-        guard let resource = original ?? edited else {
+        guard let resource = edited ?? original else {
             throw Failure.unavailable
         }
-        CutSellDiagnostics.log("asset_resource", ["used": original != nil ? "original" : "edited",
+        CutSellDiagnostics.log("asset_resource", ["used": edited != nil ? "edited" : "original",
                                                   "photos_edit": edited != nil ? "yes" : "no"])
         let ext = (resource.originalFilename as NSString).pathExtension.lowercased()
         guard CreateLimits.supportedExtensions.contains(ext) else { throw Failure.unsupported }
@@ -173,8 +174,16 @@ extension GalleryExport {
     /// starts. A small fast copy (960x540) comes down in seconds: its voice starts the cut and the
     /// editor previews it. The ORIGINAL (byte for byte) downloads and uploads in the background.
     /// nil = not for this video (already on the iPhone, 4K, unknown size or format): the normal export.
+    /// The file of the version she sees in Photos: the edited render when the video was edited, else the original.
+    static func shown(_ asset: PHAsset) -> PHAssetResource? {
+        let resources = PHAssetResource.assetResources(for: asset)
+        return resources.first(where: { $0.type == .fullSizeVideo }) ?? resources.first(where: { $0.type == .video })
+    }
+
     static func light(_ asset: PHAsset, progress: (@Sendable (Double) -> Void)? = nil) async throws -> LocalVideo? {
         let resources = PHAssetResource.assetResources(for: asset)
+        // An edited video takes the normal path (its edited render, what she sees), never the original from iCloud.
+        guard !resources.contains(where: { $0.type == .fullSizeVideo }) else { return nil }
         guard let original = resources.first(where: { $0.type == .video }) else { return nil }
         let ext = (original.originalFilename as NSString).pathExtension.lowercased()
         guard CreateLimits.supportedExtensions.contains(ext),
@@ -210,7 +219,7 @@ extension GalleryExport {
             let options = PHVideoRequestOptions()
             options.isNetworkAccessAllowed = false
             options.deliveryMode = .highQualityFormat
-            options.version = .original
+            options.version = .current
             PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { avAsset, _, info in
                 let inCloud = (info?[PHImageResultIsInCloudKey] as? Bool) ?? false
                 continuation.resume(returning: avAsset == nil && inCloud)
@@ -259,7 +268,7 @@ extension GalleryExport {
     /// The original, byte for byte, into `destination` (background part of iCloud light).
     static func downloadOriginal(assetID: String, to destination: URL, progress: (@Sendable (Double) -> Void)? = nil) async throws {
         guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil).firstObject,
-              let original = PHAssetResource.assetResources(for: asset).first(where: { $0.type == .video }) else {
+              let original = GalleryExport.shown(asset) else {
             throw Failure.unavailable
         }
         try? FileManager.default.removeItem(at: destination)
