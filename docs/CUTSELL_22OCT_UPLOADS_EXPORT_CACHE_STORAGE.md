@@ -69,7 +69,7 @@ Nothing here is deployed until the Product Owner says so. Rollback of server and
 - Each user may have 2 cuts processing at once (`CUTSELL_MAX_CONCURRENT_JOBS_PER_USER`, unchanged since before). With the
   Batch API a Bulk video now holds its slot 10–17 min, so videos 3–5 of a Bulk would be refused (the app retries 3 times
   in seconds). Found by the production check (an unhandled 500); no real user was affected.
-- Fix (`feat/bulk-batch-api`, not deployed yet): a Bulk send gets one slot per video (`bulk_size`, max 10); Single and
+- Fix (deployed 23 Oct 12:38 UTC, engine + server `f097956`; rollback `CUTSELL_ENGINE_BATCH=0` or `fd2b3e5`): a Bulk send gets one slot per video (`bulk_size`, max 10); Single and
   Combine keep the limit of 2. The limit answers 429 `processing_concurrency_limit` (Retry-After 60) instead of a 500.
 
 ## 23 Oct — why the same video gets different cuts (diagnosis, no code change)
@@ -82,3 +82,13 @@ Nothing here is deployed until the Product Owner says so. Rollback of server and
   not retakes.
 - Proposed (needs a Gold check before turning on): (1) pass step back to full thinking; (2) MULTI-PASS only when 2+
   complete passes are retakes of the same pitch (word overlap above a threshold measured on the Gold), else SINGLE PASS.
+- Production check after the fix (test user): Single + a Bulk of 3 sent together all accepted (202); one more Single while
+  they ran got 429. Single 55 s; Bulk videos ~11 min each by batch, 0 fallbacks, half price; quiet clip `no_speech`;
+  restore guard 409 / 403. Same cut (13.4 s) for all four.
+
+## 23 Oct — the 44 tests outside `tests/test_cutsell_*` (CI runs only those, which stay at 0 failures)
+- 39 (Modal benchmark scripts for the old paid Video00 runs): their tests use a fake `modal` only when the real package
+  is missing; it is installed where the probes run. Now they always use the fake. Pass.
+- 5 legacy stack (hybrid engine / Video00 RAW workflow, unchanged since the 28 Sep restore): xfail with the reason.
+- `test_semantic_stitch.py` (old 2025 demo script): ran at import and stopped the run; now a test. Pass.
+- None of them is on the path that cuts users' videos (simple engine). Full suite: 10200 passed, 0 failed.
