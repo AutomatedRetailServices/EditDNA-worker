@@ -257,14 +257,11 @@ struct HomeHubView: View {
         .accessibilityIdentifier(id)
     }
 
-    private static let tileColors: [UInt32] = [0x2A3F6B, 0x4A2A6B, 0x1F5A6B]
-
     /// "Recent" (Figma 1164:56-58): thumbnails, 90 high, radius 14.
     private func recentTile(_ project: Project, index: Int) -> some View {
         let isProcessing = Project.processingStates.contains(project.state)
         return RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .fill(LinearGradient(colors: [Color(fixed: Self.tileColors[index % 3]), Color(fixed: 0x0C1730)],
-                                 startPoint: .topLeading, endPoint: .bottomTrailing))
+            .fill(CS.wiSurface2)          // White Indigo placeholder until the thumbnail loads
             .frame(height: 90)
             .overlay {
                 if let image = thumbnails.image(for: project.projectID) {
@@ -274,7 +271,7 @@ struct HomeHubView: View {
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .task(id: project.state) { await thumbnails.load(project: project, session: appState.session) }
             .overlay {
-                if isProcessing { ProgressView().tint(.white) }
+                if isProcessing { ProgressView().tint(CS.accent) }
             }
             .accessibilityLabel(project.title)
     }

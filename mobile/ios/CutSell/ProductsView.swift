@@ -459,7 +459,7 @@ struct ProductDetailView: View {
                             }
                         } label: {
                             Text(L10n.tr(selecting ? (selected.isEmpty ? "Cancel" : "Move \(selected.count)") : "Select"))
-                                .font(CS.inter(15, .semibold)).foregroundStyle(.white)
+                                .font(CS.inter(15, .semibold)).foregroundStyle(Color.ink)
                                 .frame(width: 110, height: 50)
                                 .overlay(Capsule().stroke(Color(hex: 0x596685), lineWidth: 1))
                         }
@@ -533,7 +533,7 @@ struct ProductDetailView: View {
         let ready = mix?.ready ?? mixVideos.filter { $0.bucket != "processing" }.count
         let text = ready >= total ? "✦  Sales Mix ready: \(total) videos from \(mix?.clipCount ?? 0) clips"
             : "✦  Making your Sales Mix: \(ready) of \(total) ready"
-        return Text(L10n.tr(text)).font(CS.inter(13, .semibold)).foregroundStyle(.white)
+        return Text(L10n.tr(text)).font(CS.inter(13, .semibold)).foregroundStyle(Color.ink)
             .padding(.horizontal, 12.5)
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .background(Color(hex: 0x121A2B), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -677,7 +677,7 @@ struct AssignProductSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Capsule().fill(Color(hex: 0x4D5770)).frame(width: 40, height: 5).frame(maxWidth: .infinity).padding(.top, 9)
-            Text(L10n.tr("Which product is this?")).font(CS.inter(22, .bold)).foregroundStyle(.white).padding(.top, 17)
+            Text(L10n.tr("Which product is this?")).font(CS.inter(22, .bold)).foregroundStyle(Color.ink).padding(.top, 17)
             Text(L10n.tr("\(count) video\(count == 1 ? "" : "s") selected")).font(CS.inter(13)).foregroundStyle(Color(hex: 0x99A3BD))
                 .padding(.top, 5)
 
@@ -685,7 +685,7 @@ struct AssignProductSheet: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(L10n.tr("✦ SUGGESTED FROM THE VIDEO")).font(CS.inter(10, .bold)).foregroundStyle(CS.cyan)
-                        Text(L10n.tr(label)).font(CS.inter(15, .semibold)).foregroundStyle(.white).lineLimit(1)
+                        Text(L10n.tr(label)).font(CS.inter(15, .semibold)).foregroundStyle(Color.ink).lineLimit(1)
                     }
                     Spacer()
                     Button { Task { await move(brand: suggestion.brand, product: suggestion.product) } } label: {
@@ -718,7 +718,7 @@ struct AssignProductSheet: View {
                                     if chosen == item.product.productID { Circle().fill(CS.cyan).frame(width: 10, height: 10) }
                                 }
                                 Text(L10n.tr("\(item.brand.name) · \(item.product.name)"))
-                                    .font(CS.inter(14, .medium)).foregroundStyle(.white).lineLimit(1)
+                                    .font(CS.inter(14, .medium)).foregroundStyle(Color.ink).lineLimit(1)
                                 Spacer()
                             }
                             .frame(height: 45)

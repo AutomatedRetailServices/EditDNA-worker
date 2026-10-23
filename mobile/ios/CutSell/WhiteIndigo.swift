@@ -97,7 +97,6 @@ struct WISegmented<ID: Hashable>: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .layoutPriority(item.count == nil ? 0 : 1)
                 .accessibilityAddTraits(active ? .isSelected : [])
                 .accessibilityIdentifier(item.accessibilityID)
             }
@@ -276,5 +275,6 @@ struct WISheetCard<Content: View>: View {
         }
         .frame(maxWidth: .infinity)
         .background(CS.wiPage, in: UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28, style: .continuous))
+        .background(alignment: .bottom) { CS.wiPage.frame(height: 40).offset(y: 40).ignoresSafeArea() }
     }
 }

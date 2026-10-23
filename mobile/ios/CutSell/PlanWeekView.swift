@@ -570,8 +570,7 @@ final class PostReminders: NSObject, UNUserNotificationCenterDelegate {
 // MARK: - Shared look
 
 enum PlanStyle {
-    static let cta = LinearGradient(stops: [.init(color: Color(hex: 0x1969FF), location: 0), .init(color: Color(hex: 0x7C3AED), location: 0.55),
-                                            .init(color: Color(hex: 0x19E6FF), location: 1)], startPoint: .leading, endPoint: .trailing)
+    static let cta = CS.accentGradient   // White Indigo primary
     static let background = LinearGradient(stops: [.init(color: Color(hex: 0x03050D), location: 0), .init(color: Color(hex: 0x050B1C), location: 0.55),
                                                    .init(color: Color(hex: 0x030409), location: 1)], startPoint: .top, endPoint: .bottom)
     static let muted = Color(hex: 0x99A3BD)
@@ -676,7 +675,7 @@ struct PlanGoalView: View {
                     label("START").padding(.top, 18)
                     Button { pickingStart = true } label: {
                         HStack {
-                            Text(L10n.tr(startText)).font(CS.inter(14, .semibold)).foregroundStyle(.white)
+                            Text(L10n.tr(startText)).font(CS.inter(14, .semibold)).foregroundStyle(Color.ink)
                             Spacer()
                             Text(L10n.tr("Change")).font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
                         }
@@ -773,7 +772,7 @@ struct PlanGoalView: View {
             .accessibilityIdentifier("goalMinus")
             Spacer()
             VStack(spacing: 2) {
-                Text(L10n.tr("\(count)")).font(CS.inter(28, .bold)).foregroundStyle(.white).accessibilityIdentifier("goalCount")
+                Text(L10n.tr("\(count)")).font(CS.inter(28, .bold)).foregroundStyle(Color.ink).accessibilityIdentifier("goalCount")
                 Text(L10n.tr("of \(ready) ready video\(ready == 1 ? "" : "s")")).font(CS.inter(11)).foregroundStyle(PlanStyle.muted)
             }
             Spacer()
@@ -799,7 +798,7 @@ struct PlanGoalView: View {
         if noProduct > 0 { line2 += " · \(noProduct) without a product" }
         return VStack(alignment: .leading, spacing: 4) {
             Text(L10n.tr("✦  \(count) video\(count == 1 ? "" : "s") · \(perDay) per day · \(dates.count) day\(dates.count == 1 ? "" : "s")"))
-                .font(CS.inter(14, .semibold)).foregroundStyle(.white)
+                .font(CS.inter(14, .semibold)).foregroundStyle(Color.ink)
             Text(L10n.tr(line2)).font(CS.inter(12)).foregroundStyle(PlanStyle.muted).padding(.leading, 20)
         }
         .padding(.horizontal, 13).padding(.vertical, 9)
@@ -1036,7 +1035,7 @@ struct PlanWeekView: View {
         return Button { onOpenDay(day) } label: {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
-                    Text(PlanDay.short(day)).font(CS.inter(14, .bold)).foregroundStyle(.white)
+                    Text(PlanDay.short(day)).font(CS.inter(14, .bold)).foregroundStyle(Color.ink)
                     if allPosted {
                         Text(L10n.tr("POSTED")).font(CS.inter(9, .bold)).foregroundStyle(Color(hex: 0x33D98C))
                             .frame(width: 58, height: 18).background(Color(hex: 0x143324), in: Capsule())
@@ -1079,7 +1078,7 @@ struct PlanWeekView: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
                     Image(store.dot(for: slot)).resizable().frame(width: 7, height: 7)
-                    Text(L10n.tr(slot.brand ?? "No product")).font(CS.inter(11, .semibold)).foregroundStyle(.white).lineLimit(1)
+                    Text(L10n.tr(slot.brand ?? "No product")).font(CS.inter(11, .semibold)).foregroundStyle(Color.ink).lineLimit(1)
                 }
                 Text(L10n.tr(slot.product ?? slot.mixCode ?? "Video")).font(CS.inter(11)).foregroundStyle(PlanStyle.muted).lineLimit(2)
                 Text(PlanDay.clock(slot.time)).font(CS.inter(11, .semibold))
@@ -1226,7 +1225,7 @@ struct PlanDayView: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 6) {
                     Image(store.dot(for: slot)).resizable().frame(width: 8, height: 8)
-                    Text(L10n.tr(slot.brand ?? "No product")).font(CS.inter(13, .semibold)).foregroundStyle(.white).lineLimit(1)
+                    Text(L10n.tr(slot.brand ?? "No product")).font(CS.inter(13, .semibold)).foregroundStyle(Color.ink).lineLimit(1)
                 }
                 Text(L10n.tr(slot.product ?? "Video")).font(CS.inter(15, .bold)).foregroundStyle(Color.ink).lineLimit(2).padding(.top, 3)
                     .accessibilityIdentifier("dayProduct")
@@ -1290,7 +1289,7 @@ struct PlanDayView: View {
     }
 
     private func outline(_ title: String) -> some View {
-        Text(L10n.tr(title)).font(CS.inter(13, .semibold)).foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 46)
+        Text(L10n.tr(title)).font(CS.inter(13, .semibold)).foregroundStyle(Color.ink).frame(maxWidth: .infinity).frame(height: 46)
             .overlay(Capsule().stroke(Color(hex: 0x596685), lineWidth: 1))
     }
 
@@ -1302,9 +1301,9 @@ struct PlanDayView: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Image(store.dot(for: slot)).resizable().frame(width: 8, height: 8)
-                    Text(L10n.tr(slot.brand ?? "No product")).font(CS.inter(12, .semibold)).foregroundStyle(.white)
+                    Text(L10n.tr(slot.brand ?? "No product")).font(CS.inter(12, .semibold)).foregroundStyle(Color.ink)
                 }
-                Text(L10n.tr(slot.product ?? "Video")).font(CS.inter(14, .bold)).foregroundStyle(.white).lineLimit(1)
+                Text(L10n.tr(slot.product ?? "Video")).font(CS.inter(14, .bold)).foregroundStyle(Color.ink).lineLimit(1)
                 Text(L10n.tr(slot.postedAt != nil ? "Posted" : slot.caption == nil ? "Writing caption…" : "Caption ready"))
                     .font(CS.inter(11)).foregroundStyle(PlanStyle.muted)
             }

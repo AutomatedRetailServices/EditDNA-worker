@@ -51,11 +51,7 @@ struct IntroView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(stops: [.init(color: Color(fixed: 0x03050D), location: 0),
-                                   .init(color: Color(fixed: 0x050B1C), location: 0.55),
-                                   .init(color: Color(fixed: 0x030409), location: 1)],
-                           startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea()
+            CS.wiPage.ignoresSafeArea()      // White Indigo
             VStack(spacing: 0) {
                 // Logo centred at y 50 (status bar 47 + 3), Skip at 338,62 · Inter SemiBold 15 #99A3BD
                 ZStack {
@@ -65,7 +61,7 @@ struct IntroView: View {
                         Button(action: onFinish) {
                             Text(L10n.tr("Skip"))
                                 .font(CS.inter(15, .semibold))
-                                .foregroundStyle(Color(fixed: 0x99A3BD))
+                                .foregroundStyle(CS.wiSecondary)
                                 .frame(minWidth: 44, minHeight: 44)
                         }
                         .buttonStyle(.plain)
@@ -90,7 +86,7 @@ struct IntroView: View {
                 HStack(spacing: 8) {
                     ForEach(0..<count, id: \.self) { i in
                         RoundedRectangle(cornerRadius: 4)
-                            .fill(i == index ? AnyShapeStyle(CS.brandStroke) : AnyShapeStyle(Color(fixed: 0x33405C)))
+                            .fill(i == index ? AnyShapeStyle(CS.accent) : AnyShapeStyle(CS.wiBorder))
                             .frame(width: i == index ? 22 : 8, height: 8)
                     }
                 }
@@ -102,12 +98,11 @@ struct IntroView: View {
                     if isLast { onFinish() } else { withAnimation { index += 1 } }
                 } label: {
                     Text(L10n.tr(isLast ? "Get started" : "Next"))
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(CS.inter(16, .bold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 50)
-                        .background(Self.buttonGradient, in: RoundedRectangle(cornerRadius: 25, style: .continuous))
-                        .shadow(color: Color(fixed: 0x1969FF, opacity: 0.25), radius: 9, x: 0, y: 6)
+                        .frame(height: 52)
+                        .background(CS.accent, in: Capsule())
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("intro_next")
@@ -121,10 +116,7 @@ struct IntroView: View {
         .accessibilityIdentifier("introView")
     }
 
-    static let buttonGradient = LinearGradient(stops: [.init(color: Color(fixed: 0x1969FF), location: 0),
-                                                        .init(color: Color(fixed: 0x7C3AED), location: 0.55),
-                                                        .init(color: Color(fixed: 0x19E6FF), location: 1)],
-                                               startPoint: .leading, endPoint: .trailing)
+    static let buttonGradient = CS.accentGradient   // White Indigo primary
 
     private func slide(_ i: Int) -> some View {
         VStack(spacing: 0) {
@@ -144,14 +136,14 @@ struct IntroView: View {
             Spacer(minLength: 8)
             VStack(spacing: 0) {
                 Text(L10n.tr(Self.titles[i]))
-                    .font(CS.inter(28, .bold))
-                    .foregroundStyle(.white)
+                    .font(CS.inter(28, .heavy))
+                    .foregroundStyle(CS.wiInk)
                     .multilineTextAlignment(.center)
                     .frame(width: 350)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(L10n.tr(Self.bodies[i]))
-                    .font(CS.inter(15))
-                    .foregroundStyle(Color(fixed: 0x99A3BD))
+                    .font(CS.inter(15, .medium))
+                    .foregroundStyle(CS.wiSecondary)
                     .multilineTextAlignment(.center)
                     .frame(width: 310)
                     .fixedSize(horizontal: false, vertical: true)
@@ -166,16 +158,16 @@ struct IntroView: View {
 
 /// The four illustrations, drawn from the Figma layers (positions relative to y 150).
 private enum IntroArt {
-    static let panel = Color(fixed: 0x0F1726)
-    static let line = Color(fixed: 0x33405C)
-    static let cyan = Color(fixed: 0x19E6FF)
+    static let panel = CS.wiCard        // White Indigo cards
+    static let line = CS.wiBorder
+    static let cyan = CS.accent
 
     private static func at(_ x: CGFloat, _ y: CGFloat) -> CGSize { CGSize(width: x, height: y - 150) }
 
     /// 1145:2773 · RAW 1:46 → CUT 0:40 → the cut
     static var upload: some View {
         ZStack(alignment: .topLeading) {
-            card(title: "RAW · 1:46", titleColor: Color(fixed: 0x99A3BD), stroke: AnyShapeStyle(line), width: 1) {
+            card(title: "RAW · 1:46", titleColor: CS.wiSecondary, stroke: AnyShapeStyle(line), width: 1) {
                 ForEach(Array([(13, 40, 0), (57, 20, 1), (81, 50, 0), (135, 30, 1), (169, 60, 0), (233, 24, 1), (261, 34, 0)]
                     .enumerated()), id: \.offset) { _, b in
                     RoundedRectangle(cornerRadius: 6).fill(b.2 == 1 ? Color(fixed: 0x591F2E) : Color(fixed: 0x404D6B))
@@ -184,9 +176,9 @@ private enum IntroArt {
             }
             .offset(at(40, 200))
             Text(verbatim: "↓").font(CS.inter(26, .bold)).foregroundStyle(cyan).offset(at(183, 282))
-            card(title: "CUT · 0:40", titleColor: cyan, stroke: AnyShapeStyle(Color(fixed: 0x19E5FF)), width: 1.5) {
+            card(title: "CUT · 0:40", titleColor: cyan, stroke: AnyShapeStyle(CS.accent), width: 1.5) {
                 ForEach(Array([(12.5, 70.0), (86.5, 90.0), (180.5, 114.0)].enumerated()), id: \.offset) { _, b in
-                    RoundedRectangle(cornerRadius: 6).fill(CS.brandStroke)
+                    RoundedRectangle(cornerRadius: 6).fill(CS.accentGradient)
                         .frame(width: b.1, height: 24).offset(x: b.0, y: 30.5)
                 }
             }
@@ -208,7 +200,7 @@ private enum IntroArt {
             }
             .frame(width: 160, height: 284)
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(CS.brandStroke, lineWidth: 2))
+            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(CS.accentGradient, lineWidth: 2))
             .offset(at(115, 170))
             tool("T").offset(at(52, 200))
             tool("♪").offset(at(290, 230))
@@ -224,16 +216,16 @@ private enum IntroArt {
                     id: \.offset) { _, row in
                 Text(L10n.tr(row.0)).font(CS.inter(12, .bold)).foregroundStyle(.white)
                     .frame(width: 70, height: 30)
-                    .background(CS.brandStroke, in: RoundedRectangle(cornerRadius: 15))
+                    .background(CS.accentGradient, in: RoundedRectangle(cornerRadius: 15))
                     .offset(at(40, CGFloat(row.1)))
                 ForEach(0..<row.2, id: \.self) { k in
                     photo("IntroAvatarClip", width: 40, height: 50, radius: 8).offset(at(122 + CGFloat(k) * 46, CGFloat(row.1) - 10))
                 }
             }
-            Text(L10n.tr("= 24 videos")).font(CS.inter(20, .bold)).foregroundStyle(.white)
+            Text(L10n.tr("= 24 videos")).font(CS.inter(20, .bold)).foregroundStyle(CS.wiInk)
                 .frame(width: 198, height: 58)
                 .background(panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(CS.brandStroke, lineWidth: 1.5))
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(CS.accentGradient, lineWidth: 1.5))
                 .offset(at(96, 440))
         }
     }
@@ -244,7 +236,7 @@ private enum IntroArt {
             ForEach(0..<5, id: \.self) { d in
                 VStack(spacing: 0) {
                     Text(verbatim: (L10nState.code == "es" ? ["L", "M", "M", "J", "V"] : ["M", "T", "W", "T", "F"])[d])
-                        .font(CS.inter(13, .bold)).foregroundStyle(.white).padding(.top, 11)
+                        .font(CS.inter(13, .bold)).foregroundStyle(d == 1 ? .white : CS.wiInk).padding(.top, 11)
                     Spacer()
                     HStack(spacing: 3) {
                         Circle().fill(Color(fixed: 0x19E6FF)).frame(width: 7, height: 7)
@@ -254,7 +246,7 @@ private enum IntroArt {
                 }
                 .frame(width: 54, height: 70)
                 .background {
-                    if d == 1 { RoundedRectangle(cornerRadius: 16, style: .continuous).fill(CS.brandStroke) }
+                    if d == 1 { RoundedRectangle(cornerRadius: 16, style: .continuous).fill(CS.accentGradient) }
                     else {
                         RoundedRectangle(cornerRadius: 16, style: .continuous).fill(panel)
                             .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(line, lineWidth: 1))
@@ -265,22 +257,22 @@ private enum IntroArt {
             HStack(spacing: 12) {
                 Text(verbatim: "C").font(CS.inter(18, .bold)).foregroundStyle(.white)
                     .frame(width: 40, height: 40)
-                    .background(CS.brandStroke, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .background(CS.accentGradient, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(L10n.tr("CutSell · now")).font(CS.inter(11, .semibold)).foregroundStyle(Color(fixed: 0x99A3BD))
-                    Text(L10n.tr("Time to post: Rhino Straps 🔥")).font(CS.inter(14, .semibold)).foregroundStyle(.white)
+                    Text(L10n.tr("CutSell · now")).font(CS.inter(11, .semibold)).foregroundStyle(CS.wiSecondary)
+                    Text(L10n.tr("Time to post: Rhino Straps 🔥")).font(CS.inter(14, .semibold)).foregroundStyle(CS.wiInk)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
             }
             .padding(.leading, 13)
             .frame(width: 310, height: 70)
-            .background(Color(fixed: 0x1A1F2E), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(CS.wiCard, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(line, lineWidth: 1))
             .offset(at(40, 290))
             Text(L10n.tr("Post to TikTok")).font(CS.inter(16, .bold)).foregroundStyle(.white)
                 .frame(width: 200, height: 52)
-                .background(CS.brandStroke, in: RoundedRectangle(cornerRadius: 26))
+                .background(CS.accentGradient, in: RoundedRectangle(cornerRadius: 26))
                 .offset(at(95, 384))
         }
     }
@@ -502,7 +494,7 @@ struct GuidePage: View {
                     .frame(width: 36, height: 36)
                     .background {
                         if guide.gradientIcon {
-                            RoundedRectangle(cornerRadius: 10, style: .continuous).fill(CS.brandStroke)
+                            RoundedRectangle(cornerRadius: 10, style: .continuous).fill(CS.accentGradient)
                         } else {
                             RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(hex: 0x1F2638))
                         }
@@ -546,7 +538,7 @@ struct GuideDetailPage: View {
                             VStack(spacing: 0) {
                                 Text(verbatim: "\(n + 1)").font(CS.inter(14, .bold)).foregroundStyle(.white)
                                     .frame(width: 32, height: 32)
-                                    .background(CS.brandStroke, in: Circle())
+                                    .background(CS.accentGradient, in: Circle())
                                 if n < guide.steps.count - 1 {
                                     Rectangle().fill(Color(hex: 0x33405C)).frame(width: 2).frame(minHeight: 52)
                                         .padding(.top, 6)

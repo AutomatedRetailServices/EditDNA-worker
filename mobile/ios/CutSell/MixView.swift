@@ -501,7 +501,7 @@ struct MixSetupView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(L10n.tr("PRODUCT")).font(CS.inter(10, .bold)).foregroundStyle(CS.cyan)
                     Text(product.map { "\($0.brand.name) · \($0.product.name)" } ?? "Choose the product")
-                        .font(CS.inter(15, .semibold)).foregroundStyle(.white).lineLimit(1)
+                        .font(CS.inter(15, .semibold)).foregroundStyle(Color.ink).lineLimit(1)
                         .accessibilityIdentifier("mixProductName")
                 }
                 Spacer()
@@ -521,7 +521,7 @@ struct MixSetupView: View {
             HStack(spacing: 8) {
                 Text(L10n.tr("\(index + 1)")).font(CS.inter(12, .bold)).foregroundStyle(.white)
                     .frame(width: 24, height: 24).background(CS.brandFull, in: Circle())
-                Text(section.name).font(CS.inter(15, .semibold)).foregroundStyle(.white)
+                Text(section.name).font(CS.inter(15, .semibold)).foregroundStyle(Color.ink)
                     .accessibilityIdentifier("mixSectionName_\(index)")
                 Text(L10n.tr("\(section.clips.count) clip\(section.clips.count == 1 ? "" : "s")"))
                     .font(CS.inter(12)).foregroundStyle(Color(hex: 0x99A3BD))
@@ -590,7 +590,7 @@ struct MixSetupView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(L10n.tr(filled ? "\(total) video\(total == 1 ? "" : "s") · about \(averageSeconds) s each" : "Add clips to every part"))
-                        .font(CS.inter(15, .semibold)).foregroundStyle(.white)
+                        .font(CS.inter(15, .semibold)).foregroundStyle(Color.ink)
                         .accessibilityIdentifier("mixSummary")
                     Text(formula).font(CS.inter(11)).foregroundStyle(Color(hex: 0x99A3BD)).lineLimit(1).minimumScaleFactor(0.8)
                 }
@@ -677,8 +677,7 @@ struct MixSetupView: View {
 }
 
 enum MixStyle {
-    static let cta = LinearGradient(stops: [.init(color: Color(hex: 0x1969FF), location: 0), .init(color: Color(hex: 0x7C3AED), location: 0.55),
-                                            .init(color: Color(hex: 0x19E6FF), location: 1)], startPoint: .leading, endPoint: .trailing)
+    static let cta = CS.accentGradient   // White Indigo primary
 }
 
 // MARK: - Mix · How many (Figma 1136:2804)
@@ -697,7 +696,7 @@ struct MixHowManySheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Capsule().fill(Color(hex: 0x4D5770)).frame(width: 40, height: 5).frame(maxWidth: .infinity).padding(.top, 9)
-            Text(L10n.tr("How many videos?")).font(CS.inter(22, .bold)).foregroundStyle(.white).padding(.top, 17)
+            Text(L10n.tr("How many videos?")).font(CS.inter(22, .bold)).foregroundStyle(Color.ink).padding(.top, 17)
             Text(L10n.tr("\(total) combinations are possible")).font(CS.inter(13)).foregroundStyle(Color(hex: 0x99A3BD)).padding(.top, 6)
             HStack(spacing: 8) {
                 ForEach(options, id: \.self) { n in pill("\(n)", selected: choice == n, width: 70) { choice = n } }
@@ -710,7 +709,7 @@ struct MixHowManySheet: View {
             VStack(spacing: 0) {
                 ForEach((plan?.videos ?? []).prefix(4)) { video in
                     HStack(spacing: 0) {
-                        Text(L10n.tr("Video \(video.n)")).font(CS.inter(13, .semibold)).foregroundStyle(.white).frame(width: 72, alignment: .leading)
+                        Text(L10n.tr("Video \(video.n)")).font(CS.inter(13, .semibold)).foregroundStyle(Color.ink).frame(width: 72, alignment: .leading)
                         Text(L10n.tr(video.names.joined(separator: " · "))).font(CS.inter(12)).foregroundStyle(Color(hex: 0x99A3BD))
                             .lineLimit(1).minimumScaleFactor(0.8)
                         Spacer(minLength: 0)
@@ -786,7 +785,7 @@ struct MixProductPicker: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(L10n.tr("Which product is this Sales Mix for?")).font(CS.inter(20, .bold)).foregroundStyle(.white).padding(.top, 28)
+            Text(L10n.tr("Which product is this Sales Mix for?")).font(CS.inter(20, .bold)).foregroundStyle(Color.ink).padding(.top, 28)
             ScrollView {
                 VStack(spacing: 0) {
                     ForEach(store.allProducts, id: \.product.productID) { pair in
@@ -796,7 +795,7 @@ struct MixProductPicker: View {
                                     Image("ProductsRadio").resizable().frame(width: 20, height: 20)
                                     if selected == pair.product.productID { Circle().fill(CS.cyan).frame(width: 10, height: 10) }
                                 }
-                                Text(L10n.tr("\(pair.brand.name) · \(pair.product.name)")).font(CS.inter(15)).foregroundStyle(.white)
+                                Text(L10n.tr("\(pair.brand.name) · \(pair.product.name)")).font(CS.inter(15)).foregroundStyle(Color.ink)
                                 Spacer()
                             }
                             .frame(height: 48)

@@ -83,15 +83,7 @@ enum CS {
         startPoint: .leading, endPoint: .trailing
     )
     /// Brand gradient: Cyan → ElectricBlue → Violet → Magenta.
-    static let brandFull = LinearGradient(
-        stops: [
-            .init(color: Color(hex: 0x19E6FF), location: 0),
-            .init(color: Color(hex: 0x1769FF), location: 0.38),
-            .init(color: Color(hex: 0x7C3AED), location: 0.72),
-            .init(color: Color(hex: 0xFF21D7), location: 1),
-        ],
-        startPoint: .leading, endPoint: .trailing
-    )
+    static let brandFull = ctaGradient     // White Indigo: selected / tags / CTAs = accent #1769FF → #4A5BFF
     /// The intro / guide gradient (Figma: #19E5FF → #1769FF 35 % → #7D3BED 70 % → #FF21D6), same in both looks.
     static let brandStroke = LinearGradient(
         stops: [

@@ -27,7 +27,7 @@ enum DesignScreenshots {
     static let whiteIndigo = [
         "hub", "edits", "edits_products", "edits_processing", "plan", "you", "processing", "processing_failed", "ready",
         "err_too_long", "err_unsupported", "err_could_not_add", "perm_camera", "gallery_single", "gallery_access", "style",
-        "camera", "editor_v4_base", "editor_v4_vo_record",
+        "camera", "editor_v4_base", "editor_v4_vo_record", "welcome",
     ]
 }
 
@@ -70,6 +70,8 @@ struct DesignScreenshotRoot: View {
             .background(CS.wiPage.ignoresSafeArea())
         case "edits_processing":
             EditsProcessingPreview()
+        case "welcome":
+            WelcomeView()
         case "edits_products":
             ProjectsView(initialTab: .products)
         case "ready":

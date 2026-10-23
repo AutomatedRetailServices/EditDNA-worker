@@ -670,7 +670,9 @@ struct EditTileMenu: View {
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(Color(fixed: 0xFFFFFF))
+                .frame(width: 26, height: 20)
+                .background(Color(fixed: 0x0B1020, opacity: 0.45), in: Capsule())
                 .frame(width: 34, height: 28)
                 .contentShape(Rectangle())
         }
