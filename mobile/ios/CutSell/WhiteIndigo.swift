@@ -274,7 +274,11 @@ struct WISheetCard<Content: View>: View {
             content()
         }
         .frame(maxWidth: .infinity)
-        .background(CS.wiPage, in: UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28, style: .continuous))
-        .background(alignment: .bottom) { CS.wiPage.frame(height: 40).offset(y: 40).ignoresSafeArea() }
+        .background {
+            // Reaches the bottom edge of the screen (under the home indicator).
+            UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28, style: .continuous)
+                .fill(CS.wiPage)
+                .ignoresSafeArea(edges: .bottom)
+        }
     }
 }
