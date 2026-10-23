@@ -1,3 +1,1 @@
-{"label": "Bulk of 5, normal API (baseline)", "ttl": "1h", "cache_on": true, "batch": false, "parallel": true,
- "videos": ["Editdna bloopers videos/Bloppers1.MP4", "Editdna bloopers videos/Bloppers2.mp4", "Editdna bloopers videos/Bloppers3.mp4",
-            "Editdna bloopers videos/Bloppers4.mp4", "Editdna bloopers videos/Bloppers5.mp4"]}
+{"label": "Bulk of 5, Batch API", "ttl": "1h", "cache_on": true, "batch": true, "parallel": true, "videos": ["Editdna bloopers videos/Bloppers1.MP4", "Editdna bloopers videos/Bloppers2.mp4", "Editdna bloopers videos/Bloppers3.mp4", "Editdna bloopers videos/Bloppers4.mp4", "Editdna bloopers videos/Bloppers5.mp4"]}
