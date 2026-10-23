@@ -1,4 +1,0 @@
-B24UI    30.6 Photos access allowed
-B24UI    32.2 gallery CTA: Create 1 cut
-B24UI    79.0 PASS the cut is ready
-B24UI   203.0 FAIL editor open

@@ -1,9 +1,0 @@
-B24UI    30.6 Photos access allowed
-B24UI    32.2 gallery CTA: Create 1 cut
-B24UI    79.0 PASS the cut is ready
-B24UI   203.0 FAIL editor open
-/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:307: error: -[CutSellUITests.Build24UITests testDeviceExport] : Failed to tap "exportQuality" Any: No matches found for first query match sequence: `Descendants matching type Any` -> `Elements matching predicate '"exportQuality" IN identifiers'`, given input App element pid: 24259
-Test Case '-[CutSellUITests.Build24UITests testDeviceExport]' failed (212.260 seconds).
-Test Suite 'Build24UITests' failed at 2026-10-23 01:12:15.909.
-Test Suite 'CutSellUITests.xctest' failed at 2026-10-23 01:12:15.910.
-Test Suite 'Selected tests' failed at 2026-10-23 01:12:15.910.
