@@ -74,7 +74,7 @@ enum BackgroundFollow {
                 if let done = GroupNotify.finished(project.projectID, ok: project.state != "failed") {
                     GroupNotify.post(done.id, done.group)
                 }
-            } else if project.state == "draft_ready", known.contains(project.projectID) {
+            } else if project.state == "draft_ready", known.contains(project.projectID), !PushRegistration.active {
                 let content = UNMutableNotificationContent()
                 content.title = "\(project.title.isEmpty ? "Your cut" : project.title) is ready"
                 content.body = "Open CutSell to review and export it."

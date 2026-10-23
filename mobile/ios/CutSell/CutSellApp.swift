@@ -28,6 +28,14 @@ final class CutSellAppDelegate: NSObject, UIApplicationDelegate {
         // complete the upload and start the cut.
         MainActor.assumeIsolated { PendingUploadFinisher.wokeForUploads() }
     }
+    // 23 Oct: Apple push token (the server sends "your videos are ready", also with CutSell closed).
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        MainActor.assumeIsolated { PushRegistration.received(deviceToken) }
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        MainActor.assumeIsolated { PushRegistration.failed(error) }
+    }
 }
 
 @main
@@ -72,6 +80,7 @@ struct CutSellApp: App {
                     if let session = appState.session {
                         await notificationCenter.refresh(session: session, surfaceLocalAlerts: false)
                     }
+                    await PushRegistration.start()
                     // Build 22: an upload whose parts are all on R2 is completed and its cut started.
                     if await PendingUploadFinisher.run(session: appState.session, reason: "launch", resumeUpload: { record in
                         await ResumeRunner.resume(record, appState: appState)

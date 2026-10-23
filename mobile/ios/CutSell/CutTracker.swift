@@ -138,7 +138,7 @@ final class CutTracker: ObservableObject {
     private func announceReady(_ cut: Cut) {
         CutSellDiagnostics.log("cut_ready_seen", ["project_id": cut.id])
         // 23 Oct: a Bulk video has no notification of its own (the group sends one when all are done).
-        if UIApplication.shared.applicationState != .active && !GroupNotify.isGrouped(cut.id) {
+        if UIApplication.shared.applicationState != .active && !GroupNotify.isGrouped(cut.id) && !PushRegistration.active {
             let content = UNMutableNotificationContent()
             content.title = "\(cut.title.isEmpty ? "Your cut" : cut.title) is ready"
             content.body = "Open CutSell to review and export it."

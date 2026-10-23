@@ -246,6 +246,39 @@ final class Build24UITests: XCTestCase {
         log("FAILURES: \(failures.isEmpty ? "none" : failures.joined(separator: " | "))")
     }
 
+    /// 23 Oct: the server allows 2 cuts at once per user; a 3rd Single sent meanwhile gets "busy" (429). It must
+    /// show QUEUED (never FAILED / an error) and start by itself when there is room.
+    func testBusyStaysQueued() throws {
+        launchApp(fresh: true)
+        for n in 1...3 {
+            if n > 1 { element("tab_create").tap(); pause(1.5) }
+            guard pickAndCreate(mode: "single", count: 1) else { return }
+            let cont = element("continueInBackground")
+            check(cont.waitForExistence(timeout: 30), "Processing screen for single \(n)")
+            cont.tap()
+            pause(1)
+        }
+        openEdits()
+        var seenQueuedAfterStart = false, failed = "", last = ""
+        let deadline = Date().addingTimeInterval(15 * 60)
+        while Date() < deadline {
+            let rows = rowStatuses()
+            let now = rows.joined(separator: ", ")
+            if now != last { last = now; log("busy rows: [\(now)]"); shot("busy_rows") }
+            if rows.contains("QUEUED") && rows.filter({ $0.hasPrefix("PROCESSING") }).count >= 2 { seenQueuedAfterStart = true }
+            if let bad = rows.first(where: { $0 == "FAILED" }) { failed = bad; shot("busy_failed") }
+            if !element("editsFilterProcessing").exists { break }
+            if !element("editsProcessingList").exists, element("editsFilterProcessing").isHittable {
+                element("editsFilterProcessing").tap()
+            }
+            pause(2)
+        }
+        log("a video waited as QUEUED while two were processing: \(seenQueuedAfterStart)")
+        check(failed.isEmpty, "busy is never FAILED", failed)
+        check(!element("editsFilterProcessing").exists, "all three cuts finished")
+        log("FAILURES: \(failures.isEmpty ? "none" : failures.joined(separator: " | "))")
+    }
+
     /// Single video: Continue in background while it uploads, leave CutSell, close it (terminate)
     /// while it uploads and again while it is being cut; reopen each time. The cut must finish.
     func testLeaveAndCloseAtEachStage() throws {

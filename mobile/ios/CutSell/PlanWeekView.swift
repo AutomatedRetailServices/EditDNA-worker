@@ -551,6 +551,8 @@ final class PostReminders: NSObject, UNUserNotificationCenterDelegate {
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
                                             withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        // 23 Oct: a "ready" push while CutSell is on screen: the in-app notice shows it (no banner on top).
+        if PushRegistration.isReadyPush(notification.request.content.userInfo) { completionHandler([.list]); return }
         completionHandler([.banner, .sound, .list])
     }
 

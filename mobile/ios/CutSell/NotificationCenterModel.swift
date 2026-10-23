@@ -82,7 +82,7 @@ final class NotificationCenterModel: ObservableObject {
 
     /// Background refresh: the server's one notice for a finished Mix -> "Your 6 videos are ready ✨".
     static func surfaceMixNotices(session: CutSellSession) async {
-        guard AppPrefs.processingAlertsOn,
+        guard AppPrefs.processingAlertsOn, !PushRegistration.active,
               let response: NotificationListResponse = try? await APIClient.shared.request(
                 "/v1/notifications", query: [URLQueryItem(name: "user_id", value: session.userID),
                                              URLQueryItem(name: "limit", value: "20")], timeout: 20) else { return }
@@ -109,6 +109,8 @@ final class NotificationCenterModel: ObservableObject {
         guard AppPrefs.processingAlertsOn, !Self.alreadySurfaced(item.notificationID) else { return }
         // 23 Oct: a Bulk video has no notification of its own (its group sends one when all are done).
         if (item.kind == "draft_ready" || item.kind == "processing_failed"), GroupNotify.isGrouped(item.projectID) { return }
+        // The server already sent it by push.
+        if (item.kind == "draft_ready" || item.kind == "processing_failed"), PushRegistration.active { return }
         let content = UNMutableNotificationContent()
         content.title = "CutSell"
         switch item.kind {

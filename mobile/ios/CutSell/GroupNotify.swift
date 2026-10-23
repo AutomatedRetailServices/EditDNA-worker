@@ -121,6 +121,8 @@ enum GroupNotify {
     /// The one notification of the group (only when CutSell is not on screen; on screen the in-app notice shows).
     static func post(_ id: String, _ g: Group) {
         guard AppPrefs.processingAlertsOn, UIApplication.shared.applicationState != .active else { return }
+        // The server sends this one by push -- unless a video never reached it (its upload stopped here).
+        if PushRegistration.active && !g.projects.contains(where: { $0.hasPrefix("upload-") }) { return }
         let content = UNMutableNotificationContent()
         content.title = title(g)
         content.body = L10n.tr("Open CutSell to review and export them.")

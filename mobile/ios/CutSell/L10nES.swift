@@ -739,6 +739,7 @@ enum L10nES {
         "Proof": "Prueba",
         "QUEUED": "EN COLA",
         "Quality": "Calidad",
+        "Queued · it starts by itself when there's room": "En cola · empieza sola cuando haya espacio",
         "RAW · 1:46": "CRUDO · 1:46",
         "READY": "LISTO",
         "REJECTED": "RECHAZADO",
