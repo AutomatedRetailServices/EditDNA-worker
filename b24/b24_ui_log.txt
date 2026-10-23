@@ -1,0 +1,23 @@
+B24UI    22.7 Photos access allowed
+B24UI    23.1 PASS the bulk chip opened the gallery in bulk
+B24UI    27.0 gallery CTA: Create 3 cuts
+B24UI    32.7 PASS bulk sheet shown
+B24UI    32.8 PASS sheet: notify message from the first moment
+B24UI    33.3 PASS Bulk shows no single-video Processing screen (Step x of 8)
+B24UI    35.5 PASS Edits opens on Processing
+B24UI    38.2 PASS Processing: the group message
+B24UI    38.8 PASS Processing: the Bulk group with its bar
+B24UI    38.9 rows at start: ["PROCESSING", "QUEUED", "QUEUED"]
+B24UI    38.9 PASS 3 rows in order · PROCESSING, QUEUED, QUEUED
+B24UI    43.9 bulk rows: [PROCESSING, QUEUED, QUEUED] · 0 of 3 ready
+B24UI    60.0 bulk rows: [PROCESSING, PROCESSING, QUEUED] · 0 of 3 ready
+B24UI    83.5 bulk rows: [PROCESSING, PROCESSING, PROCESSING] · 0 of 3 ready
+B24UI   679.8 bulk rows: [PROCESSING, READY, PROCESSING] · 1 of 3 ready
+B24UI   743.6 bulk rows: [READY, READY, PROCESSING] · 2 of 3 ready
+B24UI   756.7 group notice: Your 3 videos are ready ✨
+B24UI   756.7 PASS one notice for the whole group · Your 3 videos are ready ✨
+B24UI   756.7 PASS no notice per video
+B24UI   756.7 PASS only QUEUED / PROCESSING / READY
+B24UI   756.7 PASS no 'Taking a little longer' in Bulk
+B24UI   760.0 ready chip: Ready (3)
+B24UI   760.2 FAILURES: none
