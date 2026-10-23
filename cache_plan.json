@@ -1,3 +1,1 @@
-{"label": "5 videos back to back (1h cache: few videos in the last hour)", "ttl": "1h", "cache_on": true,
- "videos": ["Editdna good videos/good videos1.mp4", "Editdna good videos/good videos2.mp4", "Editdna good videos/good videos3.mp4",
-            "Editdna good videos/good videos4.mp4", "Editdna good videos/good videos5.mp4"]}
+{"label": "spaced 6 (20 min apart)", "ttl": "1h", "cache_on": true, "videos": ["Editdna good videos/good videos6.mp4"]}
