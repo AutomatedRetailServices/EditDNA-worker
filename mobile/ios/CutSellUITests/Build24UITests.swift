@@ -645,8 +645,8 @@ final class Build24UITests: XCTestCase {
         element("hubFaceless").tap()
         check(app.alerts["Faceless video"].waitForExistence(timeout: 10), "Faceless shows Coming soon")
         shot("hub_faceless")
-        app.alerts.buttons.firstMatch.tap()
         // Sales Mix → Sales Mix · Setup
+        launchApp(fresh: false, extra: ["-CutSellProjectsMock"])
         element("hubMix").tap()
         check(element("mixProduct").waitForExistence(timeout: 15), "Sales Mix opens Sales Mix · Setup")
         shot("hub_mix")
