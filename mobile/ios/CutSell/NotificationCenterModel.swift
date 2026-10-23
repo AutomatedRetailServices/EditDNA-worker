@@ -69,12 +69,53 @@ final class NotificationCenterModel: ObservableObject {
         UNUserNotificationCenter.current().setBadgeCount(0)
     }
 
+    /// Notices already shown as an iPhone notification (here or by the background refresh): never twice.
+    private static let surfacedKey = "cutsell.notifications.surfaced"
+    private static func alreadySurfaced(_ id: String) -> Bool {
+        (UserDefaults.standard.stringArray(forKey: surfacedKey) ?? []).contains(id)
+    }
+    private static func markSurfaced(_ id: String) {
+        var ids = UserDefaults.standard.stringArray(forKey: surfacedKey) ?? []
+        ids.append(id)
+        UserDefaults.standard.set(Array(ids.suffix(200)), forKey: surfacedKey)
+    }
+
+    /// Background refresh: the server's one notice for a finished Mix -> "Your 6 videos are ready ✨".
+    static func surfaceMixNotices(session: CutSellSession) async {
+        guard AppPrefs.processingAlertsOn,
+              let response: NotificationListResponse = try? await APIClient.shared.request(
+                "/v1/notifications", query: [URLQueryItem(name: "user_id", value: session.userID),
+                                             URLQueryItem(name: "limit", value: "20")], timeout: 20) else { return }
+        for item in response.notifications where item.kind == "draft_ready" && item.payload["mix_id"] != nil
+            && !alreadySurfaced(item.notificationID) {
+            let content = UNMutableNotificationContent()
+            content.title = GroupNotify.mixTitle(videos: Self.videos(item))
+            content.body = L10n.tr("Open CutSell to review and export them.")
+            content.sound = .default
+            content.userInfo = ["project_id": item.projectID, "kind": item.kind]
+            try? await UNUserNotificationCenter.current().add(
+                UNNotificationRequest(identifier: item.notificationID, content: content, trigger: nil))
+            markSurfaced(item.notificationID)
+        }
+    }
+
+    private static func videos(_ item: CutSellNotification) -> Int {
+        if case .number(let n)? = item.payload["videos"] { return Int(n) }
+        return 0
+    }
+
     private func scheduleLocalAlert(for item: CutSellNotification) async {
         // You → Preferences → "Processing complete" off: no alert (the list still shows it).
-        guard AppPrefs.processingAlertsOn else { return }
+        guard AppPrefs.processingAlertsOn, !Self.alreadySurfaced(item.notificationID) else { return }
+        // 23 Oct: a Bulk video has no notification of its own (its group sends one when all are done).
+        if (item.kind == "draft_ready" || item.kind == "processing_failed"), GroupNotify.isGrouped(item.projectID) { return }
         let content = UNMutableNotificationContent()
         content.title = "CutSell"
         switch item.kind {
+        case "draft_ready" where item.payload["mix_id"] != nil:
+            // Mix: one notice for all its videos.
+            content.title = GroupNotify.mixTitle(videos: Self.videos(item))
+            content.body = "Open CutSell to review and export them."
         case "draft_ready":
             content.body = "Your AI draft is ready to edit."
         case "render_finished":
@@ -96,6 +137,7 @@ final class NotificationCenterModel: ObservableObject {
             trigger: nil
         )
         try? await UNUserNotificationCenter.current().add(request)
+        Self.markSurfaced(item.notificationID)
         try? await UNUserNotificationCenter.current().setBadgeCount(unreadCount)
     }
 }

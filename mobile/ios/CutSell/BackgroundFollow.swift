@@ -29,7 +29,7 @@ enum BackgroundFollow {
 
     /// CutSell went to the background.
     static func enteredBackground() {
-        guard CutTracker.shared.hasActiveCuts else { return }
+        guard CutTracker.shared.hasActiveCuts || MixCenter.shared.hasActive else { return }
         if time == nil {
             let background = BackgroundTime("cutsell-follow-cuts")
             background.begin()
@@ -69,6 +69,11 @@ enum BackgroundFollow {
         for project in list.projects {
             if Project.processingStates.contains(project.state) {
                 stillProcessing.append(project.projectID)
+            } else if GroupNotify.isGrouped(project.projectID) {
+                // 23 Oct: a Bulk video: no notification of its own; the group's one when all of it is done.
+                if let done = GroupNotify.finished(project.projectID, ok: project.state != "failed") {
+                    GroupNotify.post(done.id, done.group)
+                }
             } else if project.state == "draft_ready", known.contains(project.projectID) {
                 let content = UNMutableNotificationContent()
                 content.title = "\(project.title.isEmpty ? "Your cut" : project.title) is ready"
@@ -80,6 +85,8 @@ enum BackgroundFollow {
             }
         }
         UserDefaults.standard.set(stillProcessing, forKey: "cutsell.follow.processing")
-        return !stillProcessing.isEmpty
+        // Mix: the server sends one notice for the whole Mix; shown here too while CutSell is not on screen.
+        await NotificationCenterModel.surfaceMixNotices(session: session)
+        return !stillProcessing.isEmpty || MixCenter.shared.hasActive
     }
 }

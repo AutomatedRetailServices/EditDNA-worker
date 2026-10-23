@@ -80,6 +80,8 @@ final class MixCenter: ObservableObject {
     private var mockStarted: [String: Date] = [:]
 
     var active: [MixSummary] { mixes.filter(\.isActive) }
+    /// A Mix still being made (the background refresh keeps checking while there is one).
+    var hasActive: Bool { !active.isEmpty }
     /// The videos of Mixes still being made (shown as one group in Processing, not one row each).
     var activeProjectIDs: Set<String> { Set(active.flatMap { $0.videos.map(\.projectID) }) }
     var mixIDs: Set<String> { Set(mixes.map(\.mixID)) }

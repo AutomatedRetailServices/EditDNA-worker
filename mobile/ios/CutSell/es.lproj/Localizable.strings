@@ -13,6 +13,10 @@
 "+ Time" = "+ Hora";
 "+ %@ more" = "+ %1$@ más";
 "+ %lld more" = "+ %1$lld más";
+"1 ready, 1 needs attention" = "1 listo, 1 necesita atención";
+"1 ready, %@ need attention" = "1 listo, %1$@ necesitan atención";
+"1 ready, %lld need attention" = "1 listo, %1$lld necesitan atención";
+"1 video needs attention" = "1 video necesita atención";
 "10 clips maximum" = "Máximo 10 clips";
 "1080p copy (original not found)" = "Copia 1080p (no se encontró el original)";
 "2K · coming soon" = "2K · próximamente";
@@ -128,6 +132,8 @@
 "Build my plan" = "Crear mi plan";
 "Building your sales edit" = "Armando tu edición de venta";
 "Bulk" = "Varios";
+"Bulk · %@ videos" = "Bulk · %1$@ videos";
+"Bulk · %lld videos" = "Bulk · %1$lld videos";
 "CAMERA & EXPORT" = "CÁMARA Y EXPORTACIÓN";
 "CREATE" = "CREAR";
 "CUT · 0:40" = "CORTE · 0:40";
@@ -706,12 +712,14 @@
 "One" = "Uno";
 "One clip couldn’t be added. Try another one." = "No se pudo añadir un clip. Prueba con otro.";
 "One edit in the order you selected." = "Una edición en el orden que elegiste.";
+"One notification when the whole group is ready." = "Un solo aviso cuando todo el grupo esté listo.";
 "One selected video could not be retrieved. The videos already loaded were kept." = "No se pudo traer un video seleccionado. Los videos que ya se cargaron se mantienen.";
 "One video per day, with reminders" = "Un video por día, con recordatorios";
 "One video → one edit." = "Un video → una edición.";
 "Only videos can go on this track." = "En esta pista solo van videos.";
 "Opacity" = "Opacidad";
 "Open CutSell to review and export it." = "Abre CutSell para revisarlo y exportarlo.";
+"Open CutSell to review and export them." = "Abre CutSell para revisarlos y exportarlos.";
 "Open CutSell to save or share it." = "Abre CutSell para guardarlo o compartirlo.";
 "Open Plan my week" = "Abre Planear mi semana";
 "Open Products" = "Abre Productos";
@@ -1301,6 +1309,7 @@
 "We show how many videos come out, like 3 × 2 × 2 × 2 = 24." = "Te mostramos cuántos videos salen, por ejemplo 3 × 2 × 2 × 2 = 24.";
 "We spread your ready videos so every day has variety. Tap one to move it to another day or time." = "Repartimos tus videos listos para que cada día tenga variedad. Toca uno para moverlo a otro día u hora.";
 "We'll mark the video as posted in your plan." = "Marcaremos el video como publicado en tu plan.";
+"We'll notify you when your videos are ready. You can keep using CutSell." = "Te avisamos cuando tus videos estén listos. Puedes seguir usando CutSell.";
 "We’ll let you know in CutSell when your cut is ready." = "Te avisamos en CutSell cuando tu corte esté listo.";
 "We’ll notify you as each cut is ready." = "Te avisamos cuando cada corte esté listo.";
 "We’re saving you hours per day…" = "Te estamos ahorrando horas al día…";
@@ -1362,6 +1371,7 @@
 "Your total editing time saved" = "Tu tiempo total de edición ahorrado";
 "Your video hasn’t finished uploading. Open CutSell on a good connection and try again." = "Tu video no terminó de subir. Abre CutSell con buena conexión y vuelve a intentarlo.";
 "Your video is ready" = "Tu video está listo";
+"Your video is ready ✨" = "Tu video está listo ✨";
 "Your video is ready." = "Tu video está listo.";
 "Your video is saved on this iPhone. Resume the upload and CutSell will make the cut." = "Tu video está guardado en este iPhone. Reanuda la subida y CutSell hará el corte.";
 "Your video keeps uploading if you leave this screen or CutSell." = "Tu video sigue subiendo aunque salgas de esta pantalla o de CutSell.";
@@ -1369,10 +1379,13 @@
 "Your video was recorded in %lldp" = "Tu video se grabó en %1$lldp";
 "Your video was recorded in %@p." = "Tu video se grabó en %1$@p.";
 "Your video was recorded in %lldp." = "Tu video se grabó en %1$lldp.";
+"Your videos are ready ✨" = "Tus videos están listos ✨";
 "Your videos, by brand and product." = "Tus videos, por marca y producto.";
 "Your voice-over hasn’t been saved." = "Tu voz en off no se ha guardado.";
 "Your %@ videos are being edited" = "Tus %1$@ videos se están editando";
 "Your %lld videos are being edited" = "Tus %1$lld videos se están editando";
+"Your %@ videos are ready ✨" = "Tus %1$@ videos están listos ✨";
+"Your %lld videos are ready ✨" = "Tus %1$lld videos están listos ✨";
 "Zoom deleted" = "Zoom eliminado";
 "Zoom selected" = "Zoom seleccionado";
 "Zooms in on key moments automatically." = "Hace zoom en los momentos clave automáticamente.";
@@ -1465,6 +1478,12 @@
 "%lld processing" = "%1$lld procesando";
 "%@ ready" = "%1$@ listos";
 "%lld ready" = "%1$lld listos";
+"%@ ready, 1 needs attention" = "%1$@ listos, 1 necesita atención";
+"%lld ready, 1 needs attention" = "%1$lld listos, 1 necesita atención";
+"%@ ready, %@ need attention" = "%1$@ listos, %2$@ necesitan atención";
+"%@ ready, %lld need attention" = "%1$@ listos, %2$lld necesitan atención";
+"%lld ready, %@ need attention" = "%1$lld listos, %2$@ necesitan atención";
+"%lld ready, %lld need attention" = "%1$lld listos, %2$lld necesitan atención";
 "%@ saved · %@ couldn’t be exported. Try again." = "%1$@ guardados · %2$@ no se pudieron exportar. Vuelve a intentarlo.";
 "%@ saved · %lld couldn’t be exported. Try again." = "%1$@ guardados · %2$lld no se pudieron exportar. Vuelve a intentarlo.";
 "%lld saved · %@ couldn’t be exported. Try again." = "%1$lld guardados · %2$@ no se pudieron exportar. Vuelve a intentarlo.";
@@ -1477,6 +1496,8 @@
 "%lld steps" = "%1$lld pasos";
 "%@ videos" = "%1$@ videos";
 "%lld videos" = "%1$lld videos";
+"%@ videos need attention" = "%1$@ videos necesitan atención";
+"%lld videos need attention" = "%1$lld videos necesitan atención";
 "%@ videos saved to Photos" = "%1$@ videos guardados en Fotos";
 "%lld videos saved to Photos" = "%1$lld videos guardados en Fotos";
 "%@ video%@" = "%1$@ video%2$@";

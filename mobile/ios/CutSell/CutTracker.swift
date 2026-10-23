@@ -95,6 +95,7 @@ final class CutTracker: ObservableObject {
     private func poll(_ projectID: String) async {
         guard let session = await APIClient.shared.session, var cut = cuts[projectID] else { return }
         let wasReady = cut.isReady
+        let wasFailed = cut.isFailed
         do {
             let project: Project = try await APIClient.shared.request(
                 "/v1/projects/\(projectID)",
@@ -131,11 +132,13 @@ final class CutTracker: ObservableObject {
         }
         cuts[projectID] = cut
         if cut.isReady && !wasReady { announceReady(cut) }
+        if cut.isFailed && !wasFailed && !cut.gone { ProcessingQueue.shared.serverFailed(projectID: projectID) }
     }
 
     private func announceReady(_ cut: Cut) {
         CutSellDiagnostics.log("cut_ready_seen", ["project_id": cut.id])
-        if UIApplication.shared.applicationState != .active {
+        // 23 Oct: a Bulk video has no notification of its own (the group sends one when all are done).
+        if UIApplication.shared.applicationState != .active && !GroupNotify.isGrouped(cut.id) {
             let content = UNMutableNotificationContent()
             content.title = "\(cut.title.isEmpty ? "Your cut" : cut.title) is ready"
             content.body = "Open CutSell to review and export it."

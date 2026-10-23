@@ -292,11 +292,25 @@ struct ProjectsView: View {
     }
 
     private func takeRequestedFilter() {
+        // 23 Oct: the Bulk notice's "View" opens Ready.
+        if queue.requestedEditsFilter == "ready" {
+            queue.requestedEditsFilter = nil
+            selectedTab = .ready
+            return
+        }
         guard queue.requestedEditsFilter == "processing" else { return }
         queue.requestedEditsFilter = nil
         selectedTab = .processing
         Task { await refreshPendingCuts() }
     }
+
+    /// 23 Oct: a Bulk or a Mix is in the list (its message, no times).
+    private var hasGroups: Bool {
+        focusedRows.contains { $0.group != nil } || mixCenter.active.contains { queue.focus == nil || queue.focus == $0.mixID }
+    }
+
+    /// Only Bulk / Mix videos are listed (the Single note "as each cut is ready" is left out).
+    private var onlyGroups: Bool { hasGroups && !focusedRows.contains { $0.group == nil } }
 
     /// Figma 1134:2825-2884: "In order", the rows, and the note.
     private var processingList: some View {
@@ -304,7 +318,9 @@ struct ProjectsView: View {
             HStack(alignment: .firstTextBaseline) {
                 Text(L10n.tr("In order")).font(CS.inter(16, .semibold)).foregroundStyle(Color.ink)
                 Spacer()
-                Text(L10n.tr("Each one moves to Ready when it’s done")).font(CS.inter(11, .medium)).foregroundStyle(Color(hex: 0x99A3BD))
+                if !onlyGroups {
+                    Text(L10n.tr("Each one moves to Ready when it’s done")).font(CS.inter(11, .medium)).foregroundStyle(Color(hex: 0x99A3BD))
+                }
             }
             .padding(.top, 16)
             if let focus = queue.focus {
@@ -319,6 +335,20 @@ struct ProjectsView: View {
                 .padding(.top, 10)
                 .accessibilityIdentifier("processingFocus")
             }
+            if hasGroups {
+                // 23 Oct (PO): Bulk and Mix say this from the first moment, with no times.
+                Text(L10n.tr(ProcessingQueue.groupMessage))
+                    .font(CS.inter(13, .semibold))
+                    .foregroundStyle(Color.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 15)
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(hex: 0x0F1726), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color(hex: 0x33405C), lineWidth: 1))
+                    .padding(.top, 12)
+                    .accessibilityIdentifier("processingGroupMessage")
+            }
             VStack(spacing: 8) {
                 ForEach(mixCenter.active.filter { queue.focus == nil || queue.focus == $0.mixID }) { mix in
                     MixGroupRow(mix: mix, onRetry: { Task { await mixCenter.retry(mix, session: appState.session) } }) {
@@ -326,10 +356,15 @@ struct ProjectsView: View {
                     }
                 }
                 ForEach(Array(focusedRows.enumerated()), id: \.element.id) { index, row in
+                    if let group = row.group, index == 0 || focusedRows[index - 1].group != group,
+                       let bulk = queue.bulk(of: row.itemID) {
+                        BulkGroupHeader(total: bulk.group.total, ready: bulk.ready)
+                    }
                     processingRow(index + 1, row)
                 }
             }
             .padding(.top, 12)
+            if !onlyGroups {
             Text(L10n.tr("Editing keeps going on our servers even if you close the app. We’ll notify you as each cut is ready."))
                 .font(CS.inter(12))
                 .foregroundStyle(Color(hex: 0x99A3BD))
@@ -340,6 +375,7 @@ struct ProjectsView: View {
                 .background(Color(hex: 0x0F1726), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color(hex: 0x33405C), lineWidth: 1))
                 .padding(.top, 18)
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("editsProcessingList")

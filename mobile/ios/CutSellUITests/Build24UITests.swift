@@ -180,12 +180,16 @@ final class Build24UITests: XCTestCase {
         return (false, toasts)
     }
 
-    /// Bulk: the "being edited" sheet → Go to Edits → Processing in order → each cut moves to Ready.
+    /// Bulk (23 Oct rules): the sheet says "We'll notify you when your videos are ready. You can keep using CutSell.";
+    /// Edits · Processing shows that message, the group ("3 of 3 ready" bar) and only QUEUED / PROCESSING / READY per
+    /// video (no times, no "Taking a little longer"); no notice per video; ONE notice when the whole group is done.
     func testBulkSheetAndProcessingTab() throws {
         launchApp(fresh: true)
         guard pickAndCreate(mode: "bulk", count: 3) else { return }
         let sheet = element("bulkStartedSheet")
         check(sheet.waitForExistence(timeout: 30), "bulk sheet shown")
+        check(app.staticTexts["We'll notify you when your videos are ready. You can keep using CutSell."].exists,
+              "sheet: notify message from the first moment")
         shot("bulk_sheet")
         check(!element("processingStage").exists, "Bulk shows no single-video Processing screen (Step x of 8)")
         element("bulkGoToEdits").tap()
@@ -193,12 +197,49 @@ final class Build24UITests: XCTestCase {
         check(list.waitForExistence(timeout: 15), "Edits opens on Processing")
         pause(2)
         shot("processing_tab")
+        check(element("processingGroupMessage").exists, "Processing: the group message")
+        check(element("bulkGroupHeader").exists, "Processing: the Bulk group with its bar")
         let first = rowStatuses()
         log("rows at start: \(first)")
         check(first.count == 3, "3 rows in order", first.joined(separator: ", "))
-        let result = waitForProcessingToEmpty("bulk", minutes: 5)
-        check(result.done, "every cut left Processing")
-        check(result.toasts >= 1, "ready notice shown", "\(result.toasts)")
+        // Until the whole group is done: only the three states, no times, no per-video notice.
+        let allowed: Set<String> = ["QUEUED", "PROCESSING", "READY", "FAILED", "NO VOICE"]
+        var perVideoNotice = false, badStatus = "", slowSeen = false, groupNotice = ""
+        var lastRows = "", lastReady = ""
+        let deadline = Date().addingTimeInterval(25 * 60)
+        while Date() < deadline {
+            if element("readyToast").exists { perVideoNotice = true; shot("bulk_per_video_notice") }
+            if element("queueRowSlow").exists { slowSeen = true }
+            if element("groupToast").exists {
+                let text = element("groupToast").staticTexts.firstMatch
+                groupNotice = text.exists ? text.label : element("groupToast").label
+                shot("bulk_group_notice")
+                break
+            }
+            let rows = rowStatuses()
+            if let bad = rows.first(where: { !allowed.contains($0) }) { badStatus = bad }
+            let now = rows.joined(separator: ", ")
+            let ready = element("bulkGroupReady").exists ? element("bulkGroupReady").label : ""
+            if now != lastRows || ready != lastReady {
+                lastRows = now; lastReady = ready
+                log("bulk rows: [\(now)] · \(ready)")
+                if now.contains("READY") { shot("bulk_partly_ready") }
+            }
+            if !element("editsFilterProcessing").exists && groupNotice.isEmpty {
+                // The group left Processing: the notice shows for 8 s.
+                if element("groupToast").waitForExistence(timeout: 5) { continue }
+            }
+            if !element("editsProcessingList").exists, element("editsFilterProcessing").isHittable {
+                element("editsFilterProcessing").tap()
+            }
+            pause(2)
+        }
+        log("group notice: \(groupNotice)")
+        check(!groupNotice.isEmpty, "one notice for the whole group", groupNotice)
+        check(!perVideoNotice, "no notice per video")
+        check(badStatus.isEmpty, "only QUEUED / PROCESSING / READY", badStatus)
+        check(!slowSeen, "no 'Taking a little longer' in Bulk")
+        pause(3)
         let ready = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Ready ('")).firstMatch
         log("ready chip: \(ready.exists ? ready.label : "?")")
         shot("ready_tab")

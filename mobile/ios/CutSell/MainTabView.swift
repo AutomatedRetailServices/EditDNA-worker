@@ -77,6 +77,24 @@ struct MainTabView: View {
             }
         }
         .animation(.easeOut(duration: 0.25), value: queue.readyToast?.projectID)
+        .overlay(alignment: .bottom) {
+            // 23 Oct: a whole Bulk is done -- "Your 10 videos are ready ✨" / "9 ready, 1 needs attention" · View.
+            if let text = queue.groupToast, queue.readyToast == nil {
+                GroupReadyToast(text: text) {
+                    queue.groupToast = nil
+                    queue.requestedEditsFilter = "ready"
+                    select(.edits)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 110)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .task(id: text) {
+                    try? await Task.sleep(nanoseconds: 8_000_000_000)
+                    if queue.groupToast == text { queue.groupToast = nil }
+                }
+            }
+        }
+        .animation(.easeOut(duration: 0.25), value: queue.groupToast)
         .tiktokReturnPrompt()                      // "Did you post it?" after Post to TikTok
         .overlay(alignment: .top) {
             if let projectID = tracker.readyBanner {

@@ -15,6 +15,8 @@ final class ProcessingQueue: ObservableObject {
         case uploading(Int)
         case processing(Int)
         case failed(String)
+        /// 23 Oct: a Bulk video already done; it stays in its group until the whole group is done.
+        case ready
     }
 
     struct Item: Identifiable, Equatable {
@@ -37,6 +39,8 @@ final class ProcessingQueue: ObservableObject {
     @Published private(set) var items: [Item] = []
     /// "<name> is ready · View" (bottom notice, Figma 1134:3027).
     @Published var readyToast: (projectID: String, name: String)?
+    /// 23 Oct: "Your 10 videos are ready ✨" / "9 ready, 1 needs attention" -- one notice for a whole Bulk.
+    @Published var groupToast: String?
     /// "processing": Edits opens on its Processing filter ("Go to Edits").
     @Published var requestedEditsFilter: String?
     /// Mix: the Mix just started (Edits opens on Processing and shows its group).
@@ -58,9 +62,18 @@ final class ProcessingQueue: ObservableObject {
     var activeBulks: [(group: BulkGroup, ready: Int, thumbnail: UIImage?)] {
         bulkGroups.compactMap { group in
             let left = items.filter { $0.group == group.id }
-            guard !left.isEmpty else { return nil }
-            return (group, max(0, group.total - left.count), left.first { $0.thumbnail != nil }?.thumbnail)
+            guard left.contains(where: { $0.state != .ready }) else { return nil }
+            let notReady = left.filter { $0.state != .ready }.count
+            return (group, max(0, group.total - notReady), left.first { $0.thumbnail != nil }?.thumbnail)
         }.sorted { $0.group.startedAt > $1.group.startedAt }
+    }
+
+    /// The Bulk send a row belongs to ("3 of 10 ready" above its videos).
+    func bulk(of itemID: UUID?) -> (group: BulkGroup, ready: Int)? {
+        guard let itemID, let groupID = items.first(where: { $0.id == itemID })?.group,
+              let group = bulkGroups.first(where: { $0.id == groupID }) else { return nil }
+        let notReady = items.filter { $0.group == groupID && $0.state != .ready }.count
+        return (group, max(0, group.total - notReady))
     }
     /// Retry for a failed item (resume the upload, or open the cut).
     private var retries: [UUID: () -> Void] = [:]
@@ -72,7 +85,10 @@ final class ProcessingQueue: ObservableObject {
         let new = entries.map { Item(id: UUID(), name: $0.name, duration: $0.duration, thumbnail: nil, projectID: nil,
                                      state: .queued, addedAt: now, group: group) }
         items.append(contentsOf: new)
-        if let group, !new.isEmpty { bulkGroups.append(BulkGroup(id: group, total: new.count, startedAt: now)) }
+        if let group, !new.isEmpty {
+            bulkGroups.append(BulkGroup(id: group, total: new.count, startedAt: now))
+            GroupNotify.start(group, total: new.count)
+        }
         return new.map(\.id)
     }
 
@@ -83,7 +99,13 @@ final class ProcessingQueue: ObservableObject {
         if let name, !name.isEmpty { item.name = name }
         if let duration, duration > 0 { item.duration = duration }
         if let thumbnail { item.thumbnail = thumbnail }
-        if let projectID { item.projectID = projectID }
+        if let projectID {
+            if item.projectID != projectID, let group = item.group {
+                GroupNotify.replacePlaceholder(group, itemID: item.id)
+                GroupNotify.link(group, projectID: projectID)
+            }
+            item.projectID = projectID
+        }
         if let state { item.state = state }
         if item != items[index] || thumbnail != nil { items[index] = item }
     }
@@ -92,10 +114,16 @@ final class ProcessingQueue: ObservableObject {
         guard let id else { return }
         update(id, state: .failed(detail))
         retries[id] = retry
+        // A Bulk video whose upload stopped counts as "needs attention" for the group's one notice.
+        if let item = items.first(where: { $0.id == id }), let group = item.group, item.projectID == nil,
+           let done = GroupNotify.uploadFailed(group, itemID: id) {
+            groupDone(done.id, done.group)
+        }
     }
 
     func retry(_ id: UUID) {
         guard let action = retries.removeValue(forKey: id) else { return }
+        if let group = items.first(where: { $0.id == id })?.group { GroupNotify.replacePlaceholder(group, itemID: id) }
         update(id, state: .uploading(0))
         action()
     }
@@ -107,9 +135,34 @@ final class ProcessingQueue: ObservableObject {
 
     /// The server finished this cut: it leaves Processing and the notice shows.
     func ready(projectID: String, title: String?) {
+        // 23 Oct: a Bulk video stays in its group as Ready (no notice of its own); the group tells once, when all are done.
+        if let index = items.firstIndex(where: { $0.projectID == projectID }), items[index].group != nil {
+            items[index].state = .ready
+            if let done = GroupNotify.finished(projectID, ok: true) { groupDone(done.id, done.group) }
+            return
+        }
+        if GroupNotify.isGrouped(projectID) {
+            // A Bulk video of a send this iPhone no longer lists (CutSell was reopened): only the group tells.
+            if let done = GroupNotify.finished(projectID, ok: true) { groupDone(done.id, done.group) }
+            return
+        }
         let name = items.first { $0.projectID == projectID }?.name ?? title ?? "Your cut"
         items.removeAll { $0.projectID == projectID }
         readyToast = (projectID, name)
+    }
+
+    /// The server could not make this cut (a Bulk video: it counts as "needs attention" in the group's notice).
+    func serverFailed(projectID: String) {
+        if let done = GroupNotify.finished(projectID, ok: false) { groupDone(done.id, done.group) }
+    }
+
+    /// Every video of a Bulk send is done: one notification (CutSell not on screen) or one notice (on screen); the
+    /// ready videos leave Processing (they are in Ready), the ones that need attention stay with their Retry.
+    private func groupDone(_ id: String, _ g: GroupNotify.Group) {
+        GroupNotify.post(id, g)
+        groupToast = GroupNotify.title(g)
+        items.removeAll { $0.group == id && $0.state == .ready }
+        if !items.contains(where: { $0.group == id }) { bulkGroups.removeAll { $0.id == id } }
     }
 
     /// The rows of the Processing filter, in order: this iPhone's items, then cuts still processing on
@@ -121,17 +174,19 @@ final class ProcessingQueue: ObservableObject {
             var state = item.state
             if let id = item.projectID {
                 listed.insert(id)
-                if let cut = tracker.cut(id) {
-                    if cut.isReady { continue }
-                    if cut.isFailed { state = .failed(Self.failure(cut)) }
+                if let cut = tracker.cut(id), state != .ready {
+                    if cut.isReady { if item.group == nil { continue }; state = .ready }
+                    else if cut.isFailed { state = .failed(Self.failure(cut)) }
                     else if case .failed = state {} else {
                         state = cut.jobState == "queued" ? .queued : .processing(max(0, CutTracker.serverStage(cut).percent))
                     }
                 }
             }
+            // 23 Oct: a Bulk video shows only Queued / Processing / Ready, no times ("Taking a little longer" is Single only).
             rows.append(Row(id: item.id.uuidString, itemID: item.id, projectID: item.projectID, name: item.name,
                             duration: item.duration, thumbnail: item.thumbnail, state: state,
-                            slow: Self.slow(item.projectID.flatMap { tracker.cut($0) }, state)))
+                            slow: item.group == nil && Self.slow(item.projectID.flatMap { tracker.cut($0) }, state),
+                            group: item.group))
         }
         for project in projects where Project.processingStates.contains(project.state) && !listed.contains(project.projectID) {
             var state = State.processing(0)
@@ -140,9 +195,10 @@ final class ProcessingQueue: ObservableObject {
                 state = cut.isFailed ? .failed(Self.failure(cut))
                     : cut.jobState == "queued" ? .queued : .processing(max(0, CutTracker.serverStage(cut).percent))
             }
+            let grouped = GroupNotify.group(of: project.projectID)
             rows.append(Row(id: project.projectID, itemID: nil, projectID: project.projectID, name: project.title,
                             duration: 0, thumbnail: ThumbnailStore.shared.image(for: project.projectID), state: state,
-                            slow: Self.slow(tracker.cut(project.projectID), state)))
+                            slow: grouped == nil && Self.slow(tracker.cut(project.projectID), state), group: grouped))
         }
         return rows
     }
@@ -161,9 +217,14 @@ final class ProcessingQueue: ObservableObject {
         let duration: Double
         let thumbnail: UIImage?
         let state: State
-        /// 23 Oct: being cut for longer than usual (a Bulk / Mix video can wait for the Batch API, at most ~30 min).
+        /// 23 Oct: being cut for longer than usual (Single / Combine only; Bulk and Mix never show times).
         var slow = false
+        /// The Bulk send of this video (its row shows only Queued / Processing / Ready).
+        var group: String? = nil
     }
+
+    /// 23 Oct (PO): Bulk and Mix, from the first moment (no times, no "Taking a little longer").
+    static let groupMessage = "We'll notify you when your videos are ready. You can keep using CutSell."
 
     static let slowAfter: TimeInterval = 8 * 60
     static let slowText = "Taking a little longer, we'll notify you"
@@ -201,7 +262,7 @@ struct QueueRowView: View {
                     .truncationMode(.middle)
                 HStack {
                     Text(isNoSpeech ? L10n.tr(ProcessingQueue.noSpeech)
-                         : row.slow ? L10n.tr(ProcessingQueue.slowText) : Self.clock(row.duration))
+                         : row.slow ? L10n.tr(ProcessingQueue.slowText) : row.group != nil ? "" : Self.clock(row.duration))
                         .font(CS.inter(11, .medium))
                         .foregroundStyle(CS.textSecondaryF)
                         .lineLimit(1).minimumScaleFactor(0.7)
@@ -291,10 +352,17 @@ struct QueueRowView: View {
             Image("QueueIconQueued").resizable().frame(width: 26, height: 26).frame(width: 32, height: 60)
         case .uploading, .processing:
             SpinningIcon().frame(width: 32, height: 60)
+        case .ready:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(CS.cyan)
+                .frame(width: 32, height: 60)
+                .accessibilityIdentifier("queueRowReady")
         }
     }
 
     private var progress: Double? {
+        if row.group != nil { return nil }        // Bulk: the group's "3 of 10 ready" bar, no bar per video
         switch row.state {
         case .uploading(let p), .processing(let p): return Double(min(100, max(0, p))) / 100
         default: return nil
@@ -302,8 +370,17 @@ struct QueueRowView: View {
     }
 
     private var statusText: String {
+        if row.group != nil {
+            switch row.state {
+            case .queued: return "QUEUED"
+            case .uploading, .processing: return "PROCESSING"
+            case .ready: return "READY"
+            case .failed(let why): return why == ProcessingQueue.noSpeech ? "NO VOICE" : "FAILED"
+            }
+        }
         switch row.state {
         case .queued: return "QUEUED"
+        case .ready: return "READY"
         case .uploading(let p): return "UPLOADING \(p)%"
         case .processing(let p): return "PROCESSING \(p)%"
         case .failed(let why): return why == ProcessingQueue.noSpeech ? "NO VOICE" : "FAILED"
@@ -344,6 +421,32 @@ private struct SpinningIcon: View {
     }
 }
 
+// MARK: - Bulk group header: "Bulk · 10 videos" · "3 of 10 ready" and one bar for the group (no times)
+
+struct BulkGroupHeader: View {
+    let total: Int
+    let ready: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(L10n.tr("Bulk · \(total) videos"))
+                    .font(CS.inter(14, .semibold)).foregroundStyle(.white)
+                Spacer()
+                Text(L10n.tr("\(ready) of \(total) ready"))
+                    .font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan)
+                    .accessibilityIdentifier("bulkGroupReady")
+            }
+            ProgressView(value: Double(ready), total: Double(max(1, total))).tint(CS.cyan)
+        }
+        .padding(12)
+        .background(Color(hex: 0x0C1730), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color(hex: 0x19345F), lineWidth: 1))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("bulkGroupHeader")
+    }
+}
+
 // MARK: - Bulk · Started sheet (Figma 1134:4654)
 
 struct BulkStartedSheet: View {
@@ -359,7 +462,7 @@ struct BulkStartedSheet: View {
                 .font(CS.inter(22, .bold))
                 .foregroundStyle(Color.ink)
                 .padding(.top, 21)
-            Text(L10n.tr("You can close this screen or the app. Editing keeps going, one video at a time."))
+            Text(L10n.tr(ProcessingQueue.groupMessage))
                 .font(CS.inter(14))
                 .foregroundStyle(Color(hex: 0x99A3BD))
                 .fixedSize(horizontal: false, vertical: true)
@@ -370,7 +473,7 @@ struct BulkStartedSheet: View {
                 card(title: "Ready", subtitle: "Each one, as soon as it’s done", highlighted: false)
             }
             .padding(.top, 16)
-            Text(L10n.tr("We’ll notify you as each cut is ready."))
+            Text(L10n.tr("One notification when the whole group is ready."))
                 .font(CS.inter(12))
                 .foregroundStyle(Color(hex: 0x99A3BD))
                 .padding(.top, 16)
@@ -470,5 +573,33 @@ struct ReadyToast: View {
         let base = (name as NSString).deletingPathExtension
         guard base.count > 18 else { return base }
         return "\(base.prefix(7))…\(base.suffix(3))"
+    }
+}
+
+
+// MARK: - A whole Bulk is done (one notice for the group)
+
+struct GroupReadyToast: View {
+    let text: String
+    let onView: () -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text(text)
+                .font(CS.inter(13, .semibold))
+                .foregroundStyle(Color.ink)
+                .lineLimit(1).minimumScaleFactor(0.8)
+            Spacer(minLength: 8)
+            Button(L10n.tr("View"), action: onView)
+                .font(CS.inter(13, .semibold))
+                .foregroundStyle(CS.cyan)
+                .accessibilityIdentifier("groupToastView")
+        }
+        .padding(.horizontal, 14.5)
+        .frame(height: 44)
+        .background(Color(hex: 0x141F33), in: Capsule())
+        .overlay(Capsule().stroke(LinearGradient(colors: [Color(hex: 0x19E5FF), Color(hex: 0xFF21D7)],
+                                                  startPoint: .leading, endPoint: .trailing), lineWidth: 1.5))
+        .accessibilityIdentifier("groupToast")
     }
 }
