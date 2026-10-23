@@ -19,7 +19,16 @@ jobs:
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
         run: |
           pip install -q modal
-          timeout 1500 modal run fail_probe.py || echo "::warning::stopped at the time limit"
+          timeout 1500 modal run fail_probe.py > run.log 2>&1 || echo "::warning::stopped at the time limit"
+          python3 - <<'PY'
+          import json, os
+          tail = open("run.log", errors="replace").read()[-6000:]
+          data = json.load(open("engine_check.json")) if os.path.exists("engine_check.json") else {}
+          if not isinstance(data, dict):
+              data = {"result": data}
+          data["_run_log_tail"] = tail
+          json.dump(data, open("engine_check.json", "w"), default=str)
+          PY
           cat > pub.pem <<'KEY'
           -----BEGIN PUBLIC KEY-----
           MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAlZotqgbNtP3sdy7aLID+
