@@ -1,0 +1,50 @@
+asset_export_started index=1 of=1 seconds_long=45
+audio_first=yes
+asset_resource photos_edit=no used=original
+asset_export_done mb=44 seconds=0.9
+prepare_skipped codec=avc1 height=1920 mb=44 width=1080
+continue_in_background step=Creating your project
+audio_extracted kb=244 seconds=1.0 video_seconds=45
+audio_extract
+audio_uploaded kb=244 seconds=1.9 source_order=0
+audio_upload
+processing_started sources=1
+job_submitted job_id=144e7823-da81-492d-b3fc-d0547885535c
+audio_first_started clips=1 job_id=144e7823-da81-492d-b3fc-d0547885535c
+video_background_started clips=1 mb=44
+job_queued videos=1 waiting=1
+server_step seconds=0 step=submitted
+asset_export_started index=1 of=1 seconds_long=30
+asset_resource photos_edit=no used=original
+asset_export_done mb=29 seconds=0.0
+upload_resumed etags_on_iphone=0 resumed_part_count=0 source_order=0 total_part_count=6
+upload_parts done=0 mb=44 part_mb=8 parts=6 source_order=0
+prepare_skipped codec=avc1 height=1920 mb=29 width=1080
+upload_background_unavailable part=1
+audio_extracted kb=236 seconds=0.5 video_seconds=30
+audio_extract
+server_step progress=-1 seconds=6.6 step=created
+audio_uploaded kb=236 seconds=3.1 source_order=0
+audio_upload
+processing_started sources=1
+job_submitted job_id=d6cd9417-b287-4d58-9f9c-939937b1e25a
+audio_first_started clips=1 job_id=d6cd9417-b287-4d58-9f9c-939937b1e25a
+video_background_started clips=1 mb=29
+server_step progress=42 seconds=13.1 step=processing
+upload_resumed etags_on_iphone=0 resumed_part_count=0 source_order=0 total_part_count=4
+upload_parts done=0 mb=29 part_mb=8 parts=4 source_order=0
+server_step seconds=0 step=submitted
+server_step progress=1 seconds=7.2 step=created
+upload_part_done of=6 part=1 source_order=0
+server_step progress=100 seconds=28.8 step=ready
+cut_ready_seen project_id=prj_2dbab367bcfb43d9bfb6f0ed0eefa6b8
+upload_part_done of=6 part=4 source_order=0
+server_step progress=42 seconds=17.2 step=processing
+upload_part_done of=6 part=3 source_order=0
+server_step progress=94 seconds=23.5 step=ready
+cut_ready_seen project_id=prj_aab3c6120bad4b02a5ae072fef0d5c48
+upload_part_done of=6 part=6 source_order=0
+upload_part_done of=6 part=2 source_order=0
+upload_part_done of=6 part=5 source_order=0
+upload_complete_started mb=44 part_mb=8 parts=6 source_order=0
+upload_complete_done seconds=2.4 source_order=0 state=uploaded
