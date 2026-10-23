@@ -31,7 +31,7 @@ def audit():
             j = Job.fetch(jid, connection=r)
             src = (j.args[0].get("sources") or [{}])[0]
             meta = src.get("metadata") or {}
-            uri = meta.get("audio_uri") or src.get("uri")
+            uri = src.get("uri")
             row = {"voice_only": bool(meta.get("audio_uri")), "duration_sec_sent": src.get("duration_sec"), "language_hint": j.args[0].get("language_hint")}
             with tempfile.TemporaryDirectory() as d:
                 local = str(Path(d) / ("a" + Path(uri).suffix))
@@ -70,4 +70,4 @@ def audit():
 @app.local_entrypoint()
 def main():
     with open("engine_check.json", "w") as f:
-        json.dump({"label": "why no_speech fired 23 Oct", "rows": [audit.remote()]}, f, indent=1, default=str)
+        json.dump({"label": "no_speech 23 Oct: the original video", "rows": [audit.remote()]}, f, indent=1, default=str)
