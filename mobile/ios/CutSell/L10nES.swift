@@ -914,6 +914,7 @@ enum L10nES {
         "TODAY": "HOY",
         "Take {}": "Toma {}",
         "Take: {}": "Toma: {}",
+        "Taking a little longer, we'll notify you": "Está tardando un poco más, te avisamos",
         "Tap": "Tocar",
         "Tap / hold to record": "Toca / mantén para grabar",
         "Tap Create. You can tap Continue in background; the cut waits for you in My videos.": "Toca Crear. Puedes tocar Seguir en segundo plano; el corte te espera en Mis videos.",

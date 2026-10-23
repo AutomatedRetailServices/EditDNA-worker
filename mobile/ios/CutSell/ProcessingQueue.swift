@@ -130,7 +130,8 @@ final class ProcessingQueue: ObservableObject {
                 }
             }
             rows.append(Row(id: item.id.uuidString, itemID: item.id, projectID: item.projectID, name: item.name,
-                            duration: item.duration, thumbnail: item.thumbnail, state: state))
+                            duration: item.duration, thumbnail: item.thumbnail, state: state,
+                            slow: Self.slow(item.projectID.flatMap { tracker.cut($0) }, state)))
         }
         for project in projects where Project.processingStates.contains(project.state) && !listed.contains(project.projectID) {
             var state = State.processing(0)
@@ -140,7 +141,8 @@ final class ProcessingQueue: ObservableObject {
                     : cut.jobState == "queued" ? .queued : .processing(max(0, CutTracker.serverStage(cut).percent))
             }
             rows.append(Row(id: project.projectID, itemID: nil, projectID: project.projectID, name: project.title,
-                            duration: 0, thumbnail: ThumbnailStore.shared.image(for: project.projectID), state: state))
+                            duration: 0, thumbnail: ThumbnailStore.shared.image(for: project.projectID), state: state,
+                            slow: Self.slow(tracker.cut(project.projectID), state)))
         }
         return rows
     }
@@ -159,6 +161,15 @@ final class ProcessingQueue: ObservableObject {
         let duration: Double
         let thumbnail: UIImage?
         let state: State
+        /// 23 Oct: being cut for longer than usual (a Bulk / Mix video can wait for the Batch API, at most ~30 min).
+        var slow = false
+    }
+
+    static let slowAfter: TimeInterval = 8 * 60
+    static let slowText = "Taking a little longer, we'll notify you"
+    static func slow(_ cut: CutTracker.Cut?, _ state: State) -> Bool {
+        guard let cut, case .processing = state else { return false }
+        return Date().timeIntervalSince(cut.trackedAt) > slowAfter
     }
 }
 
@@ -189,11 +200,12 @@ struct QueueRowView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 HStack {
-                    Text(isNoSpeech ? L10n.tr(ProcessingQueue.noSpeech) : Self.clock(row.duration))
+                    Text(isNoSpeech ? L10n.tr(ProcessingQueue.noSpeech)
+                         : row.slow ? L10n.tr(ProcessingQueue.slowText) : Self.clock(row.duration))
                         .font(CS.inter(11, .medium))
                         .foregroundStyle(CS.textSecondaryF)
                         .lineLimit(1).minimumScaleFactor(0.7)
-                        .accessibilityIdentifier(isNoSpeech ? "queueRowNoSpeech" : "queueRowDuration")
+                        .accessibilityIdentifier(isNoSpeech ? "queueRowNoSpeech" : row.slow ? "queueRowSlow" : "queueRowDuration")
                     Spacer(minLength: 6)
                     Text(L10n.tr(statusText))
                         .font(CS.inter(10, .semibold))
