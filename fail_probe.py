@@ -15,7 +15,6 @@ image = (
     .pip_install_from_requirements("requirements.cutsell.worker.cpu.txt")
     .add_local_dir("cutsell_worker", remote_path="/root/cutsell_worker", ignore=["**/__pycache__/**", "**/*.pyc"])
 )
-PLAN = json.load(open("cache_plan.json"))
 
 
 PROGRESS = modal.Dict.from_name("cutsell-cache-probe-progress", create_if_missing=True)
@@ -63,6 +62,7 @@ def cut(key: str, ttl: str, cache_on: bool):
 
 @app.local_entrypoint()
 def main():
+    PLAN = json.load(open("cache_plan.json"))   # read here only: the containers don't have the file
     rows = []
     for key in PLAN["videos"]:
         try:
