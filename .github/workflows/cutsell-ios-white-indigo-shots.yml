@@ -63,7 +63,7 @@ jobs:
           set -euo pipefail
           APP="build/Build/Products/Debug-iphonesimulator/CutSell.app"
           BUNDLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")"
-          screens="$(sed -n '/static let all = \[/,/\]/p' CutSell/DesignScreenshots.swift | grep -oE '"[a-z0-9_]+"' | tr -d '"')"
+          screens="$(sed -n '/static let whiteIndigo = \[/,/\]/p' CutSell/DesignScreenshots.swift | grep -oE '"[a-z0-9_]+"' | tr -d '"')"
           picks="$(xcrun simctl list devices available --json | python3 -c '
           import json,sys
           d=json.load(sys.stdin)["devices"]
@@ -87,7 +87,7 @@ jobs:
             echo "$name" > "$RUNNER_TEMP/shots/$size/DEVICE.txt"
             for s in $screens; do
               xcrun simctl terminate "$udid" "$BUNDLE" >/dev/null 2>&1 || true
-              xcrun simctl launch "$udid" "$BUNDLE" -CutSellScreen "$s" >/dev/null
+              xcrun simctl launch "$udid" "$BUNDLE" -CutSellScreen "$s" -CutSellCatalogMock >/dev/null
               sleep 4
               xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/shots/$size/$s.png" >/dev/null 2>&1 && ok=$((ok+1))
             done

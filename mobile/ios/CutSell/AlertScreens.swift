@@ -45,82 +45,67 @@ struct PermissionScreen: View {
     var onClose: (() -> Void)?
     let onAllow: () -> Void
 
+    /// White Indigo: white screen, the icon in a soft blue circle, Bold title, grey text, blue button.
     var body: some View {
         ZStack {
-            ScreenBackground()
+            CS.wiPage.ignoresSafeArea()
             VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    BrandLogo()
-                    Spacer()
+                WIHeader {
                     if let onClose, deniedBefore {
                         Button(action: onClose) {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundStyle(Color.ink)
-                                .frame(width: 44, height: 44)
+                            Image(systemName: "xmark").font(.system(size: 15, weight: .semibold)).foregroundStyle(CS.wiInk)
+                                .frame(width: 40, height: 40)
+                                .background(CS.wiSurface2, in: Circle())
+                                .overlay(Circle().stroke(CS.wiBorder, lineWidth: 1))
                         }
+                        .buttonStyle(.plain)
                         .accessibilityLabel(L10n.tr("Close"))
                     }
                 }
-                .padding(.top, 8)
-                Text(L10n.tr(kind.screenTitle))
-                    .font(CS.inter(28, .bold))
-                    .foregroundStyle(Color.ink)
-                    .padding(.top, 14)
+                WIScreenTitle(title: kind.screenTitle).padding(.top, 2)
 
                 Spacer()
 
                 VStack(spacing: 0) {
                     icon
-                        .frame(height: 64)
-                        .padding(.top, 34)
+                        .foregroundStyle(CS.accent)
+                        .frame(width: 72, height: 72)
+                        .background(CS.accentSoft, in: Circle())
                     Text(L10n.tr(kind.heading))
-                        .font(CS.inter(23, .bold))
-                        .foregroundStyle(Color.ink)
+                        .font(CS.inter(22, .heavy))
+                        .foregroundStyle(CS.wiInk)
                         .multilineTextAlignment(.center)
                         .padding(.top, 18)
                     Text(L10n.tr(kind.message))
-                        .font(CS.inter(15))
-                        .foregroundStyle(CS.textSecondary)
+                        .font(CS.inter(14, .medium))
+                        .foregroundStyle(CS.wiSecondary)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 12)
-                    PrimaryButton(
-                        title: deniedBefore ? "Open Settings" : "Continue",
-                        height: 54,
-                        cornerRadius: 16,
-                        fontSize: 16,
-                        gradient: CS.alertButtonGradient,
-                        action: deniedBefore ? Self.openSettings : onAllow
-                    )
-                    .padding(.top, 44)
-                    .padding(.horizontal, 6)
+                        .padding(.top, 8)
+                    WIPillButton(title: deniedBefore ? "Open Settings" : "Continue",
+                                 action: deniedBefore ? Self.openSettings : onAllow)
+                        .padding(.top, 28)
                     Text(L10n.tr("You can change this later in Settings."))
-                        .font(CS.inter(13))
-                        .foregroundStyle(CS.textMuted)
-                        .padding(.top, 22)
-                        .padding(.bottom, 18)
+                        .font(CS.inter(12, .medium))
+                        .foregroundStyle(CS.wiSecondary)
+                        .padding(.top, 14)
                 }
-                .padding(.horizontal, 22)
-                .background(Color(hex: 0x0B0F1C), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .stroke(LinearGradient(colors: [Color(hex: 0x7C3AED), Color(hex: 0xF01ADB)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.5)
-                )
-                .padding(.horizontal, 20)
+                .padding(20)
+                .frame(maxWidth: .infinity)
+                .wiCard(shadow: false)
 
                 Spacer()
                 Spacer()
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 20)
         }
     }
 
     @ViewBuilder private var icon: some View {
         switch kind {
-        case .camera: Image("TabCreate").resizable().scaledToFit().frame(width: 64)
-        case .microphone: Text(L10n.tr("🎙️")).font(.system(size: 50))
-        case .photos: Image("IconUpload").resizable().scaledToFit().frame(width: 54)
+        case .camera: Image("WIRecord").renderingMode(.template).resizable().frame(width: 32, height: 32)
+        case .microphone: Image(systemName: "mic").font(.system(size: 28, weight: .regular))
+        case .photos: Image("WIUpload").renderingMode(.template).resizable().frame(width: 30, height: 30)
         }
     }
 
@@ -143,53 +128,45 @@ struct ProblemScreen: View {
     var secondaryTitle: String?
     var secondaryAction: (() -> Void)?
 
+    /// White Indigo error style (Figma 1176:2858): icon in a coloured circle, Bold title, grey explanation, blue button.
     var body: some View {
         ZStack {
-            ScreenBackground()
+            CS.wiPage.ignoresSafeArea()
             VStack(alignment: .leading, spacing: 0) {
-                BrandLogo()
-                    .padding(.top, 8)
-                Text(L10n.tr(screenTitle))
-                    .font(CS.inter(28, .bold))
-                    .foregroundStyle(Color.ink)
-                    .padding(.top, 14)
+                WIHeader { EmptyView() }
+                WIScreenTitle(title: screenTitle).padding(.top, 2)
 
                 Spacer()
 
                 VStack(spacing: 0) {
-                    Text(L10n.tr("!"))
-                        .font(CS.inter(54, .bold))
-                        .foregroundStyle(tone == .error ? CS.alert : CS.cyan)
+                    WIStatusBadge(kind: tone == .error ? .error : .info)
                     Text(L10n.tr(heading))
-                        .font(CS.inter(25, .bold))
-                        .foregroundStyle(Color.ink)
+                        .font(CS.inter(22, .heavy))
+                        .foregroundStyle(CS.wiInk)
                         .multilineTextAlignment(.center)
-                        .padding(.top, 22)
+                        .padding(.top, 20)
                     Text(L10n.tr(message))
-                        .font(CS.inter(15))
-                        .foregroundStyle(CS.textSecondary)
+                        .font(CS.inter(14, .medium))
+                        .foregroundStyle(CS.wiSecondary)
                         .multilineTextAlignment(.center)
+                        .lineSpacing(4)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 12)
-                        .padding(.horizontal, 20)
-                    VStack(spacing: 12) {
-                        PrimaryButton(
-                            title: primaryTitle, height: 56, cornerRadius: 16, fontSize: 16,
-                            gradient: CS.alertButtonGradient, action: primaryAction
-                        )
+                        .padding(.top, 8)
+                        .padding(.horizontal, 10)
+                    VStack(spacing: 10) {
+                        WIPillButton(title: primaryTitle, action: primaryAction)
                         if let secondaryTitle, let secondaryAction {
-                            SecondaryButton(title: secondaryTitle, height: 52, cornerRadius: 16, fontSize: 15, action: secondaryAction)
+                            WIPillButton(title: secondaryTitle, style: .outline, action: secondaryAction)
                         }
                     }
-                    .frame(width: 270)
-                    .padding(.top, 76)
+                    .padding(.top, 32)
                 }
                 .frame(maxWidth: .infinity)
 
                 Spacer()
                 Spacer()
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 20)
         }
     }
 }
@@ -203,54 +180,47 @@ struct LimitScreen: View {
     let onChooseAnother: () -> Void
     let onClose: () -> Void
 
+    /// White Indigo sheet (Figma 1176:2888 "Video too long"): 45 % dim, white sheet with handle, warning mark,
+    /// title, grey text, the selected video with its length in red, and the blue button.
     var body: some View {
-        ZStack {
-            LinearGradient(colors: [Color(hex: 0x0A1230), Color(hex: 0x1A0E2E)], startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea()
-            VStack(spacing: 0) {
-                HStack {
-                    Button(action: onClose) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(Color.ink)
-                            .frame(width: 44, height: 44)
-                    }
-                    .accessibilityLabel(L10n.tr("Close"))
-                    Spacer()
-                    Text(L10n.tr(detail))
-                        .font(CS.inter(14, .medium))
-                        .foregroundStyle(Color.ink)
-                }
-                .padding(.horizontal, 12)
-                Spacer()
-                Text(L10n.tr("Selected video"))
-                    .font(CS.inter(23, .semibold))
-                    .foregroundStyle(Color(hex: 0x8FB0E8))
-                Spacer()
-                Spacer()
-                VStack(alignment: .leading, spacing: 0) {
+        ZStack(alignment: .bottom) {
+            Color(fixed: 0x0B1020, opacity: 0.45).ignoresSafeArea()
+                .onTapGesture(perform: onClose)
+                .accessibilityLabel(L10n.tr("Close"))
+                .accessibilityAddTraits(.isButton)
+            WISheetCard {
+                VStack(spacing: 0) {
+                    WIStatusBadge(kind: .warning, size: 56).padding(.top, 21)
                     Text(L10n.tr(heading))
-                        .font(CS.inter(26, .bold))
-                        .foregroundStyle(.white)
-                    Text(L10n.tr(message))
-                        .font(CS.inter(15))
-                        .foregroundStyle(CS.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .font(CS.inter(22, .heavy))
+                        .foregroundStyle(CS.wiInk)
+                        .multilineTextAlignment(.center)
                         .padding(.top, 12)
-                    PrimaryButton(
-                        title: "Choose another video", height: 54, cornerRadius: 16, fontSize: 16,
-                        gradient: CS.alertButtonGradient, textColor: Color(hex: 0x0B1A40), action: onChooseAnother
-                    )
-                    .padding(.top, 16)
-                    Spacer(minLength: 0)
+                    Text(L10n.tr(message))
+                        .font(CS.inter(14, .medium))
+                        .foregroundStyle(CS.wiSecondary)
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(4)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 8)
+                        .padding(.horizontal, 20)
+                    HStack(spacing: 12) {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous).fill(CS.wiSurface2).frame(width: 36, height: 48)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(L10n.tr("Selected video")).font(CS.inter(14, .bold)).foregroundStyle(CS.wiInk)
+                            Text(L10n.tr(detail)).font(CS.inter(12, .medium)).foregroundStyle(CS.wiError).lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 11)
+                    .frame(height: 64)
+                    .wiCard(radius: 18, shadow: false)
+                    .padding(.top, 18)
+                    WIPillButton(title: "Choose another video", action: onChooseAnother)
+                        .padding(.top, 20)
                 }
-                .padding(22)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(height: 282)
-                .background(Color(hex: 0x070C1D, opacity: 0.96), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Color(hex: 0x1A6BFF), lineWidth: 1))
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 16)
             }
         }
     }
@@ -263,30 +233,26 @@ struct GalleryAccessCard: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.55).ignoresSafeArea()
+            Color(fixed: 0x0B1020, opacity: 0.45).ignoresSafeArea()
             VStack(spacing: 0) {
                 Text(L10n.tr("Gallery  access"))
-                    .font(CS.inter(25, .bold))
-                    .foregroundStyle(.white)
+                    .font(CS.inter(22, .heavy))
+                    .foregroundStyle(CS.wiInk)
                 Text(L10n.tr("Choose videos from your library to create a CutSell edit."))
-                    .font(CS.inter(16))
-                    .foregroundStyle(CS.textSecondary)
+                    .font(CS.inter(14, .medium))
+                    .foregroundStyle(CS.wiSecondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 14)
-                PrimaryButton(
-                    title: "Select More Photos…", height: 54, cornerRadius: 18, fontSize: 17,
-                    gradient: CS.alertButtonGradient, action: onSelectMore
-                )
-                .padding(.top, 30)
-                SecondaryButton(title: "Keep Current Selection", height: 54, cornerRadius: 18, fontSize: 17, action: onKeep)
+                    .padding(.top, 10)
+                WIPillButton(title: "Select More Photos…", action: onSelectMore)
+                    .padding(.top, 24)
+                WIPillButton(title: "Keep Current Selection", style: .outline, action: onKeep)
                     .padding(.top, 10)
             }
             .padding(.horizontal, 26)
             .padding(.vertical, 30)
             .frame(width: 322)
-            .background(Color(hex: 0x131826), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(Color(hex: 0x33BFFF), lineWidth: 1.5))
+            .background(CS.wiPage, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
         }
     }
 }

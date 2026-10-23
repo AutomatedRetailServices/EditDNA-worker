@@ -18,10 +18,7 @@ struct ExportSettingsView: View {
     private static let control = Color(hex: 0x0A1326)
     private static let elevated = Color(hex: 0x0B1730)
     private static let secondaryBG = Color(hex: 0x081226)
-    private static let primaryGradient = LinearGradient(
-        stops: [.init(color: Color(hex: 0x19E6FF), location: 0.097), .init(color: Color(hex: 0x1769FF), location: 0.516),
-                .init(color: Color(hex: 0xFF21D7), location: 0.903)],
-        startPoint: UnitPoint(x: 0.25, y: 0.07), endPoint: UnitPoint(x: 0.75, y: 0.93))
+    private static let primaryGradient = CS.accentGradient   // White Indigo: #1769FF → #4A5BFF
 
     private var info: ExportSourceInfo { exporter.info }
     private var cutSeconds: Double {
@@ -226,6 +223,8 @@ struct ExportSettingsView: View {
 
     private func progress(_ title: String, _ value: Double) -> some View {
         VStack(alignment: .leading, spacing: 12) {
+            // White Indigo: the same turning brand ring as Single · Processing (Export · Rendering).
+            BrandRing(size: 72).frame(maxWidth: .infinity)
             HStack {
                 Text(title).font(CS.inter(14)).foregroundStyle(CS.textSecondaryF)
                 Spacer()
@@ -252,7 +251,7 @@ struct ExportSettingsView: View {
     private func done(_ url: URL) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Label(L10n.tr("Saved to Photos"), systemImage: "checkmark.circle.fill")
-                .font(CS.inter(16, .semibold)).foregroundStyle(Color(hex: 0x19E6FF))
+                .font(CS.inter(16, .semibold)).foregroundStyle(CS.wiSuccess)
                 .accessibilityIdentifier("exportSaved")
             if exporter.usedCopy {
                 Text(L10n.tr("Your original wasn't on this iPhone, so this export used the 1080p copy."))

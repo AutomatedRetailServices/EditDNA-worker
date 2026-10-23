@@ -158,3 +158,123 @@ struct WINote: View {
         .wiCard(shadow: false)
     }
 }
+
+/// Top bar of a pushed screen (Figma 1179:3): 40 pt back button, Bold 17 title centred, optional blue text right.
+struct WIBackBar: View {
+    var title: String? = nil
+    let onBack: () -> Void
+    var trailingTitle: String? = nil
+    var onTrailing: () -> Void = {}
+
+    var body: some View {
+        ZStack {
+            if let title {
+                Text(L10n.tr(title)).font(CS.inter(17, .bold)).foregroundStyle(CS.wiInk).lineLimit(1)
+                    .padding(.horizontal, 60)
+            }
+            HStack {
+                Button(action: onBack) { WIHeaderIcon(image: "WIBack") }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(L10n.tr("Back"))
+                Spacer()
+                if let trailingTitle {
+                    Button(L10n.tr(trailingTitle), action: onTrailing)
+                        .font(CS.inter(15, .semibold))
+                        .foregroundStyle(CS.accent)
+                }
+            }
+        }
+        .frame(height: 56)
+        .padding(.top, 2)
+    }
+}
+
+/// Error / warning mark in a coloured circle (Figma 1176:2867 ErrorBadge, 1176:2993 WarnIcon).
+struct WIStatusBadge: View {
+    enum Kind { case error, warning, info }
+    var kind: Kind = .error
+    var size: CGFloat = 64
+
+    var body: some View {
+        Group {
+            switch kind {
+            case .error:
+                Image("WIErrorMark").renderingMode(.template).resizable().frame(width: size * 34 / 64, height: size * 34 / 64)
+                    .foregroundStyle(Color(fixed: 0xFFFFFF))
+                    .frame(width: size, height: size)
+                    .background(CS.wiError, in: Circle())
+            case .warning:
+                Image("WIWarn").renderingMode(.template).resizable().frame(width: size / 2, height: size / 2)
+                    .foregroundStyle(CS.wiWarning)
+                    .frame(width: size, height: size)
+                    .background(CS.wiWarningBg, in: Circle())
+            case .info:
+                Image("WIInfo").renderingMode(.template).resizable().frame(width: size / 2, height: size / 2)
+                    .foregroundStyle(CS.accent)
+                    .frame(width: size, height: size)
+                    .background(CS.accentSoft, in: Circle())
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// Figma 1176:2874 "Safe": green card "Your original video is safe · Nothing was lost."
+struct WIOriginalSafeCard: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            Image("WIShield").renderingMode(.template).resizable().frame(width: 20, height: 20)
+                .foregroundStyle(CS.wiSuccess)
+                .frame(width: 36, height: 36)
+                .background(CS.wiPage, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(L10n.tr("Your original video is safe")).font(CS.inter(14, .bold)).foregroundStyle(CS.wiInk)
+                Text(L10n.tr("Nothing was lost.")).font(CS.inter(12, .medium)).foregroundStyle(CS.wiSecondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 13)
+        .frame(height: 72)
+        .wiCard(fill: CS.wiSuccessBg, border: Color(fixed: 0xBFEBD5), shadow: false)
+        .accessibilityIdentifier("originalSafe")
+    }
+}
+
+/// 52 pt pill button: blue for the main action, black for neutral ones, outlined for the second choice.
+struct WIPillButton: View {
+    enum Style { case primary, neutral, outline }
+    let title: String
+    var style: Style = .primary
+    var icon: String? = nil
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                if let icon { Image(icon).renderingMode(.template).resizable().frame(width: 20, height: 20) }
+                Text(L10n.tr(title)).font(CS.inter(16, .bold)).lineLimit(1).minimumScaleFactor(0.8)
+            }
+            .foregroundStyle(style == .outline ? CS.wiInk : Color(fixed: 0xFFFFFF))
+            .frame(maxWidth: .infinity)
+            .frame(height: 52)
+            .background(style == .primary ? CS.accent : style == .neutral ? CS.neutralButton : CS.wiPage, in: Capsule())
+            .overlay(Capsule().stroke(style == .outline ? CS.wiInk : .clear, lineWidth: 1.5))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Bottom sheet of the White Indigo look (Figma 1176:2991): white, radius 28 on top, grey handle, 45 % dim behind.
+struct WISheetCard<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Capsule().fill(Color(fixed: 0xD5D9E2)).frame(width: 40, height: 5).padding(.top, 10)
+            content()
+        }
+        .frame(maxWidth: .infinity)
+        .background(CS.wiPage, in: UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28, style: .continuous))
+    }
+}

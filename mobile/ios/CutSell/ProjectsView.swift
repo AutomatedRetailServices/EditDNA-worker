@@ -23,6 +23,8 @@ enum EditsTab: String, CaseIterable, Identifiable, Hashable {
 /// All / Ready / Drafts filters. Opening a cut keeps the existing processing / editor screens.
 struct ProjectsView: View {
     var selectTab: (MainTab) -> Void = { _ in }
+    /// Opens on this filter (design screenshots).
+    var initialTab: EditsTab? = nil
 
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var notificationCenter: NotificationCenterModel
@@ -246,7 +248,7 @@ struct ProjectsView: View {
             .onReceive(queue.$items.dropFirst()) { _ in Task { await refreshPendingCuts() } }
             .onReceive(tracker.$cuts.dropFirst()) { _ in Task { await refreshPendingCuts() } }
             // "Go to Edits" (Bulk sheet / Processing screen) opens on Processing.
-            .onAppear { takeRequestedFilter() }
+            .onAppear { if let initialTab { selectedTab = initialTab }; takeRequestedFilter() }
             .onChange(of: queue.requestedEditsFilter) { _, _ in takeRequestedFilter() }
             // The last cut finished: Processing disappears, Ready shows it.
             .onChange(of: processingRows.isEmpty && mixCenter.active.isEmpty) { _, empty in

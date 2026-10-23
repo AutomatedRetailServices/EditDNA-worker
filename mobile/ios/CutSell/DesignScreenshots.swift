@@ -22,6 +22,13 @@ enum DesignScreenshots {
         "perm_camera", "perm_mic", "edits", "edits_empty", "you", "plan",
         "err_unsupported", "err_too_large", "err_too_long", "err_clip_limit", "err_could_not_add", "err_formats",
     ]
+
+    /// White Indigo review set (Figma 12_Prototype): the screens the Product Owner asked to see.
+    static let whiteIndigo = [
+        "hub", "edits", "edits_products", "edits_processing", "plan", "you", "processing", "processing_failed", "ready",
+        "err_too_long", "err_unsupported", "err_could_not_add", "perm_camera", "gallery_single", "gallery_access", "style",
+        "camera", "editor_v4_base", "editor_v4_vo_record",
+    ]
 }
 
 #if DEBUG
@@ -41,7 +48,7 @@ struct DesignScreenshotRoot: View {
             .appColorScheme()
             .onAppear {
                 appState.isBootstrapping = false
-                if screen == "edits" || screen == "hub" { appState.projects = Self.sampleProjects }
+                if ["edits", "hub", "edits_products", "plan", "you"].contains(screen) { appState.projects = Self.sampleProjects }
             }
     }
 
@@ -54,13 +61,23 @@ struct DesignScreenshotRoot: View {
                 stage: CutTracker.Stage(step: 6, title: "Structuring your cut", percent: 68),
                 fileName: CutName.display("Cut 14 Oct"), thumbnail: nil, onClose: {}, onOpenEdits: {}
             )
-            .background(CS.base.ignoresSafeArea())
+            .background(CS.wiPage.ignoresSafeArea())
+        case "processing_failed":
+            ProcessingContent(
+                stage: CutTracker.Stage(step: 6, title: "Structuring your cut", percent: 68),
+                fileName: CutName.display("Cut 14 Oct"), thumbnail: nil, failed: true, onClose: {}, onOpenEdits: {}
+            )
+            .background(CS.wiPage.ignoresSafeArea())
+        case "edits_processing":
+            EditsProcessingPreview()
+        case "edits_products":
+            ProjectsView(initialTab: .products)
         case "ready":
             ReadyContent(
                 cut: CutTracker.Cut(id: "sample", title: "Sample edit", fileName: "IMG_4821.MOV", footageSeconds: 366),
                 project: Self.sampleProjects[0], onBack: {}, onReview: {}
             )
-            .background(CS.base.ignoresSafeArea())
+            .background(CS.wiPage.ignoresSafeArea())
         case "create_probe":
             CreateProbe()
         case "app_probe":
@@ -146,6 +163,43 @@ struct DesignScreenshotRoot: View {
             sourceCount: 1,
             updatedAt: nil
         )
+    }
+}
+
+/// White Indigo · Edits › Processing (Figma 1177:2) with sample rows: processing, queued, failed (no network).
+private struct EditsProcessingPreview: View {
+    @State private var tab: EditsTab = .processing
+    private let rows: [ProcessingQueue.Row] = [
+        .init(id: "1", itemID: nil, projectID: nil, name: "Cut 14 Oct", duration: 33, thumbnail: nil, state: .processing(68)),
+        .init(id: "2", itemID: nil, projectID: nil, name: "Cut 14 Oct (2)", duration: 51, thumbnail: nil, state: .queued),
+        .init(id: "3", itemID: nil, projectID: nil, name: "Cut 14 Oct (3)", duration: 51, thumbnail: nil, state: .queued),
+        .init(id: "4", itemID: nil, projectID: nil, name: "A very long name for this cut of the day", duration: 26,
+              thumbnail: nil, state: .failed("Failed")),
+    ]
+
+    var body: some View {
+        ZStack {
+            CS.wiPage.ignoresSafeArea()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    WIHeader { WIHeaderIcon(image: "WISearch"); WIHeaderIcon(image: "WIMore") }
+                    WIScreenTitle(title: "Edits", subtitle: "Cuts being edited now. You can leave the app.").padding(.top, 2)
+                    WISegmented(items: [.init(id: EditsTab.processing, title: "Processing", count: 3),
+                                        .init(id: .ready, title: "Ready", count: 28), .init(id: .products, title: "Products"),
+                                        .init(id: .drafts, title: "Drafts", count: 12)], selection: $tab)
+                        .padding(.top, 13)
+                    WISectionTitle(title: "In order", note: "Each one moves to Ready when it’s done").padding(.top, 20)
+                    VStack(spacing: 8) {
+                        ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in QueueRowView(order: index + 1, row: row) }
+                    }
+                    .padding(.top, 12)
+                    WINote(title: "You can close the app", text: "Editing keeps going on our servers. We’ll notify you as each cut is ready.")
+                        .padding(.top, 16)
+                }
+                .padding(.horizontal, 20)
+            }
+        }
+        .safeAreaInset(edge: .bottom) { CSTabBar(current: .edits, select: { _ in }) }
     }
 }
 

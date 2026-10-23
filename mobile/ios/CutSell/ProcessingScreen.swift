@@ -24,7 +24,7 @@ struct CutProgressView: View {
 
     var body: some View {
         ZStack {
-            CS.base.ignoresSafeArea()
+            CS.wiPage.ignoresSafeArea()
             if let cut, cut.isReady, let project = readyProject(cut) {
                 ReadyContent(cut: cut, project: project, onBack: onClose, onReview: { openEditor = true })
             } else {
@@ -119,68 +119,62 @@ struct ProcessingContent: View {
     let onClose: () -> Void
     let onOpenEdits: () -> Void
 
+    /// White Indigo (Figma 1179:2 "Single · Processing ✅ APROBADO").
     var body: some View {
-        VStack(spacing: 12) {
-            HStack {
-                Button(action: onClose) {
-                    Image("ControlBack").resizable().frame(width: 36, height: 36)
-                }
-                .accessibilityLabel(L10n.tr("Back"))
-                Spacer()
-                Text(L10n.tr("Processing"))
-                    .font(CS.inter(22, .semibold))
-                    .foregroundStyle(Color(hex: 0xF2F7FF))
-                Spacer()
-                Button(L10n.tr("Edits"), action: onOpenEdits)
-                    .font(CS.inter(15, .semibold))
-                    .foregroundStyle(CS.cyan)
-                    .frame(width: 44, alignment: .trailing)
-            }
-            .frame(height: 46)
+        VStack(spacing: 0) {
+            WIBackBar(title: failed ? "Processing issue" : "Processing", onBack: onClose, trailingTitle: "Edits", onTrailing: onOpenEdits)
 
-            VStack(spacing: 14) {
-                VideoFirstFrame(image: thumbnail, width: 88, height: 156, cornerRadius: 16)
+            VStack(spacing: 16) {
+                VideoFirstFrame(image: thumbnail, width: 100, height: 156, cornerRadius: 20)
                 Text(fileName)
                     .accessibilityIdentifier("processingCutName")
-                    .font(CS.sf(14, .semibold))
-                    .foregroundStyle(CS.textPrimaryF)
+                    .font(CS.inter(13, .medium))
+                    .foregroundStyle(CS.wiSecondary)
                     .lineLimit(1)
-                    .frame(maxWidth: 240)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 260)
             }
-            .padding(.top, 4)
-
-            VStack(spacing: 0) {
-                Text(L10n.tr(failed ? "This cut needs another try" : "Hold on…"))
-                    .font(CS.sf(failed ? 26 : 32, .semibold))
-                    .foregroundStyle(Color(hex: 0xC4D6F7))
-                Text(L10n.tr(failed ? "Something went wrong on our side." : "We’re saving you hours per day…"))
-                    .font(CS.sf(18, .semibold))
-                    .foregroundStyle(Color(hex: 0xC4D6F7))
-            }
-            .multilineTextAlignment(.center)
-            .padding(.top, 8)
-
-            BrandRing(animating: !failed)
-                .frame(width: 150, height: 140)
-                .padding(.vertical, 6)
+            .padding(.top, 14)
 
             VStack(spacing: 6) {
+                Text(L10n.tr(failed ? "This cut needs another try" : "Hold on…"))
+                    .font(CS.inter(failed ? 26 : 30, .heavy))
+                    .tracking(failed ? -0.52 : -0.6)
+                    .foregroundStyle(CS.wiInk)
+                Text(L10n.tr(failed ? "Something went wrong on our side." : "We’re saving you hours per day…"))
+                    .font(CS.inter(15, .medium))
+                    .foregroundStyle(CS.wiSecondary)
+            }
+            .multilineTextAlignment(.center)
+            .padding(.top, 14)
+
+            if failed {
+                // White Indigo error (Figma 1176:2858): red mark in a circle and the green "original is safe" card.
+                WIStatusBadge(kind: .error).padding(.top, 22)
+                WIOriginalSafeCard().padding(.top, 22)
+            } else {
+                BrandRing(animating: true)
+                    .frame(width: 150, height: 150)
+                    .padding(.top, 16)
+            }
+
+            if !failed {
+            VStack(spacing: 4) {
                 Text(L10n.tr(stage.title))
                     .accessibilityIdentifier("processingStage")
-                    .font(CS.sf(16, .semibold))
-                    .foregroundStyle(Color(hex: 0xF2F7FF))
+                    .font(CS.inter(17, .bold))
+                    .foregroundStyle(CS.wiInk)
+                    .multilineTextAlignment(.center)
                 Text(L10n.tr(stage.percent >= 0 ? "\(stage.percent)%" : "…"))
-                    .font(CS.sf(24, .semibold))
-                    .foregroundStyle(CS.cyan)
+                    .font(CS.inter(26, .heavy))
+                    .foregroundStyle(CS.accent)
                     .contentTransition(.numericText())
                     .animation(.easeOut, value: stage.percent)
                     .accessibilityIdentifier("processingPercent")
-                // Build 25: no "Step x of 8" text or step dots (Single, Bulk and Combine): the stage
-                // name and its % are enough.
                 if let background {
                     Text(L10n.tr(background))
-                        .font(CS.sf(13))
-                        .foregroundStyle(CS.textSecondaryF)
+                        .font(CS.inter(13, .medium))
+                        .foregroundStyle(CS.wiSecondary)
                         .multilineTextAlignment(.center)
                         .padding(.top, 6)
                         .padding(.horizontal, 24)
@@ -189,61 +183,60 @@ struct ProcessingContent: View {
                 if let stalled {
                     VStack(spacing: 8) {
                         Text(L10n.tr(stalled))
-                            .font(CS.sf(13))
-                            .foregroundStyle(Color(hex: 0xFFC48A))
+                            .font(CS.inter(13, .medium))
+                            .foregroundStyle(Color(fixed: 0xB26A00))
                             .multilineTextAlignment(.center)
                             .accessibilityIdentifier("uploadStalled")
                         Button(L10n.tr("Try again"), action: onTryAgain)
-                            .font(CS.sf(15, .semibold))
-                            .foregroundStyle(CS.cyan)
+                            .font(CS.inter(15, .bold))
+                            .foregroundStyle(CS.accent)
                             .accessibilityIdentifier("uploadTryAgain")
                     }
                     .padding(.top, 8)
                     .padding(.horizontal, 24)
                 }
             }
+            .padding(.top, 14)
+            }
 
-            Spacer(minLength: 8)
+            Spacer(minLength: 12)
 
             VStack(spacing: 12) {
-                Text(L10n.tr(uploading ? "Your video keeps uploading if you leave this screen or CutSell." : "Processing continues if you leave this screen."))
-                    .font(CS.sf(13))
-                    .foregroundStyle(Color(hex: 0xB8D1F5))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 48)
-                    .background(Color(hex: 0x060E1C), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(CS.cyan.opacity(0.18), lineWidth: 1))
+                // Figma 1179:22 "Note": 52 high, radius 18, info icon + Medium 13.
+                HStack(spacing: 8) {
+                    Image("WIInfo").renderingMode(.template).resizable().frame(width: 18, height: 18)
+                        .foregroundStyle(CS.wiInk)
+                    Text(L10n.tr(uploading ? "Your video keeps uploading if you leave this screen or CutSell." : "Processing continues if you leave this screen."))
+                        .font(CS.inter(13, .medium))
+                        .foregroundStyle(CS.wiInk)
+                        .lineLimit(2).minimumScaleFactor(0.85)
+                }
+                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: 52)
+                .wiCard(radius: 18, shadow: false)
                 Button(action: onClose) {
                     Text(L10n.tr("Continue in background"))
-                        .font(CS.sf(15, .semibold))
-                        .foregroundStyle(.white)
+                        .font(CS.inter(16, .bold))
+                        .foregroundStyle(Color(fixed: 0xFFFFFF))
                         .frame(maxWidth: .infinity)
-                        .frame(height: 50)
-                        .background(
-                            LinearGradient(
-                                stops: [.init(color: Color(hex: 0x1969FF), location: 0),
-                                        .init(color: Color(hex: 0x7C3AED), location: 0.55),
-                                        .init(color: Color(hex: 0x19E6FF), location: 1)],
-                                startPoint: .leading, endPoint: .trailing),
-                            in: Capsule()
-                        )
-                        .shadow(color: Color(hex: 0x1969FF, opacity: 0.25), radius: 9, y: 6)
+                        .frame(height: 52)
+                        .background(CS.neutralButton, in: Capsule())
                 }
                 .buttonStyle(.plain)
                 // Build 24: active at every step (uploading, analysing, cutting, saving).
                 .accessibilityIdentifier("continueInBackground")
-                Text(L10n.tr("We’ll let you know in CutSell when your cut is ready."))
-                    .font(CS.sf(12))
-                    .foregroundStyle(Color(hex: 0x94ADD6))
+                Text(L10n.tr("We’ll notify you when your cut is ready."))
+                    .font(CS.inter(12, .medium))
+                    .foregroundStyle(CS.wiSecondary)
             }
-            .padding(.horizontal, 16)
             .padding(.bottom, 8)
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 20)
     }
 }
 
-/// 9:16 first frame with the neon border (Processing/VideoFirstFrame9x16).
+/// 9:16 first frame (White Indigo, Figma 1179:8): 3 pt white border, soft blue shadow (0 12 32, #1769FF at 28 %).
 struct VideoFirstFrame: View {
     let image: UIImage?
     let width: CGFloat
@@ -255,34 +248,33 @@ struct VideoFirstFrame: View {
             if let image {
                 Image(uiImage: image).resizable().scaledToFill()
             } else {
-                LinearGradient(colors: [Color(hex: 0x2A3F6B), Color(hex: 0x0C1730)], startPoint: .top, endPoint: .bottom)
-                Image("ProcessingLogo").resizable().scaledToFit().frame(width: width * 0.6).blendMode(.screen)
+                CS.accentSoft
+                BrandIcon(size: width * 0.5)
             }
         }
         .frame(width: width, height: height)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).stroke(Color(hex: 0x00E8FF), lineWidth: 2.5))
-        .shadow(color: Color(hex: 0x331FFF, opacity: 0.46), radius: 10, y: 1)
-        .shadow(color: Color(hex: 0xFF00BF, opacity: 0.64), radius: 7, x: -4, y: 5)
-        .shadow(color: Color(hex: 0x00DBFF, opacity: 0.72), radius: 6, x: 4, y: -2)
+        .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).stroke(Color(fixed: 0xFFFFFF), lineWidth: 3))
+        .shadow(color: Color(fixed: 0x1769FF, opacity: 0.28), radius: 16, y: 12)
     }
 }
 
-/// The brand ring around the CutSell bag (Processing/BrandRingMotion): one continuous circle
-/// (no gaps) filled with the logo's colours as an angular gradient that closes on itself, turning
-/// once every 2.5 s, linear and smooth, with a coloured glow behind it that turns with it.
-/// Reduce Motion: the ring stays still and the glow breathes softly. Used on every loading screen
-/// that shows the logo.
+/// White Indigo brand ring (Figma 1186:2 "Processing/BrandRing · White", note 1193:2): four arcs with the brand
+/// gradient (cyan → blue → purple → pink) and their neon glow, turning without stopping while it processes (one turn
+/// every 2.5 s); TRANSPARENT centre with the logo icon (Logo/Horizontal without letters) and its own glow.
+/// Reduce Motion: the arcs stay still and the glow breathes softly. Used by Single / Combine Processing and Export.
 struct BrandRing: View {
     var animating = true
-    /// Ring diameter; the logo and the inner disc scale with it.
+    /// Ring diameter; everything scales with it (Figma: 120).
     var size: CGFloat = 120
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    static let colors: [Color] = [Color(hex: 0x19E6FF), Color(hex: 0x1769FF), Color(hex: 0x7C3AED),
-                                  Color(hex: 0xFF21D7), Color(hex: 0x19E6FF)]
+    static let stops: [Gradient.Stop] = [
+        .init(color: Color(fixed: 0x19E6FF), location: 0), .init(color: Color(fixed: 0x1769FF), location: 0.28),
+        .init(color: Color(fixed: 0x7C3AED), location: 0.55), .init(color: Color(fixed: 0xFF1493), location: 0.78),
+        .init(color: Color(fixed: 0x19E6FF), location: 1)]
+    static let colors: [Color] = stops.map(\.color)
     static let secondsPerTurn = 2.5
-    static let lineWidth: CGFloat = 4.5
 
     /// Ring angle (degrees) at `time`: one full linear turn every 2.5 s.
     static func angle(at time: TimeInterval) -> Double {
@@ -295,35 +287,46 @@ struct BrandRing: View {
             let time = context.date.timeIntervalSinceReferenceDate
             let turning = animating && !reduceMotion
             let angle = turning ? Self.angle(at: time) : 0
-            // Reduce Motion: a soft breathing glow instead of the turn.
-            let glowOpacity = (animating && reduceMotion) ? 0.4 + 0.25 * (1 + sin(time * 2 * .pi / 2.4)) / 2 : 0.6
+            let glowOpacity = (animating && reduceMotion) ? 0.35 + 0.25 * (1 + sin(time * 2 * .pi / 2.4)) / 2 : 0.52
             ZStack {
-                // The glow: the same ring behind, blurred, turning with it (light, not a grey shadow).
-                ring
+                // Processing/RingGlow: the same arcs, blurred behind (opacity 52 %).
+                arcs(scale).blur(radius: 12 * scale).opacity(glowOpacity)
                     .rotationEffect(.degrees(angle))
-                    .blur(radius: 14 * scale)
-                    .opacity(glowOpacity)
-                    .blendMode(.plusLighter)
-                ring
+                // Processing/RingGradient with its two neon shadows (cyan up-right, magenta down-left).
+                arcs(scale)
+                    .shadow(color: Color(fixed: 0x00E0FF, opacity: 0.76), radius: 3.5 * scale, x: 3 * scale, y: -1 * scale)
+                    .shadow(color: Color(fixed: 0xE800FF, opacity: 0.58), radius: 4 * scale, x: -3 * scale, y: 3 * scale)
                     .rotationEffect(.degrees(angle))
-                Circle()
-                    .fill(Color(hex: 0x050813))
-                    .frame(width: size - 26 * scale, height: size - 26 * scale)
-                Image("ProcessingLogo")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 112 * scale, height: 112 * scale)
-                    .blendMode(.screen)
+                BrandIcon(size: 66 * scale)
             }
         }
         .frame(width: size + 30 * scale, height: size + 30 * scale)
         .accessibilityHidden(true)
     }
 
-    private var ring: some View {
-        Circle()
-            .stroke(AngularGradient(colors: Self.colors, center: .center), lineWidth: Self.lineWidth)
+    /// Four 60° arcs, 30° apart, 10 pt wide with round ends (one centred on each side), the gradient along them.
+    private func arcs(_ scale: CGFloat) -> some View {
+        BrandArcs()
+            .stroke(AngularGradient(stops: Self.stops, center: .center),
+                    style: StrokeStyle(lineWidth: 10 * scale, lineCap: .round))
             .frame(width: size, height: size)
+    }
+}
+
+/// The ring's four arcs (Figma RingGradient path: each spans ±30° around 0°, 90°, 180° and 270°).
+struct BrandArcs: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let radius = min(rect.width, rect.height) / 2
+        for side in 0..<4 {
+            let middle = Double(side) * 90
+            path.move(to: CGPoint(x: center.x + radius * cos((middle - 30) * .pi / 180),
+                                  y: center.y + radius * sin((middle - 30) * .pi / 180)))
+            path.addArc(center: center, radius: radius, startAngle: .degrees(middle - 30), endAngle: .degrees(middle + 30),
+                        clockwise: false)
+        }
+        return path
     }
 }
 
@@ -359,140 +362,125 @@ struct ReadyContent: View {
     @State private var footageSeconds: Double?
     @State private var totalSaved: Double?
 
+    /// White Indigo (Figma 1179:30 "Single · Ready"). Combine · Ready uses the same screen.
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
-                ZStack {
-                    BrandLogo()
-                    HStack {
-                        Button(action: onBack) {
-                            Image("ControlBack").resizable().frame(width: 36, height: 36)
-                                .frame(width: 44, height: 44)
-                        }
-                        .accessibilityLabel(L10n.tr("Back"))
-                        Spacer()
-                    }
-                }
-                .padding(.top, 4)
+                WIBackBar(onBack: onBack)
 
-                ZStack {
-                    RoundedRectangle(cornerRadius: 25)
-                        .fill(AngularGradient(colors: [Color(hex: 0x00EDFF), Color(hex: 0x1445FF), Color(hex: 0xB800FF), Color(hex: 0xFF0D75), Color(hex: 0x00EDFF)], center: .center))
-                        .frame(width: 134, height: 220)
-                        .blur(radius: 10)
-                        .opacity(0.9)
-                    VideoFirstFrame(image: cut.thumbnail, width: 112, height: 199, cornerRadius: 20)
-                        .overlay {
-                            Circle().fill(Color.black.opacity(0.45)).frame(width: 42, height: 42)
-                                .overlay(Image(systemName: "play.fill").font(.system(size: 18)).foregroundStyle(.white))
-                        }
-                }
-                .padding(.top, 8)
-                .onTapGesture(perform: onReview)
+                VideoFirstFrame(image: cut.thumbnail, width: 132, height: 206, cornerRadius: 20)
+                    .overlay {
+                        Image("WIPlay").renderingMode(.template).resizable().frame(width: 24, height: 24)
+                            .foregroundStyle(Color(fixed: 0xFFFFFF))
+                            .offset(x: 1)
+                            .frame(width: 52, height: 52)
+                            .background(Color(fixed: 0x0B1020, opacity: 0.55), in: Circle())
+                    }
+                    .padding(.top, -46)
+                    .onTapGesture(perform: onReview)
 
                 Text(L10n.tr("Your cut is ready"))
-                    .font(CS.sf(28, .semibold))
-                    .foregroundStyle(Color(hex: 0xFAFCFF))
-                    .padding(.top, 18)
+                    .font(CS.inter(26, .heavy))
+                    .tracking(-0.52)
+                    .foregroundStyle(CS.wiInk)
+                    .padding(.top, 24)
                 Text(CutName.display(cut.title))
-                    .font(CS.sf(13))
-                    .foregroundStyle(Color(hex: 0x8594B2))
+                    .font(CS.inter(13, .medium))
+                    .foregroundStyle(CS.wiSecondary)
                     .lineLimit(1)
                     .padding(.top, 4)
 
                 if let footage = footageSeconds ?? cut.footageSeconds, footage > 0 {
                     Text(L10n.tr("YOU JUST SAVED"))
-                        .font(CS.sf(11, .semibold))
-                        .tracking(1.4)
-                        .foregroundStyle(Color(hex: 0x4DDBFF))
-                        .padding(.top, 14)
+                        .font(CS.inter(11, .bold))
+                        .tracking(1.1)
+                        .foregroundStyle(CS.accent)
+                        .padding(.top, 18)
                     Text(Self.clock(TimeSavedLedger.saved(forFootage: footage)))
-                        .font(CS.sf(54, .semibold))
-                        .tracking(-1.8)
-                        .foregroundStyle(.white)
+                        .font(CS.inter(54, .heavy))
+                        .tracking(-1.62)
+                        .foregroundStyle(CS.wiInk)
                         .accessibilityIdentifier("timeSaved")
                     Text(L10n.tr("of editing time back in your day"))
-                        .font(CS.sf(14))
-                        .foregroundStyle(Color(hex: 0xB2BDD1))
+                        .font(CS.inter(14, .medium))
+                        .foregroundStyle(CS.wiSecondary)
                 }
 
+                // Figma 1179:43 "Stats": three columns with dividers.
                 HStack(spacing: 0) {
-                    metric("ReadyFootage", footage, "your footage")
-                    Rectangle().fill(Color(hex: 0x384766, opacity: 0.7)).frame(width: 1, height: 56)
-                    metric("ReadyTrims", keptClips.map { "\($0)" } ?? "–", "clips kept")
-                    Rectangle().fill(Color(hex: 0x384766, opacity: 0.7)).frame(width: 1, height: 56)
-                    metric("ReadyFinalCut", finalSeconds.map(Self.clock) ?? "–", "your final cut")
+                    metric("WIStatFootage", footage, "your footage")
+                    Rectangle().fill(CS.wiBorder).frame(width: 1, height: 60)
+                    metric("WIStatTrims", keptClips.map { "\($0)" } ?? "–", "clips kept")
+                    Rectangle().fill(CS.wiBorder).frame(width: 1, height: 60)
+                    metric("WIStatFinal", finalSeconds.map(Self.clock) ?? "–", "your final cut")
                 }
-                .frame(height: 88)
-                .background(Color(hex: 0x0E111A, opacity: 0.94), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Color(hex: 0x33456B, opacity: 0.65), lineWidth: 1))
+                .frame(height: 96)
+                .wiCard(shadow: false)
                 .padding(.top, 20)
 
                 if let totalSaved, totalSaved > 0 {
-                    HStack(alignment: .top, spacing: 16) {
-                        Image(systemName: "clock")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(Color(hex: 0x4DEBFF))
-                            .frame(width: 46, height: 46)
-                            .background(Circle().fill(Color(hex: 0x0A1A33)))
-                            .overlay(Circle().stroke(Color(hex: 0x4DEBFF).opacity(0.6), lineWidth: 1.5))
-                        VStack(alignment: .leading, spacing: 4) {
+                    // Figma 1179:65 "TotalSaved": blue gradient, clock in a light circle, total and the workdays badge.
+                    HStack(alignment: .center, spacing: 14) {
+                        Image("WIClockWhite").renderingMode(.template).resizable().frame(width: 24, height: 24)
+                            .foregroundStyle(Color(fixed: 0xFFFFFF))
+                            .frame(width: 48, height: 48)
+                            .background(Color(fixed: 0xFFFFFF, opacity: 0.18), in: Circle())
+                        VStack(alignment: .leading, spacing: 2) {
                             Text(TimeSavedLedger.hoursMinutes(totalSaved))
-                                .font(CS.sf(28, .semibold))
-                                .foregroundStyle(.white)
+                                .font(CS.inter(24, .heavy))
+                                .foregroundStyle(Color(fixed: 0xFFFFFF))
                             Text(L10n.tr("Your total editing time saved"))
-                                .font(CS.sf(12))
-                                .foregroundStyle(Color(hex: 0xADB8D1))
+                                .font(CS.inter(12, .medium))
+                                .foregroundStyle(Color(fixed: 0xFFFFFF, opacity: 0.85))
+                                .lineLimit(1).minimumScaleFactor(0.8)
                         }
                         Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(height: 84)
+                    .frame(maxWidth: .infinity)
+                    .overlay(alignment: .topTrailing) {
                         if let days = TimeSavedLedger.workdays(totalSaved) {
                             Text(L10n.tr("\(days)+ WORKDAY\(days == 1 ? "" : "S")"))
-                                .font(CS.sf(10, .semibold))
-                                .tracking(1.1)
-                                .foregroundStyle(Color(hex: 0x73D9FF))
-                                .padding(.top, 4)
+                                .font(CS.inter(10, .bold))
+                                .tracking(0.6)
+                                .foregroundStyle(Color(fixed: 0xFFFFFF))
+                                .padding(.horizontal, 8)
+                                .frame(height: 22)
+                                .background(Color(fixed: 0xFFFFFF, opacity: 0.2), in: Capsule())
+                                .padding(.top, 14).padding(.trailing, 14)
                         }
                     }
-                    .padding(17)
-                    .background(
-                        LinearGradient(stops: [.init(color: Color(hex: 0x0A172B), location: 0),
-                                               .init(color: Color(hex: 0x120E29), location: 0.55),
-                                               .init(color: Color(hex: 0x1F0929), location: 1)],
-                                       startPoint: .leading, endPoint: .trailing),
-                        in: RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    )
-                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Color(hex: 0x6B38C7, opacity: 0.72), lineWidth: 1))
-                    .padding(.top, 14)
+                    .background(CS.accentGradient, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .padding(.top, 12)
                     .accessibilityIdentifier("totalTimeSaved")
                 }
 
                 HStack(spacing: 10) {
                     Button(action: onReview) {
                         Text(L10n.tr("Review & edit"))
-                            .font(CS.inter(16, .semibold))
-                            .foregroundStyle(Color(hex: 0xFAFCFF))
+                            .font(CS.inter(15, .bold))
+                            .foregroundStyle(CS.wiInk)
+                            .lineLimit(1).minimumScaleFactor(0.8)
                             .frame(maxWidth: .infinity)
-                            .frame(height: 54)
-                            .background(Color(hex: 0x02060F), in: Capsule())
-                            .overlay(Capsule().stroke(Color(hex: 0x265EA3), lineWidth: 1))
+                            .frame(height: 52)
+                            .background(CS.wiPage, in: Capsule())
+                            .overlay(Capsule().stroke(CS.wiInk, lineWidth: 1.5))
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("readyReviewButton")
                     Button(action: onReview) {
                         Text(L10n.tr("Export video"))
-                            .font(CS.sf(16, .semibold))
-                            .foregroundStyle(Color(hex: 0x03050D))
+                            .font(CS.inter(15, .bold))
+                            .foregroundStyle(Color(fixed: 0xFFFFFF))
+                            .lineLimit(1).minimumScaleFactor(0.8)
                             .frame(maxWidth: .infinity)
-                            .frame(height: 54)
-                            .background(LinearGradient(
-                                stops: [.init(color: Color(hex: 0x14E0FF), location: 0),
-                                        .init(color: Color(hex: 0x1F70FF), location: 0.48),
-                                        .init(color: Color(hex: 0xFF14D9), location: 1)],
-                                startPoint: .leading, endPoint: .trailing), in: Capsule())
+                            .frame(height: 52)
+                            .background(CS.accent, in: Capsule())
                     }
                     .buttonStyle(.plain)
                 }
-                .padding(.top, 28)
+                .padding(.top, 22)
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 24)
@@ -506,9 +494,9 @@ struct ReadyContent: View {
 
     private func metric(_ icon: String, _ value: String, _ label: String) -> some View {
         VStack(spacing: 4) {
-            Image(icon).resizable().frame(width: 20, height: 20)
-            Text(value).font(CS.sf(19, .semibold)).foregroundStyle(.white)
-            Text(L10n.tr(label)).font(CS.sf(11)).foregroundStyle(Color(hex: 0x8F9CB8))
+            Image(icon).renderingMode(.template).resizable().frame(width: 20, height: 20).foregroundStyle(CS.accent)
+            Text(value).font(CS.inter(20, .heavy)).foregroundStyle(CS.wiInk)
+            Text(L10n.tr(label)).font(CS.inter(12, .medium)).foregroundStyle(CS.wiSecondary).lineLimit(1).minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity)
     }
