@@ -1,6 +1,8 @@
-"""Security review (PO 23 Oct): NAMES of the worker's secret keys (never values) and what the storage / ASR keys may do.
-Read-only: lists and HEADs; the delete test targets a key that does not exist (no data can change). Report encrypted."""
+"""Diagnosis (PO 23 Oct): why the same video gets very different cuts run to run. Each video is heard ONCE (same words);
+then the engine runs N times with the normal API. Every step's answer is kept to see where the runs part ways.
+Report encrypted. Nothing written to the app's storage or Redis."""
 import json
+import time
 
 import modal
 
@@ -8,39 +10,64 @@ app = modal.App("cutsell-fail-probe")
 secret = modal.Secret.from_name("cutsell-worker")
 image = (
     modal.Image.debian_slim(python_version="3.11")
+    .apt_install("ffmpeg")
     .pip_install_from_requirements("requirements.cutsell.worker.cpu.txt")
     .add_local_dir("cutsell_worker", remote_path="/root/cutsell_worker", ignore=["**/__pycache__/**", "**/*.pyc"])
 )
 
 
-@app.function(image=image, secrets=[secret], timeout=300)
-def audit():
-    import os, time
-    from urllib.parse import urlparse
-    from redis import Redis
-    u = urlparse(os.environ.get("REDIS_URL", ""))
-    host = (u.hostname or "")
-    out = {"redis_provider_domain": ".".join(host.split(".")[-2:]) if host.count(".") >= 1 else ("set" if host else "missing"),
-           "redis_tls": u.scheme == "rediss", "redis_has_password": bool(u.password)}
-    r = Redis.from_url(os.environ["REDIS_URL"], socket_timeout=10)
-    for section in ("persistence", "memory", "keyspace", "server"):
-        try:
-            info = r.info(section)
-            keep = {k: info[k] for k in info if k in ("aof_enabled", "rdb_last_save_time", "rdb_changes_since_last_save",
-                    "rdb_bgsave_in_progress", "used_memory_human", "maxmemory_human", "maxmemory_policy", "redis_version", "db0")}
-            if "rdb_last_save_time" in keep:
-                keep["hours_since_last_rdb_save"] = round((time.time() - keep.pop("rdb_last_save_time")) / 3600, 1)
-            out[section] = keep
-        except Exception as e:
-            out[section] = "denied: " + e.__class__.__name__
-    try:
-        out["config_save"] = r.config_get("save")
-    except Exception as e:
-        out["config_save"] = "denied: " + e.__class__.__name__
-    return out
+@app.function(image=image, secrets=[secret], timeout=600, cpu=2.0, memory=4096)
+def hear(key: str):
+    import tempfile
+    from pathlib import Path
+    from cutsell_worker import storage_routing as sr
+    from cutsell_worker.media_probe import probe_media
+    from cutsell_worker.simple_engine import asr
+    fb = sr.fallback_storage()
+    client = sr._make_fallback_client(fb)
+    with tempfile.TemporaryDirectory() as d:
+        path = str(Path(d) / "v.mp4")
+        client.download_file(fb.bucket, key, path)
+        duration = float(probe_media(path).duration_sec)
+        heard = asr.transcribe_words(asr.extract_audio(path, str(Path(d) / "a.mp3")))
+    return {"key": key, "duration": duration, "words": [w for w in heard["words"] if float(w["e"]) > float(w["s"])]}
+
+
+@app.function(image=image, secrets=[secret], timeout=600, cpu=1.0, memory=2048)
+def run_once(heard: dict, run: int, env: dict = None):
+    import os
+    import tempfile
+    os.environ.update(env or {})
+    from pathlib import Path
+    from cutsell_worker import storage_routing as sr
+    from cutsell_worker.simple_engine import engine, llm
+    fb = sr.fallback_storage()
+    tmp = tempfile.mkdtemp()
+    path = str(Path(tmp) / "v.mp4")
+    sr._make_fallback_client(fb).download_file(fb.bucket, heard["key"], path)
+    answers = []
+
+    def call(prompt, **kw):
+        text, usage = llm.call_anthropic(prompt, **kw)
+        answers.append({"step": usage.get("step"), "text": text[-3000:], "out_tokens": usage.get("output_tokens"),
+                        "thinking_blocks": usage.get("thinking_blocks")})
+        return text, usage
+
+    with llm.cache_scope(True, ttl="1h"):
+        out = engine.process(heard["words"], heard["duration"], path, video_path=None, scene_cut_list=[], llm=call)
+    report = llm.cache_report(out["usage"])
+    return {"key": heard["key"], "run": run, "cut_s": out["cut_duration"], "passes": out.get("passes"),
+            "kept": [(round(x["start"], 2), round(x["end"], 2)) for x in out["splits"] if x["visible"]],
+            "usd": report["usd"], "answers": answers,
+            "lines": [" ".join(heard["words"][k]["w"] for k in u) for u in engine.lines_of(heard["words"])], "log": str(out.get("log"))[:3000]}
 
 
 @app.local_entrypoint()
 def main():
+    plan = json.load(open("cache_plan.json"))
+    heard = list(hear.map(plan["videos"]))
+    args = [(h, r, plan.get("env") or {}) for h in heard for r in range(plan.get("runs", 5))]
+    rows = list(run_once.starmap(args, return_exceptions=True))
+    rows = [r if isinstance(r, dict) else {"error": str(r)[:300]} for r in rows]
     with open("engine_check.json", "w") as f:
-        json.dump({"label": "security review: redis", "rows": [audit.remote()]}, f, indent=1)
+        json.dump({"label": plan.get("label"), "words": {h["key"]: len(h["words"]) for h in heard}, "rows": rows}, f, default=str)
