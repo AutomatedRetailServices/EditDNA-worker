@@ -28,56 +28,47 @@ struct HomeHubView: View {
             CS.wiPage.ignoresSafeArea()
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    // Header (Figma 1164:2): logo left (~172 pt with its glow), round avatar with the initial right.
-                    HStack(alignment: .center) {
-                        BrandLogo(width: 172).padding(.leading, -11.5)
-                        Spacer()
-                        Button { selectTab(.you) } label: {
-                            Text(verbatim: String(firstName.first ?? "C").uppercased())
-                                .font(CS.inter(16, .bold))
-                                .foregroundStyle(CS.accent)
-                                .frame(width: 40, height: 40)
-                                .background(CS.accentSoft, in: Circle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("hubAvatar")
-                    }
-                    .frame(height: 67)
-                    .padding(.top, 2)
+                    // 1) Header (Figma 1164:77): only the logo, on the left (~172 pt with its glow). No avatar.
+                    BrandLogo(width: 172).padding(.leading, -11.5)
+                        .frame(height: 67)
+                        .padding(.top, 2)
 
+                    // 2) Greeting, with room under the logo.
                     Text(firstName.isEmpty ? L10n.tr("Hi 👋") : L10n.tr("Hi \(firstName) 👋"))
                         .font(CS.inter(15, .medium))
                         .foregroundStyle(CS.wiSecondary)
-                        .padding(.top, 6)
+                        .padding(.top, 32)
                     Text(L10n.tr("What are we selling today?"))
-                        .font(CS.inter(32, .heavy))
-                        .tracking(CS.screenTitleTracking)
-                        .lineSpacing(0)
+                        .font(CS.inter(24, .heavy))
                         .foregroundStyle(CS.wiInk)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 4)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .padding(.top, 3)
 
-                    uploadCard.padding(.top, 14)
-
-                    Text(L10n.tr("Create more"))
-                        .font(CS.sectionTitle)
-                        .foregroundStyle(CS.wiInk)
-                        .padding(.top, 18)
-                    salesMixCard.padding(.top, 10)
-                    HStack(spacing: 8) {
-                        smallCard(icon: "WIRecord", title: "Record", subtitle: "Camera + teleprompter", id: "hubRecord", action: onRecord)
-                        smallCard(icon: "WIPlanCal", title: "Plan my week", subtitle: "Post at your times", id: "hubPlanWeek") {
-                            selectTab(.plan)
+                    // 3) 2 × 2 grid (Figma 1164:40, 1195:115, 1195:103, 1164:47).
+                    VStack(spacing: 8) {
+                        HStack(spacing: 8) {
+                            gridTile(icon: "WIRecord", title: "Record", subtitle: "Camera + teleprompter", id: "hubRecord", action: onRecord)
+                            gridTile(icon: "WIMic", title: "Faceless", subtitle: "Just your voice and product", id: "hubFaceless") {
+                                // The Faceless flow is not built yet: the existing "Coming soon" notice.
+                                voiceOverSoon = true
+                            }
+                        }
+                        HStack(spacing: 8) {
+                            gridTile(icon: "WISalesMix", title: "Sales Mix", subtitle: "Multiple: hooks + bodies + CTAs for the same product",
+                                     id: "hubMix", action: onMix)
+                            gridTile(icon: "WIPlanCal", title: "Plan my week", subtitle: "Post at your times", id: "hubPlanWeek") {
+                                AppRouter.shared.pending = .planWeek
+                                selectTab(.plan)
+                            }
                         }
                     }
-                    .padding(.top, 8)
-                    // "Faceless video" stays hidden until the flow exists.
-                    if Self.facelessVideoReady {
-                        smallCard(icon: "WIRecord", title: "Faceless video", subtitle: "Product photos or clips + your voice. No camera.",
-                                  id: "hubFaceless") { voiceOverSoon = true }
-                            .padding(.top, 8)
-                    }
+                    .padding(.top, 18)
 
+                    // 4) Upload dropzone, 16 pt under the grid.
+                    uploadCard.padding(.top, 16)
+
+                    // 5) Recent
                     HStack(alignment: .firstTextBaseline) {
                         Text(L10n.tr("Recent"))
                             .font(CS.sectionTitle)
@@ -88,7 +79,7 @@ struct HomeHubView: View {
                             .foregroundStyle(CS.accent)
                             .accessibilityIdentifier("hubSeeAll")
                     }
-                    .padding(.top, 18)
+                    .padding(.top, 20)
 
                     if recent.isEmpty {
                         Text(L10n.tr("Your cuts will show up here."))
@@ -126,132 +117,106 @@ struct HomeHubView: View {
         }
     }
 
-    /// Figma 1164:92 "Upload/Tiles": blue gradient card, its round upload button (Single) and three white tiles.
+    /// Figma 1205:107 "Upload/Dropzone": light box (#F3F7FF) with a dashed blue border, the round gradient upload
+    /// button, the title and line centred, and three blue gradient tiles (Single / Bulk / Combine).
     private var uploadCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(L10n.tr("Upload videos"))
-                        .font(CS.inter(22, .heavy))
-                        .foregroundStyle(.white)
-                    Text(L10n.tr("AI cuts silences, mistakes & repeats."))
-                        .font(CS.inter(13, .medium))
-                        .foregroundStyle(Color.white.opacity(0.82))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 8)
-                Button { onUpload(.single) } label: {
-                    Image("WIUpload").renderingMode(.template).resizable()
-                        .frame(width: 22, height: 22)
-                        .foregroundStyle(.white)
-                        .frame(width: 42, height: 42)
-                        .background(Color.white.opacity(0.18), in: Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(L10n.tr("Upload videos"))
-                .accessibilityIdentifier("hubUploadButton")
+        VStack(spacing: 0) {
+            Button { onUpload(.single) } label: {
+                Image("WIUpload").renderingMode(.template).resizable()
+                    .frame(width: 24, height: 24)
+                    .foregroundStyle(Color(fixed: 0xFFFFFF))
+                    .frame(width: 52, height: 52)
+                    .background(CS.accentGradient, in: Circle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L10n.tr("Upload videos"))
+            .accessibilityIdentifier("hubUploadButton")
+            Text(L10n.tr("Upload videos"))
+                .font(CS.inter(22, .heavy))
+                .foregroundStyle(CS.wiInk)
+                .padding(.top, 10)
+            Text(L10n.tr("AI cuts silences, mistakes & repeats."))
+                .font(CS.inter(13, .medium))
+                .foregroundStyle(CS.wiSecondary)
+                .multilineTextAlignment(.center)
+                .padding(.top, 2)
             HStack(spacing: 8) {
                 tile(.single, icon: "WISingle", subtitle: "One video")
                 tile(.bulk, icon: "WIBulk", subtitle: "Many at once")
                 tile(.combine, icon: "WICombine", subtitle: "Join into one")
             }
-            .padding(.top, 18)
+            .padding(.top, 12)
         }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(CS.accentGradient, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .padding(.top, 16)
+        .padding(.horizontal, 14)
+        .padding(.bottom, 17)
+        .frame(maxWidth: .infinity)
+        .background(Color(fixed: 0xF3F7FF), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous)
+            .strokeBorder(Color(fixed: 0x1769FF, opacity: 0.45), style: StrokeStyle(lineWidth: 1.5, dash: [6, 5])))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("hubUpload")
     }
 
+    /// Figma 1205:115 / 122 / 130: blue gradient tile, radius 18, soft blue shadow, white icon on 20 % white.
     private func tile(_ mode: CreateMode, icon: String, subtitle: String) -> some View {
         Button { onUpload(mode) } label: {
             VStack(alignment: .leading, spacing: 0) {
                 Image(icon).renderingMode(.template).resizable()
-                    .frame(width: 20, height: 20)
-                    .foregroundStyle(CS.accent)
-                    .frame(width: 36, height: 36)
-                    .background(CS.accentSoft, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-                Spacer(minLength: 10)
+                    .frame(width: 18, height: 18)
+                    .foregroundStyle(Color(fixed: 0xFFFFFF))
+                    .frame(width: 32, height: 32)
+                    .background(Color(fixed: 0xFFFFFF, opacity: 0.2), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                Spacer(minLength: 6)
                 Text(L10n.tr(mode.title))
                     .font(CS.inter(14, .bold))
-                    .foregroundStyle(CS.wiInk)
+                    .foregroundStyle(Color(fixed: 0xFFFFFF))
                     .lineLimit(1).minimumScaleFactor(0.8)
                 Text(L10n.tr(subtitle))
                     .font(CS.inter(11, .medium))
-                    .foregroundStyle(CS.wiSecondary)
-                    .lineLimit(1).minimumScaleFactor(0.8)
-                    .padding(.top, 4)
+                    .foregroundStyle(Color(fixed: 0xFFFFFF, opacity: 0.85))
+                    .lineLimit(1).minimumScaleFactor(0.75)
+                    .padding(.top, 2)
             }
             .padding(12)
-            .frame(maxWidth: .infinity, minHeight: 112, maxHeight: 112, alignment: .topLeading)
-            .background(CS.wiPage, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .frame(maxWidth: .infinity, minHeight: 94, maxHeight: 94, alignment: .topLeading)
+            .background(CS.accentGradient, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: Color(fixed: 0x1769FF, opacity: 0.25), radius: 7, x: 0, y: 6)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("hubMode_\(mode.rawValue)")
     }
 
-    /// Figma 1164:30 "Sales Mix" (full width): opens Sales Mix · Setup.
-    private var salesMixCard: some View {
-        Button(action: onMix) {
-            HStack(spacing: 14) {
-                Image("WISalesMix").renderingMode(.template).resizable()
-                    .frame(width: 20, height: 20)
-                    .foregroundStyle(.white)
-                    .frame(width: 38, height: 38)
-                    .background(CS.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(L10n.tr("Sales Mix"))
-                        .font(CS.cardTitle)
-                        .foregroundStyle(CS.wiInk)
-                    Text(L10n.tr("Record a few hooks, bodies & CTAs. We mix them into many videos."))
-                        .font(CS.inter(11, .medium))
-                        .foregroundStyle(CS.wiSecondary)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 0)
-                Image("WIChevron").renderingMode(.template).resizable()
-                    .frame(width: 18, height: 18)
-                    .foregroundStyle(CS.accent)
-            }
-            .padding(.horizontal, 13)
-            .padding(.vertical, 18)
-            .frame(maxWidth: .infinity, minHeight: 96)
-            .background(CS.wiCard, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("hubMix")
-    }
-
-    /// Figma 1164:40 / 1164:47: half-width card, white icon box, title, small line.
-    private func smallCard(icon: String, title: String, subtitle: String, id: String, action: @escaping () -> Void) -> some View {
+    /// Figma 1164:40 "Tile": 171 × 122, radius 20, #F8F9FB, 38 pt #EEF3FF icon box with the blue icon, Bold 15, Medium 11.
+    private func gridTile(icon: String, title: String, subtitle: String, id: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 0) {
                 Image(icon).renderingMode(.template).resizable()
                     .frame(width: 20, height: 20)
-                    .foregroundStyle(CS.wiInk)
+                    .foregroundStyle(CS.accent)
                     .frame(width: 38, height: 38)
-                    .background(CS.wiPage, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
-                Spacer(minLength: 8)
+                    .background(CS.accentSoft, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
                 Text(L10n.tr(title))
                     .font(CS.cardTitle)
                     .foregroundStyle(CS.wiInk)
                     .lineLimit(1).minimumScaleFactor(0.85)
+                    .padding(.top, 8)
                 Text(L10n.tr(subtitle))
                     .font(CS.inter(11, .medium))
                     .foregroundStyle(CS.wiSecondary)
+                    .lineSpacing(1)
                     .lineLimit(2)
+                    .minimumScaleFactor(0.85)
                     .multilineTextAlignment(.leading)
-                    .padding(.top, 3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 2)
+                Spacer(minLength: 0)
             }
             .padding(13)
-            .frame(maxWidth: .infinity, minHeight: 112, maxHeight: 112, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: 122, maxHeight: 122, alignment: .topLeading)
             .background(CS.wiCard, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(id)

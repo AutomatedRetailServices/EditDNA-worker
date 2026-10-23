@@ -226,14 +226,14 @@ struct CSTabBar: View {
                             .interpolation(.high)
                             .frame(width: 26, height: 26)
                             .foregroundStyle(isActive ? CS.accent : CS.wiInk)
-                            .padding(.top, 13)
+                            .padding(.top, 8)
                         Text(L10n.tr(item.title))
                             .font(CS.inter(11, isActive ? .semibold : .medium))
                             .foregroundStyle(isActive ? CS.accent : CS.wiSecondary)
                             .lineLimit(1)
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: .infinity)
-                            .padding(.top, 8)
+                            .padding(.top, 3)
                         Circle().fill(isActive ? CS.accent : .clear).frame(width: 5, height: 5).padding(.top, 4)
                         Spacer(minLength: 0)
                     }
@@ -245,7 +245,7 @@ struct CSTabBar: View {
                 .accessibilityIdentifier("tab_\(item.rawValue)")
             }
         }
-        .frame(height: 80)
+        .frame(height: 66)        // Figma 1164:59: thinner bar, just above the home indicator
         .background(CS.wiPage, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
         .shadow(color: Color(fixed: 0x0D1433, opacity: 0.08), radius: 8, x: 0, y: 4)

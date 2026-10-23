@@ -585,36 +585,50 @@ final class Build24UITests: XCTestCase {
     /// Plan my week (Figma 1138:2749 / 2798 / 2872) with an in-memory plan (-CutSellPlanMock): Goal → Build my week →
     /// Week (videos of the 4 origins) → move a video → Day: caption edit / copy, Share to TikTok (share sheet with the
     /// video), Save, Mark as posted → rebuild keeps it posted → a "Time to post" reminder opens its day.
+    /// White Indigo Create (Figma 1164:2): logo only (no avatar), the 2 × 2 grid and the Upload dropzone; each of the 7
+    /// buttons opens the right thing (a fresh launch per button).
     func testCreateHub() throws {
         launchApp(fresh: true, extra: ["-CutSellProjectsMock"])
         pause(2)
         shot("create_hub")
-        check(element("planMeter").exists, "meter X / N cuts · Plan", element("planMeter").label)
-        for mode in ["single", "bulk", "combine"] { check(element("hubMode_\(mode)").exists, "Upload videos · \(mode) chip") }
-        check(element("hubMix").exists, "Mix row")
-        check(element("hubRecord").exists, "Record with CutSell")
-        check(!element("hubVoiceOver").exists && !element("hubFaceless").exists, "Faceless video hidden until it is built")
-        check(app.buttons["See all in Edits"].exists, "Recent cuts · See all in Edits")
-        // Mix row → Mix · Setup (the same screen as New Mix in Plan)
+        check(!element("hubAvatar").exists, "no avatar on Create")
+        check(!element("planMeter").exists, "no plan meter on Create")
+        check(!app.staticTexts["Create more"].exists, "no 'Create more' title")
+        for id in ["hubRecord", "hubFaceless", "hubMix", "hubPlanWeek", "hubMode_single", "hubMode_bulk", "hubMode_combine"] {
+            check(element(id).exists && element(id).isHittable, "\(id) shown")
+        }
+        // Record → camera with teleprompter (or its permission screen on the Simulator)
+        element("hubRecord").tap()
+        check(wait(15) { self.element("recordButton").exists || self.app.staticTexts["Allow camera access"].exists
+                         || self.app.staticTexts["Allow microphone access"].exists }, "Record opens the camera")
+        shot("hub_record")
+        // Faceless → the flow is not built yet: the "Coming soon" notice
+        launchApp(fresh: false, extra: ["-CutSellProjectsMock"])
+        element("hubFaceless").tap()
+        check(app.alerts["Faceless video"].waitForExistence(timeout: 10), "Faceless shows Coming soon")
+        shot("hub_faceless")
+        app.alerts.buttons.firstMatch.tap()
+        // Sales Mix → Sales Mix · Setup
         element("hubMix").tap()
-        check(element("mixProduct").waitForExistence(timeout: 15), "Mix row opens Mix · Setup")
-        shot("create_mix_setup")
-        element("mixClose").tap()
-        pause(1)
-        // Bulk → the gallery, with Single · Bulk · Combine at the bottom (Figma 484:214)
-        element("hubMode_bulk").tap()
-        allowPhotos()
-        let picker = element("createModePicker")
-        if !picker.waitForExistence(timeout: 20) {
-            app.swipeUp(velocity: .slow)                 // nudges the interruption monitor if the prompt is still up
+        check(element("mixProduct").waitForExistence(timeout: 15), "Sales Mix opens Sales Mix · Setup")
+        shot("hub_mix")
+        // Plan my week → Plan › Goal (or the week)
+        launchApp(fresh: false, extra: ["-CutSellProjectsMock"])
+        element("hubPlanWeek").tap()
+        check(wait(15) { self.element("goalStart").exists || self.element("goalTimesHelp").exists
+                         || self.element("goalCount").exists },
+              "Plan my week opens Plan my week")
+        shot("hub_planweek")
+        // Single / Bulk / Combine → the gallery in that mode
+        for (mode, helper) in [("single", "One video → one edit."), ("bulk", "Each video becomes a separate edit."),
+                               ("combine", "One edit in the order you selected.")] {
+            launchApp(fresh: false, extra: ["-CutSellProjectsMock"])
+            element("hubMode_\(mode)").tap()
             allowPhotos()
+            if !app.staticTexts[helper].waitForExistence(timeout: 20) { app.swipeUp(velocity: .slow); allowPhotos() }
+            check(app.staticTexts[helper].waitForExistence(timeout: 20), "\(mode) opens the gallery in \(mode)")
+            shot("hub_\(mode)")
         }
-        check(picker.waitForExistence(timeout: 30), "gallery mode picker")
-        for title in ["Single", "Bulk", "Combine"] {
-            check(picker.buttons[title].exists || app.buttons[title].exists, "gallery shows \(title)")
-        }
-        check(app.staticTexts["Each video becomes a separate edit."].exists, "Bulk chip opened the gallery in Bulk")
-        shot("create_gallery_bulk")
         done()
     }
 

@@ -542,6 +542,7 @@
 "It scrolls near the lens while you record." = "Sube junto a la cámara mientras grabas.";
 "Join into one" = "Unir en uno";
 "Jump and smooth" = "Salta y suaviza";
+"Just your voice and product" = "Solo tu voz y el producto";
 "Keep Current Selection" = "Mantener selección actual";
 "Keep CutSell open until it finishes." = "Deja CutSell abierto hasta que termine.";
 "Keep CutSell open until the audio is sent. The videos keep uploading in the background." = "Deja CutSell abierto hasta que se envíe el audio. Los videos siguen subiendo en segundo plano.";
@@ -640,6 +641,7 @@
 "Move %lld video%@" = "Mover %1$lld video%2$@";
 "Move %lld video%lld" = "Mover %1$lld video%2$lld";
 "Multiple clips" = "Varios clips";
+"Multiple: hooks + bodies + CTAs for the same product" = "Varios: hooks + cuerpos + CTAs del mismo producto";
 "Music" = "Música";
 "Music (uploading)" = "Música (subiendo)";
 "Music added · tap ↶ to undo" = "Música añadida · toca ↶ para deshacer";
