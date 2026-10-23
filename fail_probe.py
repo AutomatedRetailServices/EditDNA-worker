@@ -15,7 +15,7 @@ image = (
 
 @app.function(image=image, secrets=[secret], timeout=600)
 def audit():
-    import os, tempfile, subprocess
+    import os, tempfile, subprocess, json
     from pathlib import Path
     from redis import Redis
     from rq.job import Job
@@ -42,9 +42,13 @@ def audit():
                 except Exception:
                     sr._make_fallback_client(sr.fallback_storage()).download_file(sr.fallback_storage().bucket, key, local)
                 row["file_ext"] = Path(uri).suffix
-                p = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration:stream=codec_name,sample_rate,channels",
-                                    "-of", "compact", local], capture_output=True, text=True)
-                row["probe"] = "\n".join(l for l in p.stdout.splitlines() if "location" not in l.lower())[:1200]
+                p = subprocess.run(["ffprobe", "-v", "error", "-show_format", "-show_streams", "-of", "json", local], capture_output=True, text=True)
+                info = json.loads(p.stdout or "{}")
+                keep = {"format": {k: v for k, v in (info.get("format") or {}).items() if k in ("size", "bit_rate", "format_name")},
+                        "format_tags": {k: v for k, v in ((info.get("format") or {}).get("tags") or {}).items() if "location" not in k.lower() and "iso6709" not in k.lower()},
+                        "streams": [{k: v for k, v in st.items() if k in ("codec_type", "codec_name", "bit_rate", "width", "height", "r_frame_rate", "sample_rate", "channels", "duration")}
+                                    | {"tags": {k: v for k, v in (st.get("tags") or {}).items() if k in ("handler_name", "encoder", "vendor_id")}} for st in info.get("streams") or []]}
+                row["probe"] = keep
                 mp3 = asr.extract_audio(local, str(Path(d) / "x.mp3"))
                 row["mean_db"] = ad._mean_volume_db(mp3)
                 heard = asr.transcribe_words(mp3)
