@@ -1,0 +1,25 @@
+B24UI    24.9 PASS the bulk chip opened the gallery in bulk
+B24UI    28.8 gallery CTA: Create 3 cuts
+B24UI    54.3 PASS bulk sheet shown
+B24UI    54.3 PASS sheet: notify message from the first moment
+B24UI    54.8 PASS Bulk shows no single-video Processing screen (Step x of 8)
+B24UI    56.9 PASS Edits opens on Processing
+B24UI    59.5 PASS Processing: the group message
+B24UI    59.9 PASS Processing: the Bulk group with its bar
+B24UI    60.1 rows at start: ["PROCESSING", "PROCESSING", "QUEUED"]
+B24UI    60.1 PASS 3 rows in order · PROCESSING, PROCESSING, QUEUED
+B24UI    63.1 bulk rows: [PROCESSING, PROCESSING, QUEUED] · 0 of 3 ready
+B24UI    68.6 bulk rows: [PROCESSING, PROCESSING, PROCESSING] · 0 of 3 ready
+B24UI   639.5 bulk rows: [READY, PROCESSING, PROCESSING] · 1 of 3 ready
+B24UI   695.9 bulk rows: [READY, PROCESSING, READY] · 2 of 3 ready
+B24UI   774.1 group notice: Your 3 videos are ready ✨
+B24UI   774.1 PASS one notice for the whole group · Your 3 videos are ready ✨
+B24UI   774.1 PASS no notice per video
+B24UI   774.1 PASS only QUEUED / PROCESSING / READY
+B24UI   774.1 PASS no 'Taking a little longer' in Bulk
+B24UI   777.4 ready chip: Ready (5)
+B24UI   777.6 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testBulkSheetAndProcessingTab]' passed (779.590 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-23 15:59:58.859.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-23 15:59:58.860.
+Test Suite 'Selected tests' passed at 2026-10-23 15:59:58.862.
