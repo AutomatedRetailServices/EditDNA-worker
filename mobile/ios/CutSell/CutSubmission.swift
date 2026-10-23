@@ -430,7 +430,9 @@ extension CutSubmitter {
                 let response: FlowBSubmitResponse = try await Retry.run("start cut", onRetry: { _, error in
                     if case APIError.http(429, let detail) = error, detail.contains("processing_concurrency_limit") { return }
                     onRetry?(Retry.short(error))
-                }) { try await APIClient.shared.request(
+                }) {
+                    if FakeBusy.take() { throw APIError.http(429, "processing_concurrency_limit") }
+                    return try await APIClient.shared.request(
                     "/v1/flow-b/jobs",
                     method: "POST",
                     body: Body(project_id: projectID, user_id: session.userID, sources: sources, language_hint: nil,
@@ -449,7 +451,7 @@ extension CutSubmitter {
                     CutSellDiagnostics.log("job_waiting_for_slot", [:])
                     onWaiting?()
                 }
-                try await Task.sleep(nanoseconds: Self.slotRetrySeconds * 1_000_000_000)
+                try await Task.sleep(nanoseconds: FakeBusy.waitSeconds(Self.slotRetrySeconds) * 1_000_000_000)
             } catch {
                 CutSellDiagnostics.log("job_submit_failed", Retry.fields(error))
                 throw error
@@ -478,4 +480,29 @@ struct CutSubmitError: LocalizedError {
     var projectID: String? = nil
 
     var errorDescription: String? { underlying.localizedDescription }
+}
+
+
+/// Simulator probe only: `-CutSellFakeBusy N` answers "busy" (429) to the first N cut starts, and
+/// `-CutSellSlotWait S` asks again after S seconds, to check the Queued path without loading the server.
+enum FakeBusy {
+    nonisolated(unsafe) private static var left: Int = {
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: "-CutSellFakeBusy"), i + 1 < args.count else { return 0 }
+        return Int(args[i + 1]) ?? 0
+    }()
+    private static let lock = NSLock()
+
+    nonisolated static func take() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard left > 0 else { return false }
+        left -= 1
+        return true
+    }
+
+    nonisolated static func waitSeconds(_ normal: UInt64) -> UInt64 {
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: "-CutSellSlotWait"), i + 1 < args.count, let s = UInt64(args[i + 1]) else { return normal }
+        return s
+    }
 }

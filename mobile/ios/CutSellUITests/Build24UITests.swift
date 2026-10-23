@@ -246,42 +246,41 @@ final class Build24UITests: XCTestCase {
         log("FAILURES: \(failures.isEmpty ? "none" : failures.joined(separator: " | "))")
     }
 
-    /// 23 Oct: the server allows 2 cuts at once per user; a 3rd Single sent meanwhile gets "busy" (429). It must
-    /// show QUEUED (never FAILED / an error) and start by itself when there is room.
+    /// 23 Oct: "busy" (429 processing_concurrency_limit: the user already has as many cuts being made as allowed) must
+    /// show QUEUED -- never FAILED or an error -- and the cut must start by itself. The app is told "busy" for the
+    /// first starts (-CutSellFakeBusy; Retry asks 3 times per round, so 4 = two rounds) and asks again every 5 s.
     func testBusyStaysQueued() throws {
-        launchApp(fresh: true)
-        for n in 1...3 {
-            if n > 1 { element("tab_create").tap(); pause(1.5) }
-            // A different video each time (the same file being uploaded already would not start a second cut).
-            guard pickAndCreate(mode: "single", count: 1, first: n - 1) else { return }
-            let cont = element("continueInBackground")
-            guard cont.waitForExistence(timeout: 45) else {
-                check(false, "Processing screen for single \(n)")
-                shot("busy_no_processing_\(n)")
-                return
+        launchApp(fresh: true, extra: ["-CutSellFakeBusy", "4", "-CutSellSlotWait", "5"])
+        guard pickAndCreate(mode: "single", count: 1) else { return }
+        let cont = element("continueInBackground")
+        check(cont.waitForExistence(timeout: 45), "Processing screen")
+        var sawQueuedText = false
+        for _ in 0..<40 {
+            if app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Queued'")).firstMatch.exists {
+                sawQueuedText = true; shot("busy_processing_screen"); break
             }
-            log("single \(n) sent")
-            cont.tap()
-            pause(1)
+            pause(0.5)
         }
+        log("Processing screen said Queued: \(sawQueuedText)")
+        if cont.exists { cont.tap(); pause(1) }
         openEdits()
-        var seenQueuedAfterStart = false, failed = "", last = ""
-        let deadline = Date().addingTimeInterval(15 * 60)
+        var seenQueued = false, failed = "", last = ""
+        let deadline = Date().addingTimeInterval(8 * 60)
         while Date() < deadline {
             let rows = rowStatuses()
             let now = rows.joined(separator: ", ")
             if now != last { last = now; log("busy rows: [\(now)]"); shot("busy_rows") }
-            if rows.contains("QUEUED") && rows.filter({ $0.hasPrefix("PROCESSING") }).count >= 2 { seenQueuedAfterStart = true }
-            if let bad = rows.first(where: { $0 == "FAILED" }) { failed = bad; shot("busy_failed") }
+            if rows.contains("QUEUED") { seenQueued = true }
+            if rows.contains("FAILED") { failed = "FAILED"; shot("busy_failed") }
             if !element("editsFilterProcessing").exists { break }
             if !element("editsProcessingList").exists, element("editsFilterProcessing").isHittable {
                 element("editsFilterProcessing").tap()
             }
-            pause(2)
+            pause(1)
         }
-        log("a video waited as QUEUED while two were processing: \(seenQueuedAfterStart)")
+        check(sawQueuedText || seenQueued, "busy shows Queued")
         check(failed.isEmpty, "busy is never FAILED", failed)
-        check(!element("editsFilterProcessing").exists, "all three cuts finished")
+        check(!element("editsFilterProcessing").exists, "the cut started by itself and finished")
         log("FAILURES: \(failures.isEmpty ? "none" : failures.joined(separator: " | "))")
     }
 
