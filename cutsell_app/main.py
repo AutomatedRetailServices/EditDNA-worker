@@ -22,6 +22,7 @@ from cutsell_app.notification_routes import router as notification_router
 from cutsell_app.overlay_routes import router as overlay_router
 from cutsell_app.pending_review_routes import router as pending_review_router
 from cutsell_app.project_routes import router as project_router
+from cutsell_app.push_routes import router as push_router
 from cutsell_app.render_version_routes import router as render_version_router
 from cutsell_app.text_routes import router as text_router
 from cutsell_app.timeline_routes import router as timeline_router
@@ -63,6 +64,7 @@ from cutsell_worker.uploads import (
 app = FastAPI(title="CutSell API", version="0.1.0")
 app.add_middleware(AuthScopeMiddleware)
 app.include_router(auth_router)
+app.include_router(push_router)
 app.include_router(multipart_router)
 app.include_router(text_router)
 app.include_router(overlay_router)
@@ -396,8 +398,9 @@ def submit_flow_b(payload: FlowBSubmitRequest):
 @app.get("/v1/capabilities")
 def capabilities():
     """What this server can do (the app checks before using a newer flow; an older server answers 404)."""
+    from cutsell_worker import push
     return {"audio_first": True, "video_ready": True, "idempotent_multipart_complete": True, "mix": True,
-            "plan_week": True}
+            "plan_week": True, "push": push.active()}
 
 
 class VideoReadyRequest(BaseModel):

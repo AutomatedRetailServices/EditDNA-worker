@@ -515,6 +515,17 @@ def _safe_notify(*, user_id: str, project_id: str, kind: str, payload: dict | No
         return {"status": "degraded", "reason": exc.__class__.__name__}
 
 
+def _safe_push(request, *, ok: bool, error: str = "") -> dict:
+    """23 Oct: the iPhone push (Single / Combine: one per cut; Bulk: one when the whole send is done). Never raises."""
+    try:
+        from . import push
+        push.mark_configured()
+        return push.cut_finished(user_id=request.user_id, project_id=request.project_id, sources=request.sources,
+                                 ok=ok, error=error)
+    except Exception as exc:
+        return {"sent": 0, "reason": exc.__class__.__name__}
+
+
 def run_flow_b_job(payload: dict) -> dict:
     """Run the CutSell Flow B brain inside the RunPod RQ worker.
 
@@ -702,6 +713,7 @@ def run_flow_b_job(payload: dict) -> dict:
                 kind="draft_ready",
                 payload={"job_id": job_id, "selected_count": len(serialized["draft"].get("selected") or [])},
             )
+            serialized["push"] = _safe_push(request, ok=True)
             outcome = "draft_ready"
             # Brand / product (Claude Haiku 5.5): AFTER the cut is saved and announced, never able to change or
             # fail it. The photo step reads the original video when it is here (not for a voice-only source).
@@ -753,6 +765,7 @@ def run_flow_b_job(payload: dict) -> dict:
             kind="processing_failed",
             payload=error_payload,
         )
+        _safe_push(request, ok=False, error=error_code)
         if job is not None:
             job.meta["stage"] = "failed"
             job.meta["error_code"] = error_code

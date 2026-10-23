@@ -420,6 +420,13 @@ def _announce(user_id, record, deps):
     except Exception:
         pass
     try:
+        from . import push      # 23 Oct: one iPhone push for the whole Mix (also with CutSell closed)
+        push.mark_configured()
+        push.mix_finished(user_id=user_id, mix_id=record["mix_id"], videos=len(record["combos"]),
+                          project_id=record["combos"][0]["project_id"])
+    except Exception:
+        pass
+    try:
         from .usage_limits import record_processing_minutes
         clips = record.get("clips") or {}
         record_processing_minutes(user_id=user_id, project_id=record["mix_id"],
