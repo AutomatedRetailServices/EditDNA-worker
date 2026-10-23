@@ -116,10 +116,23 @@ def test_old_bucket_uri_is_read_from_amazon(amazon, tmp_path):
     r2 = FakeClient("r2")
     out = storage.download_source(f"s3://{OLD}/{SCOPE}old.mp4", str(tmp_path / "a"), client=r2)
     assert Path(out).read_text() == f"amazon:{OLD}/{SCOPE}old.mp4"
-    assert r2.calls == []
+    # 22 Oct: R2 is asked first (one HEAD, same key, current bucket); not copied there -> Amazon, as before
+    assert r2.calls == [("head_object", CURRENT, f"{SCOPE}old.mp4")]
     assert amazon.built[0].endpoint_url == "https://s3.us-east-2.amazonaws.com"
     url = uploads.create_presigned_source_download(f"s3://{OLD}/{SCOPE}old.mp4", project_id="p", user_id="u", client=r2)
-    assert url["url"] == f"https://amazon/{OLD}/{SCOPE}old.mp4" and r2.calls == []
+    assert url["url"] == f"https://amazon/{OLD}/{SCOPE}old.mp4"
+    assert all(call[0] == "head_object" and call[1] == CURRENT for call in r2.calls)
+
+
+def test_old_bucket_uri_copied_to_r2_is_read_from_r2(amazon, tmp_path):
+    """22 Oct (PO): her old videos were copied to R2 under the same key: the old address now reads R2 (Amazon stays
+    the 30-day backup, never asked)."""
+    r2 = FakeClient("r2", objects={(CURRENT, f"{SCOPE}old.mp4")})
+    out = storage.download_source(f"s3://{OLD}/{SCOPE}old.mp4", str(tmp_path / "a"), client=r2)
+    assert Path(out).read_text() == f"r2:{CURRENT}/{SCOPE}old.mp4"
+    assert storage_routing.presigned_get(OLD, f"{SCOPE}old.mp4", expires_in=60, client=r2) == f"https://r2/{CURRENT}/{SCOPE}old.mp4"
+    assert storage_routing.head(OLD, f"{SCOPE}old.mp4", client=r2)["from"] == "r2"
+    assert amazon.built == [] or all(not getattr(c, "calls", []) for c in amazon.built)
 
 
 def test_current_bucket_miss_falls_back_to_amazon(amazon, tmp_path):
