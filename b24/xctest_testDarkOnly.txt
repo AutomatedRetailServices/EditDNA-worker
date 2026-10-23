@@ -1,0 +1,6 @@
+B24UI    27.2 PASS dark: Preferences has no Appearance
+B24UI    38.7 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testDarkOnly]' passed (39.258 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-23 01:46:45.581.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-23 01:46:45.581.
+Test Suite 'Selected tests' passed at 2026-10-23 01:46:45.581.

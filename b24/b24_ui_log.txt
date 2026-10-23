@@ -1,0 +1,16 @@
+B24UI    27.2 PASS dark: Preferences has no Appearance
+B24UI    38.7 FAILURES: none
+B24UI    27.9 PASS Storage page
+B24UI    28.0 total: 0 MB
+B24UI    32.2 PASS space freed · Freed 0 MB
+B24UI    32.4 FAILURES: none
+B24UI    19.2 Photos access allowed
+B24UI    20.6 gallery CTA: Create 1 cut
+B24UI    76.3 PASS the cut is ready
+B24UI    84.2 PASS editor open
+B24UI    92.9 quality menu: ["4K Ultra HD", "Your video was recorded in 1080p", "1080p HD", "Export quality: 1080p"]
+B24UI    97.3 PASS export settings open
+B24UI    99.8 detected: 1080x1920 30fps H.264 originals:true · hint: Your video was recorded in 1080p. · estimate: ≈ 9 MB
+B24UI    99.9 PASS 4K greyed out for a 1080p original
+B24UI   487.3 PASS exported on the iPhone and saved to Photos · 387 s
+B24UI   492.0 PASS export settings again
