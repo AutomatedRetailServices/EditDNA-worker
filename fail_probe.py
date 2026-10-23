@@ -1,8 +1,7 @@
-"""Prompt-cache test (22 Oct): cut QA videos with the engine code of feat/engine-cache-all in an ephemeral Modal run
-(nothing deployed; nothing written to the app's storage or Redis). Per video: tokens, cost with the cache and the same
-tokens without it. cache_plan.json says which videos and which cache lifetime. Report encrypted."""
+"""Diagnosis (PO 23 Oct): why the same video gets very different cuts run to run. Each video is heard ONCE (same words);
+then the engine runs N times with the normal API. Every step's answer is kept to see where the runs part ways.
+Report encrypted. Nothing written to the app's storage or Redis."""
 import json
-import os
 import time
 
 import modal
@@ -17,69 +16,48 @@ image = (
 )
 
 
-PROGRESS = modal.Dict.from_name("cutsell-cache-probe-progress", create_if_missing=True)
-
-
-def _mark(stage):
-    try:
-        PROGRESS["stage"] = f"{time.strftime('%H:%M:%S', time.gmtime())} {stage}"
-    except Exception:
-        pass
-
-
-@app.function(image=image, secrets=[secret], timeout=3000, cpu=2.0, memory=4096)
-def cut(key: str, ttl: str, cache_on: bool, batch: bool = False):
+@app.function(image=image, secrets=[secret], timeout=600, cpu=2.0, memory=4096)
+def hear(key: str):
     import tempfile
     from pathlib import Path
     from cutsell_worker import storage_routing as sr
     from cutsell_worker.media_probe import probe_media
-    from cutsell_worker.simple_engine import asr, llm, process
-    _mark('start')
+    from cutsell_worker.simple_engine import asr
     fb = sr.fallback_storage()
     client = sr._make_fallback_client(fb)
-    started = time.time()
     with tempfile.TemporaryDirectory() as d:
         path = str(Path(d) / "v.mp4")
         client.download_file(fb.bucket, key, path)
-        _mark('downloaded')
         duration = float(probe_media(path).duration_sec)
-        t_dl = time.time() - started
         heard = asr.transcribe_words(asr.extract_audio(path, str(Path(d) / "a.mp3")))
-        t_asr = time.time() - started
-        words = [w for w in heard["words"] if float(w["e"]) > float(w["s"])]
-        _mark(f'heard {len(words)} words')
-        t0 = time.time()
-        with llm.cache_scope(cache_on, ttl=ttl), llm.batch_scope(batch):
-            out = process(words, duration, path, video_path=None, scene_cut_list=[])
-            report = llm.cache_report(out["usage"], ttl=ttl)
-        _mark('engine done')
-        calls = [{k: u.get(k) for k in ("step", "input_tokens", "output_tokens", "cache_read_input_tokens",
-                                        "cache_creation_input_tokens", "cache_creation", "cache_ttl", "batch", "batch_wait_s", "batch_fallback")} for u in out["usage"]]
-    return {"key": key, "ttl": ttl, "cache_on": cache_on, "seconds_long": round(duration, 1), "words": len(words),
-            "started_utc": time.strftime("%H:%M:%S", time.gmtime(started)), "engine_s": round(time.time() - t0, 1),
-            "cut_s": out.get("cut_duration"), "total_s": round(time.time() - started, 1), "splits": [(round(x["start"], 2), round(x["end"], 2), x["visible"]) for x in out["splits"]], "t_download": round(t_dl, 1), "t_asr": round(t_asr, 1), "report": report, "calls": calls}
+    return {"key": key, "duration": duration, "words": [w for w in heard["words"] if float(w["e"]) > float(w["s"])]}
+
+
+@app.function(image=image, secrets=[secret], timeout=600, cpu=1.0, memory=2048)
+def run_once(heard: dict, run: int):
+    from cutsell_worker.simple_engine import engine, llm
+    answers = []
+
+    def call(prompt, **kw):
+        text, usage = llm.call_anthropic(prompt, **kw)
+        answers.append({"step": usage.get("step"), "text": text[-3000:], "out_tokens": usage.get("output_tokens"),
+                        "thinking_blocks": usage.get("thinking_blocks")})
+        return text, usage
+
+    with llm.cache_scope(True, ttl="1h"):
+        out = engine.process(heard["words"], heard["duration"], "/dev/null", video_path=None, scene_cut_list=[], llm=call)
+    report = llm.cache_report(out["usage"])
+    return {"key": heard["key"], "run": run, "cut_s": out["cut_duration"], "passes": out.get("passes"),
+            "kept": [(round(x["start"], 2), round(x["end"], 2)) for x in out["splits"] if x["visible"]],
+            "usd": report["usd"], "answers": answers, "log": str(out.get("log"))[:3000]}
 
 
 @app.local_entrypoint()
 def main():
-    PLAN = json.load(open("cache_plan.json"))   # read here only: the containers don't have the file
-    rows = []
-    if PLAN.get("parallel"):
-        args = [(k, PLAN.get("ttl", "1h"), PLAN.get("cache_on", True), PLAN.get("batch", False)) for k in PLAN["videos"]]
-        for key, res in zip(PLAN["videos"], cut.starmap(args, return_exceptions=True)):
-            rows.append(res if isinstance(res, dict) else {"key": key, "error": str(res)[:300]})
-        PLAN["videos"] = []
-        with open("engine_check.json", "w") as f:
-            json.dump({"label": PLAN.get("label"), "rows": rows}, f, indent=1, default=str)
-    for key in PLAN["videos"]:
-        try:
-            rows.append(cut.remote(key, PLAN.get("ttl", "1h"), PLAN.get("cache_on", True), PLAN.get("batch", False)))
-        except Exception as e:
-            stage = None
-            try:
-                stage = PROGRESS.get("stage")
-            except Exception:
-                pass
-            rows.append({"key": key, "error": f"{e.__class__.__name__}: {str(e)[:300]}", "last_stage": stage})
-        with open("engine_check.json", "w") as f:   # written after every video (a time limit keeps the rest)
-            json.dump({"label": PLAN.get("label"), "rows": rows}, f, indent=1, default=str)
+    plan = json.load(open("cache_plan.json"))
+    heard = list(hear.map(plan["videos"]))
+    args = [(h, r) for h in heard for r in range(plan.get("runs", 5))]
+    rows = list(run_once.starmap(args, return_exceptions=True))
+    rows = [r if isinstance(r, dict) else {"error": str(r)[:300]} for r in rows]
+    with open("engine_check.json", "w") as f:
+        json.dump({"label": plan.get("label"), "words": {h["key"]: len(h["words"]) for h in heard}, "rows": rows}, f, default=str)
