@@ -27,9 +27,7 @@ enum DesignScreenshots {
     static let whiteIndigo = [
         "editor_v4_base", "editor_v4_caption_edit", "editor_v4_cap_highlight", "editor_v4_cap_box", "editor_v4_cap_fonts",
         "editor_v4_overlay_gallery", "editor_v4_overlay_selected", "editor_v4_vo_record", "editor_v4_vo_review",
-        "hub", "processing", "opening", "edits_processing", "processing_failed", "err_too_long", "err_too_large",
-        "queued", "export_failed", "plan_attention_bulk", "plan_attention_plan",
-        "you", "plan", "edits",
+        "plan_my_week", "plan_week", "plan_today", "export_where", "export_saved", "export_schedule", "plan",
     ]
     /// The full White Indigo review set (main screens).
     static let whiteIndigoMain = [
@@ -85,6 +83,15 @@ struct DesignScreenshotRoot: View {
             }
         case "export_failed":
             ExportFailedPreview()
+        case "export_where", "export_saved", "export_schedule":
+            ExportPreview(screen: screen)
+        case "plan_my_week":
+            NavigationStack { PlanMyWeekView(onBuilt: {}) }
+        case "plan_my_week_between":
+            NavigationStack { PlanMyWeekView(onBuilt: {}) }
+        case "plan_week_sheet":
+            NavigationStack { PlanWeekView(onNewMix: {}, onOpenDay: { _ in }) }
+                .task { try? await PlanWeekStore.shared.build(session: nil) }
         case "plan_attention_bulk", "plan_attention_plan":
             PlanAttentionPreview(detailed: screen == "plan_attention_plan")
         case "processing_failed":
@@ -118,7 +125,7 @@ struct DesignScreenshotRoot: View {
         case "plan_goal":
             NavigationStack { PlanGoalView(onBuilt: {}) }
         case "plan_week":
-            NavigationStack { PlanWeekView(onNewMix: {}, onSettings: {}, onOpenDay: { _ in }) }
+            NavigationStack { PlanWeekView(onNewMix: {}, onOpenDay: { _ in }) }
                 .task { try? await PlanWeekStore.shared.build(session: nil) }
         case "plan_today":
             NavigationStack { PlanDayView(day: PlanDay.iso.string(from: Date())) }
@@ -258,6 +265,32 @@ private struct ProductDetailPreview: View {
             await CatalogStore.shared.refresh(session: nil, projects: appState.projects)
             id = CatalogStore.shared.allProducts.first?.product.productID
         }
+    }
+}
+
+/// Figma 1259:3101 / 1259:3199: the Export sheet (WHERE TO?), "Saved to Photos", and the scheduling sheet, which goes on
+/// to This week when "Schedule" is tapped (the probe walks it).
+private struct ExportPreview: View {
+    let screen: String
+    @StateObject private var holder = SampleEditorHolder()
+    @StateObject private var exporter = DeviceExport()
+    @State private var settings = ExportSettings()
+    @State private var scheduled = false
+    @ObservedObject private var router = AppRouter.shared
+
+    var body: some View {
+        Group {
+            if scheduled {
+                NavigationStack { PlanWeekView(onNewMix: {}, onOpenDay: { _ in }) }
+            } else if let model = holder.model {
+                ExportSettingsView(model: model, exporter: exporter, settings: $settings, projectID: "sample", session: nil,
+                                   onServerExport: {},
+                                   previewDestination: screen == "export_schedule" ? .plan : .photos)
+                    .onAppear { if screen != "export_where" { exporter.previewDone() } }
+                    .onChange(of: router.pending) { _, value in if value == .thisWeek { router.pending = nil; scheduled = true } }
+            }
+        }
+        .onAppear { holder.build(preset: "classic", font: "montserrat", overlays: false) }
     }
 }
 

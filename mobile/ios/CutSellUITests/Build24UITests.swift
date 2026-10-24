@@ -1360,6 +1360,107 @@ final class Build24UITests: XCTestCase {
         XCTAssertTrue(failures.isEmpty, failures.joined(separator: " | "))
     }
 
+    /// Build 47 (Figma 1258:3101 / 1257:3329): Plan my week in one screen, This week's video sheet, the reminder.
+    func testWIPlanSimple() throws {
+        launchApp(fresh: true, extra: ["-CutSellPlanMock", "-CutSellProjectsMock", "-CutSellCatalogMock", "-CutSellPlanTestReminder"])
+        element("tab_plan").tap()
+        let card = element("planMyWeek")
+        check(card.waitForExistence(timeout: 20), "Plan · Plan my week ›")
+        card.tap()
+        check(element("planMyWeekSimple").waitForExistence(timeout: 10), "Plan my week opens the one-screen picker")
+        let tiles = app.descendants(matching: .any).matching(identifier: "pmwVideo")
+        check(wait(10) { tiles.count >= 6 }, "Ready videos in the grid", "\(tiles.count)")
+        check(!element("pmwBuild").isEnabled, "Build plan is off with no video")
+        for index in [0, 3, 1, 4, 2, 5] { tiles.element(boundBy: index).tap(); pause(0.4) }
+        check(tiles.element(boundBy: 0).value as? String == "1" && tiles.element(boundBy: 3).value as? String == "2"
+              && tiles.element(boundBy: 5).value as? String == "6", "numbers follow the taps (1–6)",
+              "\(tiles.element(boundBy: 0).value ?? "") \(tiles.element(boundBy: 3).value ?? "") \(tiles.element(boundBy: 5).value ?? "")")
+        log("button: \(element("pmwBuild").label) · \(element("pmwSummary").label)")
+        shot("pmw_six_tapped")
+        // Tap again: it leaves and the numbers move up, then back.
+        tiles.element(boundBy: 3).tap(); pause(0.4)
+        check(tiles.element(boundBy: 1).value as? String == "2", "untapping renumbers", "\(tiles.element(boundBy: 1).value ?? "")")
+        tiles.element(boundBy: 3).tap(); pause(0.4)
+        element("pmwSetting_between").tap()
+        check(element("betweenPreview").waitForExistence(timeout: 5), "Between selector")
+        log("between: \(element("betweenPreview").label)")
+        pause(1); shot("pmw_between")
+        element("settingDone").tap(); pause(1)
+        element("pmwBuild").tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        if springboard.buttons["Allow"].waitForExistence(timeout: 5) { springboard.buttons["Allow"].tap() }
+        let subtitle = element("weekSubtitle")
+        check(subtitle.waitForExistence(timeout: 15), "Build plan opens This week", subtitle.label)
+        check(subtitle.label.hasPrefix("6 videos"), "the 6 videos are planned", subtitle.label)
+        pause(1); shot("pmw_this_week")
+        // A video of the calendar → Swap video · Change day or time · Remove from plan.
+        let slots = app.descendants(matching: .any).matching(identifier: "weekSlot")
+        slots.element(boundBy: 1).tap()
+        check(element("slotSheet").waitForExistence(timeout: 5), "tapping a video opens its sheet")
+        check(element("slotSwap").exists && element("slotChange").exists && element("slotRemove").exists, "Swap · Change · Remove")
+        pause(1); shot("week_video_sheet")
+        element("slotSwap").tap()
+        check(element("swapSheet").waitForExistence(timeout: 5), "Swap video lists other videos")
+        let options = app.descendants(matching: .any).matching(identifier: "swapOption")
+        if options.count > 0 {
+            options.element(boundBy: 0).tap(); pause(1.5)
+            check(element("weekSubtitle").label.hasPrefix("6 videos"), "after the swap: still 6 videos", element("weekSubtitle").label)
+        }
+        shot("week_after_swap")
+        // Back on Plan: "See this week ›" next to "Plan my week ›".
+        element("tab_plan").tap(); pause(1); element("tab_plan").tap(); pause(1)
+        check(element("planSeeWeek").waitForExistence(timeout: 5) && element("planMyWeek").exists, "Plan: See this week › and Plan my week ›")
+        shot("plan_see_this_week")
+        element("planSeeWeek").tap()
+        check(element("weekSubtitle").waitForExistence(timeout: 5), "See this week › opens This week")
+        // A day, then the reminder ("Time to post: … on TikTok").
+        let open = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'weekDayOpen_'")).firstMatch
+        open.tap()
+        check(element("dayShare").waitForExistence(timeout: 10), "the day: Share to …", element("dayShare").label)
+        shot("day_share")
+        XCUIDevice.shared.press(.home)
+        let banner = springboard.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Time to post'")).firstMatch
+        let shown = banner.waitForExistence(timeout: 45)
+        check(shown, "the reminder arrives", shown ? banner.label : "")
+        pause(0.5); shot("notification")
+        if shown { banner.tap() } else { app.activate() }
+        check(element("dayTitle").waitForExistence(timeout: 15), "the reminder opens its video")
+        shot("notification_opened")
+        done()
+    }
+
+    /// Build 47 (Figma 1259:3101 / 1259:3199): Export · WHERE TO?, Saved to Photos, the scheduling sheet → This week.
+    func testWIExportWhereTo() throws {
+        func screen(_ name: String) {
+            app = XCUIApplication()
+            app.launchArguments = ["-CutSellScreen", name, "-CutSellPlanMock", "-CutSellCatalogMock"]
+            app.launch()
+            pause(3)
+        }
+        screen("export_where")
+        check(element("exportToPhotos").waitForExistence(timeout: 15) && element("exportToPlan").exists, "WHERE TO? Save to Photos · Add to Plan")
+        shot("export_where")
+        screen("export_saved")
+        check(element("exportSaved").waitForExistence(timeout: 15) && element("exportShare").exists && element("exportDone").exists,
+              "Saved to Photos · Share · Done")
+        shot("export_saved")
+        screen("export_schedule")
+        check(element("scheduleSheet").waitForExistence(timeout: 15), "the scheduling sheet")
+        shot("export_schedule")
+        element("scheduleNetwork_Instagram").tap()
+        let days = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'scheduleDay_'"))
+        if days.count > 2 { days.element(boundBy: 2).tap() }
+        element("scheduleTime_19:00").tap()
+        log("button: \(element("scheduleSave").label)")
+        shot("export_schedule_chosen")
+        element("scheduleSave").tap()
+        let subtitle = element("weekSubtitle")
+        check(subtitle.waitForExistence(timeout: 15), "Schedule → This week", subtitle.label)
+        check(app.staticTexts["7:00 PM"].exists, "the video at 7:00 PM in This week")
+        pause(1); shot("export_scheduled_in_week")
+        done()
+    }
+
     /// PO 24 Oct: the whole White Indigo Plan path, as she walks it (Figma 1209:2 / 70 / 170).
     func testWIPlanPath() throws {
         // 1) From the Create tile "Plan my week" (no plan yet → Plan my week).
@@ -1395,7 +1496,7 @@ final class Build24UITests: XCTestCase {
         pause(1); shot("wi_path_3_week")
 
         // 4) Tap a day → Today.
-        let firstDay = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'weekDay_'")).firstMatch
+        let firstDay = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'weekDayOpen_'")).firstMatch
         check(firstDay.waitForExistence(timeout: 5), "a day in This week")
         firstDay.tap()
         check(element("dayTitle").waitForExistence(timeout: 10), "a day opens Today")

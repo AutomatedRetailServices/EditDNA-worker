@@ -260,6 +260,9 @@ final class DeviceExport: ObservableObject {
     func reset() { if !running { phase = .idle } }
 
     #if DEBUG
+    /// Design screenshots only: the export finished (Saved to Photos / the scheduling sheet).
+    func previewDone() { phase = .done(URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("preview.mp4")) }
+
     /// Design screenshots only: the "Export failed" screen at a given step and %.
     func previewFailed(step: Int, progress: Double) {
         phase = .exporting(progress)

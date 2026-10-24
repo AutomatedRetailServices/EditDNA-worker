@@ -434,6 +434,7 @@ struct EditorV4View: View {
                     sheet = .export
                     if !model.isExporting { Task { await model.export() } }
                 }
+                .environmentObject(appState)
             }
             .task(id: model.selectedClips.count) {
                 // 4K Ultra HD is chosen by default when the original is 4K; 1080p HD otherwise.

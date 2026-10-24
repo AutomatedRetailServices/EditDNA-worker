@@ -292,6 +292,106 @@ final class PlanWeekStore: ObservableObject {
         await refresh(session: session)
     }
 
+    // MARK: Plan my week · SIMPLE (Figma 1258:3101): her own videos, in her order
+
+    /// Probe library (the same nine videos as the probe's plan).
+    static let mockLibrary: [(brand: String, product: String, productID: String, source: String, mix: String?)] = [
+        ("CeraVe", "Hydrating Cleanser", "p1", "single", nil), ("Glow Recipe", "Watermelon Toner", "p5", "mix", "H1 · B1 · C1"),
+        ("Dior", "Lip Glow", "p2", "combine", nil), ("Glow Recipe", "Watermelon Toner", "p5", "mix", "H2 · B2 · C2"),
+        ("Old Navy", "Denim Jacket", "p3", "bulk", nil), ("Glow Recipe", "Watermelon Toner", "p5", "mix", "H1 · B2 · C1"),
+        ("Rhino", "Power Bank", "p4", "bulk", nil), ("Glow Recipe", "Watermelon Toner", "p5", "mix", "H2 · B1 · C2"),
+        ("CeraVe", "Moisturizing Cream", "p6", "single", nil)]
+
+    /// Her Ready videos that can be planned (not personal, not posted), newest first, with brand and product.
+    func plannable(projects: [Project], catalog: CatalogStore) -> [PlanPick] {
+        if mock {
+            let posted = Set(mockSlots.filter { $0.postedAt != nil }.map(\.projectID))
+            return Self.mockLibrary.enumerated().compactMap { k, v in
+                posted.contains("plan_\(k)") ? nil : PlanPick(projectID: "plan_\(k)", brand: v.brand, product: v.product)
+            }
+        }
+        let personal = Set(state?.personal ?? [])
+        let posted = Set((state?.week?.slots ?? []).filter { $0.postedAt != nil }.map(\.projectID))
+        let products = Dictionary(catalog.allProducts.map { ($0.product.productID, ($0.brand.name, $0.product.name)) },
+                                  uniquingKeysWith: { a, _ in a })
+        let links = catalog.overview.videos ?? [:]
+        return projects.filter { $0.state == "draft_ready" && !personal.contains($0.projectID) && !posted.contains($0.projectID) }
+            .map { project in
+                let found = links[project.projectID]?.productID.flatMap { products[$0] }
+                return PlanPick(projectID: project.projectID, brand: found?.0, product: found?.1)
+            }
+    }
+
+    /// Puts each video on its day and time (pinned), keeps what is already planned, saves her times / days and builds
+    /// the week again (the server keeps every pinned slot and adds nothing: count = the videos planned).
+    func schedule(_ items: [(projectID: String, date: String, time: String)], times: [String], days: [Int], start: String,
+                  session: CutSellSession?) async throws {
+        let today = state?.today ?? PlanDay.iso.string(from: Date())
+        let open = (state?.week?.slots ?? []).filter { $0.postedAt == nil && $0.date >= today }
+        if mock {
+            for item in items { mockAdd(item.projectID, date: item.date, time: item.time) }
+            mockPrefs.times = Array(times.prefix(8)); mockPrefs.days = days; mockPrefs.start = start
+            mockBuilt = true
+            state = mockState(); PostReminders.shared.schedule(state); return
+        }
+        guard let session else { throw APIError.invalidResponse }
+        struct Move: Encodable { let user_id: String; let project_id: String; let date: String; let time: String }
+        // What is already planned stays where it is (pinned), then her new videos.
+        for slot in open where slot.pinned != true && !items.contains(where: { $0.projectID == slot.projectID }) {
+            let _: PlanState = try await APIClient.shared.request("/v1/plan/slots/move", method: "POST",
+                body: Move(user_id: session.userID, project_id: slot.projectID, date: slot.date, time: slot.time))
+        }
+        for item in items {
+            let _: PlanState = try await APIClient.shared.request("/v1/plan/slots/move", method: "POST",
+                body: Move(user_id: session.userID, project_id: item.projectID, date: item.date, time: item.time))
+        }
+        var prefs = state?.prefs ?? PlanPrefs(perDay: 1, days: days, reminders: [], tz: nil)
+        prefs.times = Array(times.prefix(8))
+        prefs.days = days
+        prefs.start = start
+        prefs.count = Set(open.map(\.projectID)).union(items.map(\.projectID)).count
+        if prefs.remind == nil { prefs.remind = true }
+        try await savePrefs(prefs, session: session)
+        try await build(session: session)
+        CutSellDiagnostics.log("plan_simple_built", ["videos": String(items.count)])
+    }
+
+    /// Reminders on / off (This week › Settings).
+    func setReminders(_ on: Bool, session: CutSellSession?) async throws {
+        guard var prefs = state?.prefs else { return }
+        prefs.remind = on
+        try await savePrefs(prefs, session: session)
+        PostReminders.shared.schedule(state)
+    }
+
+    /// One video on a day and time (Export › Add to Plan · Swap video): pinned; the week is made if there is none.
+    func add(projectID: String, date: String, time: String, replacing old: String? = nil, session: CutSellSession?) async throws {
+        if mock {
+            if let old { mockSlots.removeAll { $0.projectID == old } }
+            mockAdd(projectID, date: date, time: time); mockBuilt = true
+            if mockPrefs.times == nil { mockPrefs.times = [time] }
+            state = mockState(); PostReminders.shared.schedule(state); return
+        }
+        guard let session else { throw APIError.invalidResponse }
+        if let old {
+            struct Body: Encodable { let user_id: String; let project_id: String }
+            state = try await APIClient.shared.request("/v1/plan/slots/remove", method: "POST", body: Body(user_id: session.userID, project_id: old))
+        }
+        try await schedule([(projectID, date, time)], times: state?.prefs.times ?? [time],
+                           days: state?.prefs.days ?? Array(0..<7), start: state?.prefs.start ?? date, session: session)
+    }
+
+    private func mockAdd(_ projectID: String, date: String, time: String) {
+        let k = Int(projectID.replacingOccurrences(of: "plan_", with: "")) ?? 0
+        let v = Self.mockLibrary[min(max(0, k), Self.mockLibrary.count - 1)]
+        mockSlots.removeAll { $0.projectID == projectID }
+        mockSlots.append(PlanSlot(date: date, time: time, projectID: projectID, pinned: true, product: v.product, brand: v.brand,
+                                  productID: v.productID, mixCode: v.mix, source: v.source, postedAt: nil,
+                                  caption: "So good on my skin ✨ #\(v.brand.lowercased().filter(\.isLetter)) #tiktokshop",
+                                  captionSource: "ai", durationSec: 31 + Double(k)))
+        mockSlots.sort { ($0.date, $0.time) < ($1.date, $1.time) }
+    }
+
     // MARK: Probe-only plan (videos of the four origins, built like the server: no product twice in a row)
 
     private func mockState() -> PlanState {
@@ -527,7 +627,7 @@ final class PostReminders: NSObject, UNUserNotificationCenterDelegate {
                 guard parts.count == 2, let when = Calendar.current.date(bySettingHour: parts[0], minute: parts[1], second: 0, of: day),
                       when > Date() else { continue }
                 let content = UNMutableNotificationContent()
-                content.title = L10n.tr("Time to post: \(slot.product ?? L10n.tr("your video"))")
+                content.title = L10n.tr("Time to post: \(slot.product ?? L10n.tr("your video")) on \(PostNetwork.of(slot.projectID).rawValue)")
                 content.body = [slot.brand, L10n.tr("Caption and video are ready.")].compactMap { $0 }.joined(separator: " · ")
                 content.sound = .default
                 content.userInfo = ["plan_day": slot.date, "project_id": slot.projectID]
@@ -541,7 +641,7 @@ final class PostReminders: NSObject, UNUserNotificationCenterDelegate {
     /// Probe / "Test reminder": one reminder in a few seconds.
     func test(_ slot: PlanSlot, seconds: TimeInterval = 4) {
         let content = UNMutableNotificationContent()
-        content.title = "Time to post: \(slot.product ?? "your video")"
+        content.title = L10n.tr("Time to post: \(slot.product ?? "your video") on \(PostNetwork.of(slot.projectID).rawValue)")
         content.body = "Caption and video are ready."
         content.userInfo = ["plan_day": slot.date, "project_id": slot.projectID]
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: Self.prefix + "test",
@@ -951,7 +1051,8 @@ struct TimePickerSheet: View {
 
 struct PlanWeekView: View {
     let onNewMix: () -> Void
-    let onSettings: () -> Void
+    /// Unused (PO 24 Oct: Settings no longer opens Plan my week; it holds the reminders switch).
+    var onSettings: (() -> Void)? = nil
     /// One navigation path for the whole Plan tab (a reminder can open a day from anywhere).
     let onOpenDay: (String) -> Void
     @EnvironmentObject private var appState: AppState
@@ -959,6 +1060,9 @@ struct PlanWeekView: View {
     @ObservedObject private var store = PlanWeekStore.shared
     @ObservedObject private var thumbnails = ThumbnailStore.shared
     @State private var moving: PlanSlot?
+    @State private var acting: PlanSlot?
+    @State private var swapping: PlanSlot?
+    @State private var settingsOpen = false
 
     private var days: [String] { Array(Set((store.state?.week?.slots ?? []).map(\.date))).sorted() }
 
@@ -970,7 +1074,7 @@ struct PlanWeekView: View {
                     HStack {
                         PlanBackButton(title: "Plan") { dismiss() }
                         Spacer()
-                        Button(L10n.tr("Settings"), action: onSettings).font(CS.inter(14, .semibold)).foregroundStyle(CS.cyan)
+                        Button(L10n.tr("Settings")) { settingsOpen = true }.font(CS.inter(14, .semibold)).foregroundStyle(CS.accent)
                             .accessibilityIdentifier("weekSettings")
                     }
                     .padding(.top, 8)
@@ -1018,6 +1122,25 @@ struct PlanWeekView: View {
                 .presentationDetents([.height(420)])
                 .presentationBackground(CS.wiPage)
         }
+        .sheet(item: $acting) { slot in
+            SlotActionsSheet(slot: slot,
+                             onSwap: { acting = nil; DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { swapping = slot } },
+                             onChange: { acting = nil; DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { moving = slot } },
+                             onRemove: { acting = nil; Task { try? await store.remove(slot, session: appState.session) } })
+                .environmentObject(appState)
+                .presentationDetents([.height(400)])
+                .presentationBackground(CS.wiPage)
+        }
+        .sheet(item: $swapping) { slot in
+            SwapVideoSheet(slot: slot).environmentObject(appState)
+                .presentationDetents([.large])
+                .presentationBackground(CS.wiPage)
+        }
+        .sheet(isPresented: $settingsOpen) {
+            PlanWeekSettingsSheet().environmentObject(appState)
+                .presentationDetents([.height(260)])
+                .presentationBackground(CS.wiPage)
+        }
         .task { await store.refresh(session: appState.session) }
     }
 
@@ -1040,8 +1163,7 @@ struct PlanWeekView: View {
         let slots = (store.state?.week?.slots ?? []).filter { $0.date == day }
         let isToday = day == store.state?.today
         let allPosted = !slots.isEmpty && slots.allSatisfy { $0.postedAt != nil }
-        return Button { onOpenDay(day) } label: {
-            VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     Text(PlanDay.short(day)).font(CS.inter(14, .bold)).foregroundStyle(Color.ink)
                     if allPosted {
@@ -1053,6 +1175,10 @@ struct PlanWeekView: View {
                     }
                     Spacer()
                 }
+                .contentShape(Rectangle())
+                .onTapGesture { onOpenDay(day) }
+                .accessibilityAddTraits(.isButton)
+                .accessibilityIdentifier("weekDayOpen_\(day)")
                 if slots.count > 3 {                       // Goal v2: up to 8 times a day -> the day scrolls sideways
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(alignment: .top, spacing: 8) {
@@ -1071,8 +1197,6 @@ struct PlanWeekView: View {
             .background(PlanStyle.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(isToday ? CS.accent : PlanStyle.border, lineWidth: isToday ? 1.5 : 1))
-        }
-        .buttonStyle(.plain)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("weekDay_\(day)")
     }
@@ -1096,6 +1220,8 @@ struct PlanWeekView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
+        // Figma 1257:3329: tapping a video opens Swap video · Change day or time · Remove from plan.
+        .onTapGesture { acting = slot }
         .contextMenu {
             Button(L10n.tr("Move to another day or time")) { moving = slot }
             Button(L10n.tr("Remove from this week"), role: .destructive) { Task { try? await store.remove(slot, session: appState.session) } }
@@ -1282,7 +1408,7 @@ struct PlanDayView: View {
             // Figma 1209:170: one blue "Share to TikTok" (the video to Photos, the caption copied, TikTok opens), then
             // "Save to Photos" and "✓ Mark as posted".
             Button { Task { await postToTikTok(slot) } } label: {
-                Text(L10n.tr(exporter.progress[slot.projectID].map { "Preparing… \(Int($0 * 100)) %" } ?? "Share to TikTok"))
+                Text(L10n.tr(exporter.progress[slot.projectID].map { "Preparing… \(Int($0 * 100)) %" } ?? "Share to \(PostNetwork.of(slot.projectID).rawValue)"))
                     .font(CS.inter(16, .semibold)).foregroundStyle(Color(fixed: 0xFFFFFF))
                     .frame(maxWidth: .infinity).frame(height: 50)
                     .background(CS.accent, in: Capsule())
@@ -1342,6 +1468,20 @@ struct PlanDayView: View {
         do {
             let file = try await exporter.file(for: slot.projectID, session: appState.session)
             current = slot.projectID
+            let network = PostNetwork.of(slot.projectID)
+            if network != .tiktok {
+                // Instagram / Facebook: the video in Photos, the caption copied, their app opens (she posts it there).
+                let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+                guard status == .authorized || status == .limited else { notice = "Allow CutSell to add videos to Photos."; return }
+                try await PHPhotoLibrary.shared().performChanges { PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: file) }
+                UIPasteboard.general.string = slot.caption ?? ""
+                notice = "Caption copied · paste it in \(network.rawValue)"
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                for link in network.appURLs {
+                    if let url = URL(string: link), await UIApplication.shared.open(url) { break }
+                }
+                return
+            }
             await TikTokPoster.shared.post(video: file, caption: slot.caption, projectID: slot.projectID, onNotice: { notice = $0 }) {
                 try? await store.markPosted(slot, session: appState.session)
             }

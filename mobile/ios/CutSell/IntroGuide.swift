@@ -309,7 +309,7 @@ private enum IntroArt {
 @MainActor
 final class AppRouter: ObservableObject {
     static let shared = AppRouter()
-    enum Destination: String { case upload, mix, record, script, edits, products, plan, planWeek }
+    enum Destination: String { case upload, mix, record, script, edits, products, plan, planWeek, thisWeek }
     /// Set by a guide; MainTabView picks the tab, the screen that owns it opens the feature and clears it.
     @Published var pending: Destination?
     private init() {}
@@ -318,7 +318,7 @@ final class AppRouter: ObservableObject {
         switch pending {
         case .upload, .mix, .record, .script, nil: return .create
         case .edits, .products: return .edits
-        case .plan, .planWeek: return .plan
+        case .plan, .planWeek, .thisWeek: return .plan
         }
     }
 }

@@ -21,9 +21,10 @@ struct PlanView: View {
     enum PlanRoute: Hashable { case goal, week, day(String) }
 
     private func openFromGuide() {
-        guard router.pending == .planWeek else { return }
+        guard router.pending == .planWeek || router.pending == .thisWeek else { return }
+        let week = router.pending == .thisWeek
         router.pending = nil
-        path = week.hasWeek ? [.week] : [.goal]
+        path = week ? [.week] : [.goal]                // PO 24 Oct: "Plan my week" always opens Plan my week first
     }
 
     var body: some View {
@@ -33,9 +34,9 @@ struct PlanView: View {
                     Group {
                         switch route {
                         case .goal:
-                            PlanGoalView(onBuilt: { path = [.week] }).environmentObject(appState)
+                            PlanMyWeekView(onBuilt: { path = [.week] }).environmentObject(appState)
                         case .week:
-                            PlanWeekView(onNewMix: { showingMix = true }, onSettings: { path.append(.goal) },
+                            PlanWeekView(onNewMix: { showingMix = true }, onSettings: nil,
                                          onOpenDay: { path.append(.day($0)) }).environmentObject(appState)
                         case .day(let day):
                             PlanDayView(day: day).environmentObject(appState)
@@ -249,7 +250,7 @@ struct PlanView: View {
                 }
             }
             .padding(.top, 10)
-            Button { path = week.hasWeek ? [.week] : [.goal] } label: {
+            Button { path = [.goal] } label: {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(L10n.tr(cardTitle(todays: todays))).font(CS.inter(14, .semibold)).foregroundStyle(CS.wiInk)
                         .accessibilityIdentifier("planWeekCardTitle")
@@ -265,6 +266,13 @@ struct PlanView: View {
             .buttonStyle(.plain)
             .padding(.top, 12)
             .accessibilityIdentifier("planMyWeek")
+            if week.hasWeek {
+                // A plan is built: its own way to This week (Plan my week stays as it is).
+                Button(L10n.tr("See this week ›")) { path = [.week] }
+                    .font(CS.inter(13, .semibold)).foregroundStyle(CS.accent)
+                    .padding(.top, 10)
+                    .accessibilityIdentifier("planSeeWeek")
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("planThisWeek")
