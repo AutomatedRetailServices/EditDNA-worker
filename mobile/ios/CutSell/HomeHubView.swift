@@ -36,7 +36,7 @@ struct HomeHubView: View {
                         .padding(.top, 2)
 
                     // 2) Greeting, with room under the logo.
-                    Text(firstName.isEmpty ? L10n.tr("Hi 👋") : L10n.tr("Hi \(firstName) 👋"))
+                    Text(firstName.isEmpty ? L10n.tr("Hi there 👋") : L10n.tr("Hi \(firstName) 👋"))
                         .font(CS.inter(15, .medium))
                         .foregroundStyle(CS.wiSecondary)
                         .padding(.top, 32)
@@ -108,6 +108,9 @@ struct HomeHubView: View {
                 .padding(.bottom, 16)
             }
         }
+        .wiStatusBarCover()
+        // The account name for "Hi {name} 👋" (people who signed in before it was kept on this iPhone).
+        .task { if account.name.isEmpty { await account.refresh(session: appState.session) } }
         .safeAreaInset(edge: .bottom) { CSTabBar(current: .create, select: selectTab) }
         .task(id: recent.filter { Project.processingStates.contains($0.state) }.map(\.id)) {
             for project in recent where Project.processingStates.contains(project.state) {

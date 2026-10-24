@@ -11,6 +11,7 @@ struct PlanView: View {
     @ObservedObject private var mixes = MixCenter.shared
     @ObservedObject private var queue = ProcessingQueue.shared
     @ObservedObject private var thumbnails = ThumbnailStore.shared
+    @ObservedObject private var tracker = CutTracker.shared
     @State private var showingMix = false
     @ObservedObject private var week = PlanWeekStore.shared
     @State private var path: [PlanRoute] = []
@@ -27,7 +28,7 @@ struct PlanView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            home
+            home.wiStatusBarCover()
                 .navigationDestination(for: PlanRoute.self) { route in
                     Group {
                         switch route {
@@ -69,7 +70,12 @@ struct PlanView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     // White Indigo (Figma 1166:107): no Sales Mix / Bulk cards here (they are on Create).
                     WIHeader { EmptyView() }
-                    WIScreenTitle(title: "Plan", subtitle: "What’s in progress and what to post.").padding(.top, 2)
+                    WIScreenTitle(title: "Plan", subtitle: attention == nil ? "What’s in progress and what to post." : "Plan needs attention")
+                        .padding(.top, 2)
+                    if let attention {
+                        NeedsAttentionSection(summary: attention.summary, rows: attention.rows, onRetry: retry)
+                            .padding(.top, 16)
+                    }
 
                     HStack(alignment: .firstTextBaseline) {
                         Text(L10n.tr("In progress")).font(CS.sectionTitle).foregroundStyle(CS.wiInk)
@@ -128,6 +134,28 @@ struct PlanView: View {
             })
             .environmentObject(appState)
         }
+    }
+
+    /// Figma 1233:3243 / 1233:3354: the newest Bulk send where a video really failed (a video without a voice is not
+    /// a failure: it goes to Sales Mix from Edits).
+    private var attention: (summary: NeedsAttentionSummary, rows: [ProcessingQueue.Row])? {
+        let rows = queue.rows(projects: appState.projects, tracker: tracker)
+        for group in queue.bulkGroups.sorted(by: { $0.startedAt > $1.startedAt }) {
+            let mine = rows.filter { $0.group == group.id }
+            let failed = mine.contains { if case .failed(let why) = $0.state { return why != ProcessingQueue.noSpeech }; return false }
+            guard failed else { continue }
+            // Ready videos leave the list once the whole send is done: the send's size says how many are ready.
+            var summary = NeedsAttentionSummary(rows: mine)
+            summary.ready = max(summary.ready, group.total - summary.active - summary.queued - summary.failed)
+            return (summary, mine)
+        }
+        return nil
+    }
+
+    /// The same Retry as Edits › Processing.
+    private func retry(_ row: ProcessingQueue.Row) {
+        if let item = row.itemID, queue.canRetry(item) { queue.retry(item); return }
+        if let id = row.projectID { Task { _ = await tracker.retry(projectID: id) } }
     }
 
     private func openEdits(focus: String?) {

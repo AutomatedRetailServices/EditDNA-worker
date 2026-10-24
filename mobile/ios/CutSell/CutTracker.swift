@@ -221,7 +221,7 @@ final class CutTracker: ObservableObject {
         switch state {
         // Build 23: one honest name for the server's work, with what it is doing now.
         case "queued", "uploaded", "preparing", "created":
-            return Stage(step: 3, title: "Cutting your video… starting", percent: scaled(2))
+            return Stage(step: 3, title: "Cutting your video…", percent: scaled(2))
         case "transcribing":
             return Stage(step: 4, title: "Cutting your video… listening", percent: scaled(12))
         case "analyzing":
@@ -232,7 +232,7 @@ final class CutTracker: ObservableObject {
         case "composing":
             return Stage(step: 7, title: "Cutting your video… almost done", percent: scaled(84))
         default:
-            return Stage(step: 3, title: "Cutting your video… starting", percent: scaled(2))
+            return Stage(step: 3, title: "Cutting your video…", percent: scaled(2))
         }
     }
 

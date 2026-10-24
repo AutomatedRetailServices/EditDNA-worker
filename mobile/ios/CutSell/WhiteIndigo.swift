@@ -12,6 +12,16 @@ extension View {
     }
 }
 
+extension View {
+    /// The strip behind the clock and battery stays white: content that scrolls up passes UNDER it, never over the
+    /// status bar (PO 24 Oct: the Edits logo and title rode over the time and battery).
+    func wiStatusBarCover() -> some View {
+        overlay(alignment: .top) {
+            CS.wiPage.frame(height: 0).ignoresSafeArea(edges: .top).allowsHitTesting(false)
+        }
+    }
+}
+
 /// Header of the main screens: the horizontal logo (172 pt with its glow) left, round buttons right.
 struct WIHeader<Trailing: View>: View {
     @ViewBuilder var trailing: () -> Trailing

@@ -27,8 +27,9 @@ enum DesignScreenshots {
     static let whiteIndigo = [
         "editor_v4_base", "editor_v4_caption_edit", "editor_v4_cap_highlight", "editor_v4_cap_box", "editor_v4_cap_fonts",
         "editor_v4_overlay_gallery", "editor_v4_overlay_selected", "editor_v4_vo_record", "editor_v4_vo_review",
-        "editor_v4_mic", "editor_v4_style", "editor_v4_sel_video", "editor_v4_vo_track", "editor_v4_vo_selected",
-        "hub", "promoting_sheet", "processing_failed",
+        "hub", "processing", "opening", "edits_processing", "processing_failed", "err_too_long", "err_too_large",
+        "queued", "export_failed", "plan_attention_bulk", "plan_attention_plan",
+        "you", "plan", "edits",
     ]
     /// The full White Indigo review set (main screens).
     static let whiteIndigoMain = [
@@ -67,10 +68,25 @@ struct DesignScreenshotRoot: View {
             HomeHubView(onUpload: { _ in }, onRecord: {}, onOpenProject: { _ in }, selectTab: { _ in })
         case "processing":
             ProcessingContent(
-                stage: CutTracker.Stage(step: 6, title: "Structuring your cut", percent: 68),
+                stage: CutTracker.Stage(step: 3, title: "Cutting your video…", percent: 42),
                 fileName: CutName.display("Cut 14 Oct"), thumbnail: nil, onClose: {}, onOpenEdits: {}
             )
             .background(CS.wiPage.ignoresSafeArea())
+        case "queued":
+            ProcessingContent(
+                stage: CutTracker.Stage(step: 3, title: "Cutting your video…", percent: 0),
+                fileName: CutName.display("Cut 14 Oct"), thumbnail: nil, queued: true, onClose: {}, onOpenEdits: {}
+            )
+            .background(CS.wiPage.ignoresSafeArea())
+        case "opening":
+            NavigationStack {
+                DraftEditorView(project: Project(projectID: "sample", userID: "sample", title: "Cut 14 Oct", state: "draft_ready",
+                                                 latestJobID: nil, sourceCount: 1, updatedAt: nil))
+            }
+        case "export_failed":
+            ExportFailedPreview()
+        case "plan_attention_bulk", "plan_attention_plan":
+            PlanAttentionPreview(detailed: screen == "plan_attention_plan")
         case "processing_failed":
             ProcessingContent(
                 stage: CutTracker.Stage(step: 6, title: "Structuring your cut", percent: 68),
@@ -245,13 +261,53 @@ private struct ProductDetailPreview: View {
     }
 }
 
+/// Figma 1233:3199 "Export failed" (stopped while encoding at 72 %).
+private struct ExportFailedPreview: View {
+    @StateObject private var exporter = DeviceExport()
+    var body: some View {
+        ExportFailedView(exporter: exporter, onBack: {}, onTryAgain: {}, onChangeSettings: {}, onServerExport: {})
+            .onAppear { exporter.previewFailed(step: 1, progress: 0.72) }
+    }
+}
+
+/// Figma 1233:3243 (Bulk) and 1233:3354 (Plan, with the counts line): a Bulk send where one video failed.
+private struct PlanAttentionPreview: View {
+    let detailed: Bool
+    private var rows: [ProcessingQueue.Row] {
+        [("1", 42.0, ProcessingQueue.State.ready), ("2", 33, .ready), ("3", 51, detailed ? .processing(40) : .ready),
+         ("4", 26, .failed("The cut needs another try"))].map { id, duration, state in
+            .init(id: id, itemID: nil, projectID: nil, name: "cutsell0100190284\(Int(id)! + 7).mp4", duration: duration,
+                  thumbnail: nil, state: state, group: "g")
+        }
+    }
+    var body: some View {
+        ZStack {
+            CS.wiPage.ignoresSafeArea()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    WIHeader { EmptyView() }
+                    WIScreenTitle(title: "Plan", subtitle: "Plan needs attention").padding(.top, 2)
+                    NeedsAttentionSection(summary: detailed ? NeedsAttentionSummary(ready: 8, active: 1, queued: 0, failed: 1)
+                                                            : NeedsAttentionSummary(ready: 9, active: 0, queued: 0, failed: 1),
+                                          rows: rows, onRetry: { _ in })
+                        .padding(.top, 16)
+                }
+                .padding(.horizontal, 20)
+            }
+        }
+        .wiStatusBarCover()
+        .safeAreaInset(edge: .bottom) { CSTabBar(current: .plan, select: { _ in }) }
+    }
+}
+
 /// White Indigo · Edits › Processing (Figma 1177:2) with sample rows: processing, queued, failed (no network).
 private struct EditsProcessingPreview: View {
     @State private var tab: EditsTab = .processing
     private let rows: [ProcessingQueue.Row] = [
         .init(id: "1", itemID: nil, projectID: nil, name: "Cut 14 Oct", duration: 33, thumbnail: nil, state: .processing(68)),
         .init(id: "2", itemID: nil, projectID: nil, name: "Cut 14 Oct (2)", duration: 51, thumbnail: nil, state: .queued),
-        .init(id: "3", itemID: nil, projectID: nil, name: "Cut 14 Oct (3)", duration: 51, thumbnail: nil, state: .queued),
+        .init(id: "3", itemID: nil, projectID: nil, name: "Product clip 14 Oct", duration: 12, thumbnail: nil,
+              state: .failed(ProcessingQueue.noSpeech)),
         .init(id: "4", itemID: nil, projectID: nil, name: "A very long name for this cut of the day", duration: 26,
               thumbnail: nil, state: .failed("Failed")),
     ]

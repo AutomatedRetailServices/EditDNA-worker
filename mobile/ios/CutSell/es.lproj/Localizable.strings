@@ -13,9 +13,11 @@
 "+ Time" = "+ Hora";
 "+ %@ more" = "+ %1$@ más";
 "+ %lld more" = "+ %1$lld más";
+"1 finished cut is already in Edits" = "1 corte terminado ya está en Edits";
 "1 ready, 1 needs attention" = "1 listo, 1 necesita atención";
 "1 ready, %@ need attention" = "1 listo, %1$@ necesitan atención";
 "1 ready, %lld need attention" = "1 listo, %1$lld necesitan atención";
+"1 video needs action" = "1 video necesita acción";
 "1 video needs attention" = "1 video necesita atención";
 "10 clips maximum" = "Máximo 10 clips";
 "1080p copy (original not found)" = "Copia 1080p (no se encontró el original)";
@@ -51,6 +53,7 @@
 "Add photo or video" = "Añadir foto o video";
 "Add text" = "Añadir texto";
 "Add text manually" = "Añadir texto a mano";
+"Add to Sales Mix" = "Agregar a Sales Mix";
 "Add to %@" = "Añadir a %1$@";
 "Add to %lld" = "Añadir a %1$lld";
 "Add video" = "Añadir video";
@@ -139,6 +142,7 @@
 "Bulk · %@ videos" = "Bulk · %1$@ videos";
 "Bulk · %lld videos" = "Bulk · %1$lld videos";
 "CAMERA & EXPORT" = "CÁMARA Y EXPORTACIÓN";
+"COMPLETED" = "COMPLETADO";
 "CREATE" = "CREAR";
 "CUT · 0:40" = "CORTE · 0:40";
 "Cache cleared on this iPhone. Your projects are safe." = "Caché borrada en este iPhone. Tus proyectos están a salvo.";
@@ -166,6 +170,7 @@
 "Center" = "Centro";
 "Change" = "Cambiar";
 "Change a voice-over's volume from its panel in the editor." = "Cambia el volumen de una voz en off desde su panel en el editor.";
+"Change export settings" = "Cambiar ajustes de exportación";
 "Change permission" = "Cambiar permiso";
 "Change the language" = "Cambiar el idioma";
 "Change time" = "Cambiar hora";
@@ -393,6 +398,7 @@
 "Edits" = "Mis videos";
 "Edits processed" = "Ediciones procesadas";
 "Email" = "Correo";
+"Encoding video" = "Codificando el video";
 "English or Español" = "English o Español";
 "Enhance voice" = "Mejorar voz";
 "Error: %@." = "Error: %1$@.";
@@ -413,6 +419,7 @@
 "Export quality: 1080p" = "Calidad de exportación: 1080p";
 "Export quality: 4K" = "Calidad de exportación: 4K";
 "Export ready" = "Exportación lista";
+"Export stopped" = "La exportación se detuvo";
 "Export to Photos" = "Exportar a Fotos";
 "Export video" = "Exportar video";
 "Exporting 4K…" = "Exportando en 4K…";
@@ -505,6 +512,7 @@
 "Help" = "Ayuda";
 "Help & Legal" = "Ayuda y legal";
 "Help & Support" = "Ayuda y soporte";
+"Hi there 👋" = "Hola 👋";
 "Hi %@ 👋" = "Hola %1$@ 👋";
 "Hi %lld 👋" = "Hola %1$lld 👋";
 "Hi 👋" = "Hola 👋";
@@ -668,6 +676,7 @@
 "Natural audio overlap" = "Superposición natural del audio";
 "Navigation, processing states, export screens and account settings use the selected language." = "La navegación, los estados de procesamiento, las pantallas de exportación y los ajustes de la cuenta usan el idioma elegido.";
 "Needs a retry" = "Hay que reintentar";
+"Needs attention" = "Necesita atención";
 "New Cut" = "Nuevo corte";
 "New Sales Mix" = "Nuevo Sales Mix";
 "New Sales Mix ›" = "Nuevo Sales Mix ›";
@@ -704,6 +713,7 @@
 "No video, audio or transcript is sent unless you choose it in the report." = "No se envía video, audio ni transcripción a menos que lo elijas en el reporte.";
 "No videos in your library yet." = "Todavía no hay videos en tu galería.";
 "No voice" = "Sin voz";
+"No voice found — use it as a product clip" = "No encontramos voz — úsalo como clip de producto";
 "No voice-over placed on the timeline yet." = "Todavía no hay voz en off en la línea de tiempo.";
 "No voice-over yet" = "Todavía no hay voz en off";
 "Not asked yet" = "Todavía no se pidió";
@@ -713,6 +723,7 @@
 "Not yet" = "Todavía no";
 "Nothing in progress. Start a Sales Mix or a Bulk." = "Nada en proceso. Empieza un Sales Mix o varios videos.";
 "Nothing left to post today" = "No queda nada por publicar hoy";
+"Nothing was lost" = "No se perdió nada";
 "Nothing was lost." = "No se perdió nada.";
 "Notifications" = "Notificaciones";
 "Off" = "Apagado";
@@ -811,6 +822,7 @@
 "Plan ends early: %lld of %lld videos fit without the same product back to back." = "El plan termina antes: caben %1$lld de %2$lld videos sin repetir el mismo producto seguido.";
 "Plan my week" = "Planear mi semana";
 "Plan my week ›" = "Planear mi semana ›";
+"Plan needs attention" = "El plan necesita atención";
 "Plan your week" = "Planea tu semana";
 "Plan your week and post" = "Planea tu semana y publica";
 "Play" = "Reproducir";
@@ -826,6 +838,7 @@
 "Prepare to share" = "Preparar para compartir";
 "Preparing footage" = "Preparando el material";
 "Preparing preview…" = "Preparando la vista previa…";
+"Preparing video" = "Preparando el video";
 "Preparing video %@ of %@" = "Preparando video %1$@ de %2$@";
 "Preparing video %@ of %lld" = "Preparando video %1$@ de %2$lld";
 "Preparing video %lld of %@" = "Preparando video %1$lld de %2$@";
@@ -922,6 +935,7 @@
 "Rename cut" = "Cambiar nombre del corte";
 "Rename product" = "Cambiar nombre del producto";
 "Rename section" = "Cambiar nombre de la sección";
+"Rendering frames" = "Renderizando cuadros";
 "Reorder" = "Reordenar";
 "Replay intro" = "Ver la introducción otra vez";
 "Report a Problem" = "Reportar un problema";
@@ -941,6 +955,7 @@
 "Retrieving %lld of %@ from Photos / iCloud…" = "Trayendo %1$lld de %2$@ de Fotos / iCloud…";
 "Retrieving %lld of %lld from Photos / iCloud…" = "Trayendo %1$lld de %2$lld de Fotos / iCloud…";
 "Retry" = "Reintentar";
+"Retry failed" = "Reintenta los fallidos";
 "Retry processing" = "Reintentar procesamiento";
 "Review & edit" = "Revisar y editar";
 "Review clips" = "Revisar clips";
@@ -972,6 +987,7 @@
 "Saved" = "Guardado";
 "Saved to Photos" = "Guardado en Fotos";
 "Saved. It can be placed on the timeline once this project's timeline is ready." = "Guardado. Se podrá poner en la línea de tiempo cuando la de este proyecto esté lista.";
+"Saving to Photos" = "Guardando en Fotos";
 "Saving to Photos…" = "Guardando en Fotos…";
 "Saving your changes…" = "Guardando tus cambios…";
 "Saving…" = "Guardando…";
@@ -1337,6 +1353,8 @@
 "Volume" = "Volumen";
 "Wait until it finishes uploading, then split it." = "Espera a que termine de subir y luego divídelo.";
 "Waiting for CutSell" = "Esperando a CutSell";
+"Waiting for a processing slot" = "Esperando un espacio para procesar";
+"Waiting to start" = "Esperando para empezar";
 "Watching and choosing best takes" = "Mirando y eligiendo las mejores tomas";
 "We couldn't hear anyone talking in this video" = "No escuchamos a nadie hablando en este video";
 "We couldn’t finish this cut" = "No pudimos terminar este corte";
@@ -1350,7 +1368,9 @@
 "We'll notify you when your videos are ready. You can keep using CutSell." = "Te avisamos cuando tus videos estén listos. Puedes seguir usando CutSell.";
 "We’ll let you know in CutSell when your cut is ready." = "Te avisamos en CutSell cuando tu corte esté listo.";
 "We’ll notify you as each cut is ready." = "Te avisamos cuando cada corte esté listo.";
+"We’ll notify you when processing begins." = "Te avisaremos cuando empiece el procesamiento.";
 "We’ll notify you when your cut is ready." = "Te avisamos cuando tu corte esté listo.";
+"We’ll start automatically when a slot opens." = "Empezaremos solos cuando haya un espacio.";
 "We’re saving you hours per day…" = "Te estamos ahorrando horas al día…";
 "What are we promoting today?" = "¿Qué vamos a promocionar hoy?";
 "What are we selling today?" = "¿Qué vendemos hoy?";
@@ -1395,6 +1415,8 @@
 "Your Sales Mix videos appear in Plan, ready to export." = "Tus videos de Sales Mix aparecen en Plan, listos para exportar.";
 "Your account" = "Tu cuenta";
 "Your cut" = "Tu corte";
+"Your cut and export settings are still saved." = "Tu corte y tus ajustes de exportación siguen guardados.";
+"Your cut is next in line" = "Tu corte es el siguiente";
 "Your cut is ready" = "Tu corte está listo";
 "Your cuts will show up here." = "Tus cortes aparecerán aquí.";
 "Your cuts, organized by brand and product." = "Tus cortes, por marca y producto.";
@@ -1421,6 +1443,7 @@
 "Your video is ready." = "Tu video está listo.";
 "Your video is saved on this iPhone. Resume the upload and CutSell will make the cut." = "Tu video está guardado en este iPhone. Reanuda la subida y CutSell hará el corte.";
 "Your video keeps uploading if you leave this screen or CutSell." = "Tu video sigue subiendo aunque salgas de esta pantalla o de CutSell.";
+"Your video was not saved" = "Tu video no se guardó";
 "Your video was recorded in %@p" = "Tu video se grabó en %1$@p";
 "Your video was recorded in %lldp" = "Tu video se grabó en %1$lldp";
 "Your video was recorded in %@p." = "Tu video se grabó en %1$@p.";
@@ -1478,6 +1501,8 @@
 "%lld / %lld cuts ·" = "%1$lld / %2$lld cortes ·";
 "%@ MB" = "%1$@ MB";
 "%lld MB" = "%1$lld MB";
+"%@ active" = "%1$@ activos";
+"%lld active" = "%1$lld activos";
 "%@ added" = "%1$@ añadido";
 "%lld added" = "%1$lld añadido";
 "%@ added on a new layer · tap ↶ to undo" = "%1$@ añadido en una capa nueva · toca ↶ para deshacer";
@@ -1496,6 +1521,8 @@
 "%lld clip%lld • Resume upload" = "%1$lld clip%2$lld • Reanudar subida";
 "%@ combinations are possible" = "Se pueden hacer %1$@ combinaciones";
 "%lld combinations are possible" = "Se pueden hacer %1$lld combinaciones";
+"%@ finished cuts are already in Edits" = "%1$@ cortes terminados ya están en Edits";
+"%lld finished cuts are already in Edits" = "%1$lld cortes terminados ya están en Edits";
 "%@ is ready" = "%1$@ está listo";
 "%lld is ready" = "%1$lld está listo";
 "%@ is ready to save or share." = "%1$@ está listo para guardar o compartir.";
@@ -1522,6 +1549,10 @@
 "%lld of %lld videos fit%lld. The rest would put the same product back to back." = "Caben %1$lld de %2$lld videos%3$lld. El resto pondría el mismo producto seguido.";
 "%@ processing" = "%1$@ procesando";
 "%lld processing" = "%1$lld procesando";
+"%@ queued · %@ failed" = "%1$@ en cola · %2$@ fallidos";
+"%@ queued · %lld failed" = "%1$@ en cola · %2$lld fallidos";
+"%lld queued · %@ failed" = "%1$lld en cola · %2$@ fallidos";
+"%lld queued · %lld failed" = "%1$lld en cola · %2$lld fallidos";
 "%@ ready" = "%1$@ listos";
 "%lld ready" = "%1$lld listos";
 "%@ ready, 1 needs attention" = "%1$@ listos, 1 necesita atención";
@@ -1542,6 +1573,8 @@
 "%lld steps" = "%1$lld pasos";
 "%@ videos" = "%1$@ videos";
 "%lld videos" = "%1$lld videos";
+"%@ videos need action" = "%1$@ videos necesitan acción";
+"%lld videos need action" = "%1$lld videos necesitan acción";
 "%@ videos need attention" = "%1$@ videos necesitan atención";
 "%lld videos need attention" = "%1$lld videos necesitan atención";
 "%@ videos saved to Photos" = "%1$@ videos guardados en Fotos";

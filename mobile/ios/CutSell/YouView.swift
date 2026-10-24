@@ -149,6 +149,7 @@ struct YouView: View {
                 .padding(.bottom, 24)
             }
         }
+        .wiStatusBarCover()
         .safeAreaInset(edge: .bottom) { CSTabBar(current: .you, select: selectTab) }
         .fullScreenCover(item: $page) { start in
             YouPagesView(start: start)

@@ -31,6 +31,18 @@ struct ExportSettingsView: View {
     private var is4K: Bool { settings.canvas(for: info).width >= 2160 }
 
     var body: some View {
+        if case .failed = exporter.phase {
+            ExportFailedView(exporter: exporter,
+                             onBack: { exporter.reset(); dismiss() },
+                             onTryAgain: { exporter.start(model: model, settings: settings) },
+                             onChangeSettings: { exporter.reset() },
+                             onServerExport: { dismiss(); onServerExport() })
+        } else {
+            settingsScreen
+        }
+    }
+
+    private var settingsScreen: some View {
         ZStack(alignment: .top) {
             Color(hex: 0x050814).ignoresSafeArea()
             preview
@@ -290,5 +302,109 @@ struct ExportSettingsView: View {
 
     static func size(_ bytes: Int64) -> String {
         bytes >= 1_000_000_000 ? String(format: "%.1f GB", Double(bytes) / 1e9) : "\(max(1, bytes / 1_000_000)) MB"
+    }
+}
+
+/// White Indigo · ERROR · Export/Rendering · Failed (Figma 1233:3199): the still ring with a red "!", the % it reached,
+/// the steps (done ✓, the one that stopped !, the rest —), "Nothing was lost", blue "Try Again", outlined
+/// "Change export settings".
+struct ExportFailedView: View {
+    @ObservedObject var exporter: DeviceExport
+    let onBack: () -> Void
+    let onTryAgain: () -> Void
+    let onChangeSettings: () -> Void
+    let onServerExport: () -> Void
+
+    private static let red = Color(fixed: 0xE5484D)
+    private static let steps = ["Preparing video", "Rendering frames", "Encoding video", "Saving to Photos"]
+
+    /// The Figma step that stopped: preparing → 0, encoding → 2, saving → 3.
+    private var failedIndex: Int { exporter.lastStep == 0 ? 0 : exporter.lastStep == 1 ? 2 : 3 }
+
+    var body: some View {
+        ZStack {
+            CS.wiPage.ignoresSafeArea()
+            ScrollView {
+                VStack(spacing: 0) {
+                    WIBackBar(title: "Export failed", onBack: onBack)
+                    BrandRing(animating: false, size: 110)
+                        .overlay(alignment: .bottomTrailing) {
+                            Text(verbatim: "!").font(CS.inter(13, .heavy)).foregroundStyle(Color(fixed: 0xFFFFFF))
+                                .frame(width: 22, height: 22)
+                                .background(Self.red, in: Circle())
+                                .overlay(Circle().stroke(Color(fixed: 0xFFFFFF), lineWidth: 2))
+                                .padding(.trailing, 24).padding(.bottom, 24)
+                        }
+                        .padding(.top, 6)
+                    Text(verbatim: "\(Int((exporter.lastProgress * 100).rounded()))%")
+                        .font(CS.inter(40, .heavy)).foregroundStyle(CS.wiInk)
+                        .accessibilityIdentifier("exportFailedPercent")
+                    Text(L10n.tr("Export stopped")).font(CS.inter(15, .medium)).foregroundStyle(CS.wiSecondary)
+                    Text(L10n.tr("Your video was not saved")).font(CS.inter(12, .medium)).foregroundStyle(CS.accent)
+                        .padding(.top, 4)
+                    VStack(spacing: 4) {
+                        ForEach(Array(Self.steps.enumerated()), id: \.offset) { index, title in step(index, title) }
+                    }
+                    .padding(12)
+                    .wiCard(radius: 18, shadow: false)
+                    .padding(.top, 22)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(L10n.tr("Nothing was lost")).font(CS.inter(14, .semibold)).foregroundStyle(CS.wiInk)
+                        Text(L10n.tr("Your cut and export settings are still saved.")).font(CS.inter(12, .medium))
+                            .foregroundStyle(CS.wiSecondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                    .wiCard(radius: 16, shadow: false)
+                    .padding(.top, 14)
+                    Button(action: onTryAgain) {
+                        Text(L10n.tr("Try Again")).font(CS.inter(16, .bold)).foregroundStyle(Color(fixed: 0xFFFFFF))
+                            .frame(maxWidth: .infinity).frame(height: 52)
+                            .background(CS.accent, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("exportTryAgain")
+                        .padding(.top, 20)
+                    Button(action: onChangeSettings) {
+                        Text(L10n.tr("Change export settings")).font(CS.inter(16, .semibold)).foregroundStyle(CS.wiInk)
+                            .frame(maxWidth: .infinity).frame(height: 52)
+                            .background(CS.wiPage, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(CS.accent, lineWidth: 1.5))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("exportChangeSettings")
+                    .padding(.top, 12)
+                    Button(L10n.tr("Export on our server (1080p)"), action: onServerExport)
+                        .font(CS.inter(13, .semibold)).foregroundStyle(CS.accent)
+                        .accessibilityIdentifier("exportServerFallback")
+                        .padding(.top, 14)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 24)
+            }
+        }
+        .wiStatusBarCover()
+        .accessibilityIdentifier("exportFailed")
+    }
+
+    private func step(_ index: Int, _ title: String) -> some View {
+        let failed = index == failedIndex
+        let done = index < failedIndex
+        return HStack(spacing: 10) {
+            Group {
+                if done { Image(systemName: "checkmark").font(.system(size: 13, weight: .bold)).foregroundStyle(CS.wiReady) }
+                else if failed { Text(verbatim: "!").font(CS.inter(15, .heavy)).foregroundStyle(Self.red) }
+                else { Circle().stroke(CS.wiSecondary, lineWidth: 1.5).frame(width: 11, height: 11) }
+            }
+            .frame(width: 16)
+            Text(L10n.tr(title)).font(CS.inter(14, failed ? .semibold : .medium))
+                .foregroundStyle(failed ? CS.wiInk : CS.wiSecondary)
+            Spacer()
+            if failed { Text(L10n.tr("Failed")).font(CS.inter(12, .medium)).foregroundStyle(CS.accent) }
+            else if !done { Text(verbatim: "—").foregroundStyle(CS.wiSecondary) }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 44)
+        .background(failed ? Color(fixed: 0xFDEBEC) : .clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }

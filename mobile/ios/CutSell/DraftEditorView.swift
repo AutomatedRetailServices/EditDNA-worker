@@ -40,7 +40,7 @@ struct DraftEditorView: View {
                 EditorV4View(model: model, project: project, previewState: Self.probeState)
             } else if let model = holder.model, !model.isLoading, model.snapshot == nil, model.errorMessage != nil {
                 VStack(spacing: 14) {
-                    Text(L10n.tr("Couldn’t open this cut")).font(CS.inter(18, .semibold)).foregroundStyle(.white)
+                    Text(L10n.tr("Couldn’t open this cut")).font(CS.inter(18, .semibold)).foregroundStyle(CS.wiInk)
                     Text(L10n.tr(model.errorMessage.map { DraftEditorViewModel.plainWords($0) } ?? "Please try again.")).font(CS.inter(13)).foregroundStyle(CS.textSecondaryF)
                         .multilineTextAlignment(.center)
                     PrimaryButton(title: "Try again", height: 48, cornerRadius: 14, fontSize: 15) {
@@ -50,13 +50,13 @@ struct DraftEditorView: View {
                 }
                 .padding(24)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(hex: 0x02040A).ignoresSafeArea())
+                .background(CS.wiPage.ignoresSafeArea())
             } else {
                 ZStack {
-                    Color(hex: 0x02040A).ignoresSafeArea()
+                    CS.wiPage.ignoresSafeArea()
                     VStack(spacing: 14) {
-                        BrandRing(size: 84)
-                        Text(L10n.tr("Opening your cut…")).font(CS.inter(14, .medium)).foregroundStyle(CS.textSecondaryF)
+                        BrandRing(size: 96)
+                        Text(L10n.tr("Opening your cut…")).font(CS.inter(15, .semibold)).foregroundStyle(CS.wiSecondary)
                     }
                 }
             }
@@ -80,11 +80,12 @@ struct DraftEditorView: View {
             // While it opens (or if it can't), a plain way back.
             if !(holder.model.map { !$0.isLoading && $0.snapshot != nil } ?? false) {
                 Button { dismiss() } label: {
-                    Image(systemName: "chevron.left").font(.system(size: 17, weight: .semibold)).foregroundStyle(.white)
-                        .frame(width: 44, height: 44)
+                    WIHeaderIcon(image: "WIBack")
                 }
+                .buttonStyle(.plain)
                 .accessibilityLabel(L10n.tr("Back"))
-                .padding(.leading, 8)
+                .accessibilityIdentifier("openingBack")
+                .padding(.leading, 20).padding(.top, 4)
             }
         }
     }

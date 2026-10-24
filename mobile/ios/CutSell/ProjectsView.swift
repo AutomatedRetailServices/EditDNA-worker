@@ -204,6 +204,7 @@ struct ProjectsView: View {
                 }
             }
             }
+            .wiStatusBarCover()
             .toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .bottom) { CSTabBar(current: .edits, select: selectTab) }
             .navigationDestination(for: Project.self) { project in

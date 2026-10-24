@@ -35,6 +35,7 @@ struct CutProgressView: View {
                     fileName: CutName.display(cut?.title),
                     thumbnail: uploading ? thumbnail : (cut?.thumbnail ?? thumbnail),
                     failed: !uploading && cut?.isFailed == true,
+                    queued: !uploading && cut?.isFailed != true && cut?.jobState == "queued",
                     uploading: uploading,
                     stalled: uploading ? submitter?.stalled : nil,
                     background: projectID.flatMap { videos.status($0)?.text },
@@ -112,6 +113,8 @@ struct ProcessingContent: View {
     let fileName: String
     let thumbnail: UIImage?
     var failed = false
+    /// The server has the cut but has not started it yet (Figma 1233:3155 "Processing/Queued").
+    var queued = false
     /// While the video uploads from this iPhone CutSell must stay open, so there is no way out.
     var uploading = false
     /// Build 21: "No data sent for 90 seconds…" (the upload keeps trying; nothing was cancelled).
@@ -132,7 +135,7 @@ struct ProcessingContent: View {
     /// White Indigo (Figma 1179:2 "Single · Processing ✅ APROBADO").
     var body: some View {
         VStack(spacing: 0) {
-            WIBackBar(title: failed ? "Processing issue" : "Processing", onBack: onClose, trailingTitle: "Edits", onTrailing: onOpenEdits)
+            WIBackBar(title: failed ? "Processing issue" : queued ? "Queued" : "Processing", onBack: onClose, trailingTitle: "Edits", onTrailing: onOpenEdits)
 
             VStack(spacing: 16) {
                 VideoFirstFrame(image: thumbnail, width: 100, height: 156, cornerRadius: 20)
@@ -171,6 +174,13 @@ struct ProcessingContent: View {
                 }
                 .padding(.top, 6)
             } else {
+            if queued {
+                Text(L10n.tr("Your cut is next in line"))
+                    .font(CS.inter(24, .bold))
+                    .foregroundStyle(Color(fixed: 0x4A5263))
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 14)
+            } else {
             VStack(spacing: 6) {
                 Text(L10n.tr("Hold on…"))
                     .font(CS.inter(30, .heavy))
@@ -182,6 +192,7 @@ struct ProcessingContent: View {
             }
             .multilineTextAlignment(.center)
             .padding(.top, 14)
+            }
 
                 BrandRing(animating: true)
                     .frame(width: 150, height: 150)
@@ -190,17 +201,23 @@ struct ProcessingContent: View {
 
             if !failed {
             VStack(spacing: 4) {
-                Text(L10n.tr(stage.title))
+                Text(L10n.tr(queued ? "Waiting to start" : stage.title))
                     .accessibilityIdentifier("processingStage")
                     .font(CS.inter(17, .bold))
                     .foregroundStyle(CS.wiInk)
                     .multilineTextAlignment(.center)
-                Text(L10n.tr(stage.percent >= 0 ? "\(stage.percent)%" : "…"))
+                Text(L10n.tr(queued ? "0%" : stage.percent >= 0 ? "\(stage.percent)%" : "…"))
                     .font(CS.inter(26, .heavy))
                     .foregroundStyle(CS.accent)
                     .contentTransition(.numericText())
                     .animation(.easeOut, value: stage.percent)
                     .accessibilityIdentifier("processingPercent")
+                if queued {
+                    Text(L10n.tr("Waiting for a processing slot"))
+                        .font(CS.inter(13, .medium))
+                        .foregroundStyle(CS.wiSecondary)
+                        .accessibilityIdentifier("queuedLine")
+                }
                 if let background {
                     Text(L10n.tr(background))
                         .font(CS.inter(13, .medium))
@@ -229,11 +246,24 @@ struct ProcessingContent: View {
             .padding(.top, 14)
             }
 
+            if failed {
+                // The note and the button follow the text (same spacing as the rest of the app), not the bottom edge.
+                failedFooter.padding(.top, 28)
+                Spacer(minLength: 0)
+            } else {
             Spacer(minLength: 12)
-
-            if failed { failedFooter } else {
             VStack(spacing: 12) {
                 // Figma 1179:22 "Note": 52 high, radius 18, info icon + Medium 13.
+                if queued {
+                    Text(L10n.tr("We’ll start automatically when a slot opens."))
+                        .font(CS.inter(13, .medium))
+                        .foregroundStyle(CS.wiSecondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .background(Color(fixed: 0xF3F7FF), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(CS.accent, lineWidth: 1))
+                } else {
                 HStack(spacing: 8) {
                     Image("WIInfo").renderingMode(.template).resizable().frame(width: 18, height: 18)
                         .foregroundStyle(CS.wiInk)
@@ -246,18 +276,19 @@ struct ProcessingContent: View {
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: 52)
                 .wiCard(radius: 18, shadow: false)
+                }
                 Button(action: onClose) {
                     Text(L10n.tr("Continue in background"))
                         .font(CS.inter(16, .bold))
                         .foregroundStyle(Color(fixed: 0xFFFFFF))
                         .frame(maxWidth: .infinity)
                         .frame(height: 52)
-                        .background(CS.neutralButton, in: Capsule())
+                        .background(queued ? CS.accent : CS.neutralButton, in: Capsule())
                 }
                 .buttonStyle(.plain)
                 // Build 24: active at every step (uploading, analysing, cutting, saving).
                 .accessibilityIdentifier("continueInBackground")
-                Text(L10n.tr("We’ll notify you when your cut is ready."))
+                Text(L10n.tr(queued ? "We’ll notify you when processing begins." : "We’ll notify you when your cut is ready."))
                     .font(CS.inter(12, .medium))
                     .foregroundStyle(CS.wiSecondary)
             }
@@ -267,7 +298,7 @@ struct ProcessingContent: View {
         .padding(.horizontal, 20)
     }
 
-    /// Figma 1233:3123: the "nothing was lost" note, the red "Retry processing" and its line.
+    /// Figma 1233:3123: the "nothing was lost" note, the blue "Retry processing" (PO 24 Oct) and its line.
     private var failedFooter: some View {
         VStack(spacing: 12) {
             Text(L10n.tr(retryFailed ? "Couldn’t retry this cut. Please upload it again." : "Your original video is safe. Nothing was lost."))
@@ -297,7 +328,7 @@ struct ProcessingContent: View {
                 .foregroundStyle(Color(fixed: 0xFFFFFF))
                 .frame(maxWidth: .infinity)
                 .frame(height: 52)
-                .background(Self.errorRed, in: Capsule())
+                .background(CS.accent, in: Capsule())
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("retryProcessing")
@@ -332,10 +363,11 @@ struct VideoFirstFrame: View {
     }
 }
 
-/// White Indigo brand ring (Figma 1186:2 "Processing/BrandRing · White", note 1193:2): four arcs with the brand
-/// gradient (cyan → blue → purple → pink) and their neon glow, turning without stopping while it processes (one turn
-/// every 2.5 s); TRANSPARENT centre with the logo icon (Logo/Horizontal without letters) and its own glow.
-/// Reduce Motion: the arcs stay still and the glow breathes softly. Used by Single / Combine Processing and Export.
+/// White Indigo waiting ring (Figma 1186:2): ONE continuous circle with the logo icon's glow gradient
+/// (#FF1F3D → #E040FB → #8B5CF6 → #2F7BFF → #00E5FF → back to #FF1F3D) and its neon glow, turning without stopping
+/// (one turn every 2.5 s); TRANSPARENT centre with the logo icon (Logo/Horizontal 2:23 without letters).
+/// The only waiting ring of the app: Processing, Queued, Opening your cut, Export, Combine, Plan export and other loads.
+/// Reduce Motion: the ring stays still and the glow breathes softly.
 struct BrandRing: View {
     var animating = true
     /// Ring diameter; everything scales with it (Figma: 120).
@@ -343,9 +375,9 @@ struct BrandRing: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static let stops: [Gradient.Stop] = [
-        .init(color: Color(fixed: 0x19E6FF), location: 0), .init(color: Color(fixed: 0x1769FF), location: 0.28),
-        .init(color: Color(fixed: 0x7C3AED), location: 0.55), .init(color: Color(fixed: 0xFF1493), location: 0.78),
-        .init(color: Color(fixed: 0x19E6FF), location: 1)]
+        .init(color: Color(fixed: 0xFF1F3D), location: 0), .init(color: Color(fixed: 0xE040FB), location: 0.2),
+        .init(color: Color(fixed: 0x8B5CF6), location: 0.4), .init(color: Color(fixed: 0x2F7BFF), location: 0.6),
+        .init(color: Color(fixed: 0x00E5FF), location: 0.8), .init(color: Color(fixed: 0xFF1F3D), location: 1)]
     static let colors: [Color] = stops.map(\.color)
     static let secondsPerTurn = 2.5
 
@@ -360,15 +392,14 @@ struct BrandRing: View {
             let time = context.date.timeIntervalSinceReferenceDate
             let turning = animating && !reduceMotion
             let angle = turning ? Self.angle(at: time) : 0
-            let glowOpacity = (animating && reduceMotion) ? 0.35 + 0.25 * (1 + sin(time * 2 * .pi / 2.4)) / 2 : 0.52
+            let glowOpacity = (animating && reduceMotion) ? 0.35 + 0.25 * (1 + sin(time * 2 * .pi / 2.4)) / 2 : 0.55
             ZStack {
-                // Processing/RingGlow: the same arcs, blurred behind (opacity 52 %).
-                arcs(scale).blur(radius: 12 * scale).opacity(glowOpacity)
+                // Neon glow: the same ring, blurred behind.
+                ring(scale).blur(radius: 12 * scale).opacity(glowOpacity)
                     .rotationEffect(.degrees(angle))
-                // Processing/RingGradient with its two neon shadows (cyan up-right, magenta down-left).
-                arcs(scale)
-                    .shadow(color: Color(fixed: 0x00E0FF, opacity: 0.76), radius: 3.5 * scale, x: 3 * scale, y: -1 * scale)
-                    .shadow(color: Color(fixed: 0xE800FF, opacity: 0.58), radius: 4 * scale, x: -3 * scale, y: 3 * scale)
+                ring(scale)
+                    .shadow(color: Color(fixed: 0x00E5FF, opacity: 0.6), radius: 4 * scale)
+                    .shadow(color: Color(fixed: 0xE040FB, opacity: 0.5), radius: 6 * scale)
                     .rotationEffect(.degrees(angle))
                 BrandIcon(size: 66 * scale)
             }
@@ -377,29 +408,11 @@ struct BrandRing: View {
         .accessibilityHidden(true)
     }
 
-    /// Four 60° arcs, 30° apart, 10 pt wide with round ends (one centred on each side), the gradient along them.
-    private func arcs(_ scale: CGFloat) -> some View {
-        BrandArcs()
-            .stroke(AngularGradient(stops: Self.stops, center: .center),
-                    style: StrokeStyle(lineWidth: 10 * scale, lineCap: .round))
+    /// One full circle, 8 pt wide, the gradient all the way round (no segments, no gaps).
+    private func ring(_ scale: CGFloat) -> some View {
+        Circle()
+            .stroke(AngularGradient(stops: Self.stops, center: .center), lineWidth: 8 * scale)
             .frame(width: size, height: size)
-    }
-}
-
-/// The ring's four arcs (Figma RingGradient path: each spans ±30° around 0°, 90°, 180° and 270°).
-struct BrandArcs: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        let radius = min(rect.width, rect.height) / 2
-        for side in 0..<4 {
-            let middle = Double(side) * 90
-            path.move(to: CGPoint(x: center.x + radius * cos((middle - 30) * .pi / 180),
-                                  y: center.y + radius * sin((middle - 30) * .pi / 180)))
-            path.addArc(center: center, radius: radius, startAngle: .degrees(middle - 30), endAngle: .degrees(middle + 30),
-                        clockwise: false)
-        }
-        return path
     }
 }
 

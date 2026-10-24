@@ -208,6 +208,8 @@ final class ProcessingQueue: ObservableObject {
 
     /// 22 Oct: a video where nobody can be heard says so (and can go to Mix) instead of "needs another try".
     static let noSpeech = "We couldn't hear anyone talking in this video"
+    /// Edits › Processing row of a video without a voice (PO 24 Oct: not an error, neutral card).
+    static let noVoiceRow = "No voice found — use it as a product clip"
     static func failure(_ cut: CutTracker.Cut) -> String {
         cut.error == "no_speech" ? noSpeech : "The cut needs another try"
     }
@@ -245,15 +247,17 @@ struct QueueRowView: View {
     var onRetry: () -> Void = {}
 
     private var failed: Bool { if case .failed = row.state { return true }; return false }
+    /// Really failed (it has Retry): only these rows are red. A video without a voice is not an error (PO 24 Oct).
+    private var alert: Bool { failed && !isNoSpeech }
 
     /// White Indigo row (Figma 1177:113 / 125 / 145): number, thumbnail, name ("…" when long), duration · state.
     var body: some View {
         HStack(spacing: 0) {
             Text(verbatim: String(format: "%02d", order))
                 .font(CS.inter(11, .bold))
-                .foregroundStyle(failed ? CS.wiError : CS.accent)
+                .foregroundStyle(alert ? CS.wiError : CS.accent)
                 .frame(width: 28, height: 28)
-                .background(failed ? CS.wiErrorBg2 : CS.accentSoft, in: Circle())
+                .background(alert ? CS.wiErrorBg2 : CS.accentSoft, in: Circle())
             thumbnail
                 .frame(width: 46, height: 60)
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -264,13 +268,27 @@ struct QueueRowView: View {
                     .foregroundStyle(CS.wiInk)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                if isNoSpeech {
+                    // The whole sentence, on two lines when needed (never cut with "…"), and the Sales Mix button under it.
+                    Text(L10n.tr(ProcessingQueue.noVoiceRow))
+                        .font(CS.inter(12, .medium))
+                        .foregroundStyle(CS.wiSecondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 4)
+                        .accessibilityIdentifier("queueRowNoSpeech")
+                    Button { AppRouter.shared.pending = .mix } label: { outlined("Add to Sales Mix", color: CS.accent, icon: nil) }
+                        .buttonStyle(.plain)
+                        .padding(.top, 8)
+                        .accessibilityIdentifier("queueRowUseInMix")
+                } else {
                 HStack(spacing: 0) {
-                    let time = isNoSpeech || row.slow ? "" : Self.clock(row.duration)
-                    if isNoSpeech || row.slow {
-                        Text(L10n.tr(isNoSpeech ? ProcessingQueue.noSpeech : ProcessingQueue.slowText))
-                            .foregroundStyle(isNoSpeech ? CS.wiError : CS.wiSecondary)
+                    let time = row.slow ? "" : Self.clock(row.duration)
+                    if row.slow {
+                        Text(L10n.tr(ProcessingQueue.slowText))
+                            .foregroundStyle(CS.wiSecondary)
                             .font(CS.inter(12, .medium))
-                            .accessibilityIdentifier(isNoSpeech ? "queueRowNoSpeech" : "queueRowSlow")
+                            .accessibilityIdentifier("queueRowSlow")
                     } else {
                         Text(verbatim: time)
                             .font(CS.inter(12, .medium))
@@ -284,6 +302,7 @@ struct QueueRowView: View {
                 }
                 .lineLimit(1).minimumScaleFactor(0.75)
                 .padding(.top, 4)
+                }
                 if let fraction = progress {
                     GeometryReader { proxy in
                         ZStack(alignment: .leading) {
@@ -302,8 +321,9 @@ struct QueueRowView: View {
         }
         .padding(.leading, 13)
         .padding(.trailing, 13)
-        .frame(height: 84)
-        .wiCard(fill: failed ? CS.wiErrorBg : CS.wiCard, border: failed ? Color(fixed: 0xF6C9CB) : CS.wiBorder, shadow: false)
+        .padding(.vertical, isNoSpeech ? 12 : 0)
+        .frame(minHeight: 84)
+        .wiCard(fill: alert ? CS.wiErrorBg : CS.wiCard, border: alert ? Color(fixed: 0xF6C9CB) : CS.wiBorder, shadow: false)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("queueRow")
     }
@@ -334,10 +354,8 @@ struct QueueRowView: View {
     @ViewBuilder private var trailing: some View {
         switch row.state {
         case .failed where isNoSpeech:
-            // Nobody talks in it: Retry would fail again; it can still be a clip of a Mix.
-            Button { AppRouter.shared.pending = .mix } label: { outlined("Use in Sales Mix", color: CS.accent, icon: nil) }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("queueRowUseInMix")
+            // Nobody talks in it: Retry would fail again; "Add to Sales Mix" sits under its sentence.
+            EmptyView()
         case .failed:
             Button(action: onRetry) { outlined("Retry", color: CS.wiError, icon: "WIRetry") }
                 .buttonStyle(.plain)

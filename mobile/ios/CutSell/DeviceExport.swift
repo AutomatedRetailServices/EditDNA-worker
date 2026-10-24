@@ -155,7 +155,20 @@ final class DeviceExport: ObservableObject {
         case noSpace(Int64)
     }
 
-    @Published private(set) var phase: Phase = .idle
+    @Published private(set) var phase: Phase = .idle {
+        didSet {
+            switch phase {
+            case .original(let v): lastStep = 0; lastProgress = v
+            case .exporting(let v): lastStep = 1; lastProgress = v
+            case .saving: lastStep = 2; lastProgress = 1
+            default: break
+            }
+        }
+    }
+    /// Where the last run was when it stopped (Figma 1233:3199 "Export failed"): 0 preparing, 1 encoding, 2 saving.
+    @Published private(set) var lastStep = 0
+    /// The last % reached (0...1).
+    @Published private(set) var lastProgress: Double = 0
     @Published private(set) var info = ExportSourceInfo()
     @Published private(set) var usedCopy = false
     private var task: Task<Void, Never>?
@@ -245,6 +258,16 @@ final class DeviceExport: ObservableObject {
     }
 
     func reset() { if !running { phase = .idle } }
+
+    #if DEBUG
+    /// Design screenshots only: the "Export failed" screen at a given step and %.
+    func previewFailed(step: Int, progress: Double) {
+        phase = .exporting(progress)
+        if step == 2 { phase = .saving; lastProgress = progress }
+        lastStep = step
+        phase = .failed("preview")
+    }
+    #endif
 
     func run(model: DraftEditorViewModel, settings: ExportSettings) async throws -> URL {
         let started = Date()
