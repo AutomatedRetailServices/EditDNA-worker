@@ -1,0 +1,8 @@
+B24UI    29.4 FAIL WHERE TO? Save to Photos · Add to Plan
+B24UI    55.5 FAIL Saved to Photos · Share · Done
+B24UI    79.7 FAIL the scheduling sheet
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:1450: error: -[CutSellUITests.Build24UITests testWIExportWhereTo] : Failed to tap "scheduleNetwork_Instagram" Any: No matches found for first query match sequence: `Descendants matching type Any` -> `Elements matching predicate '"scheduleNetwork_Instagram" IN identifiers'`, given input App element pid: 24925
+Test Case '-[CutSellUITests.Build24UITests testWIExportWhereTo]' failed (83.707 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-24 20:28:29.216.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-24 20:28:29.217.
+Test Suite 'Selected tests' failed at 2026-10-24 20:28:29.218.

@@ -1,0 +1,8 @@
+B24UI    21.9 PASS Plan · Plan my week ›
+B24UI    24.3 PASS Plan my week opens the one-screen picker
+B24UI    24.9 PASS Ready videos in the grid · 9
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:1373: error: -[CutSellUITests.Build24UITests testWIPlanSimple] : Failed to get matching snapshot: No matches found for first query match sequence: `Descendants matching type Any` -> `Elements matching predicate '"pmwBuild" IN identifiers'`, given input App element pid: 17223
+Test Case '-[CutSellUITests.Build24UITests testWIPlanSimple]' failed (31.270 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-24 20:25:38.263.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-24 20:25:38.263.
+Test Suite 'Selected tests' failed at 2026-10-24 20:25:38.263.
