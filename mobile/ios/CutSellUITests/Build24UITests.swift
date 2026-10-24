@@ -1360,6 +1360,59 @@ final class Build24UITests: XCTestCase {
         XCTAssertTrue(failures.isEmpty, failures.joined(separator: " | "))
     }
 
+    /// PO 24 Oct: the whole White Indigo Plan path, as she walks it (Figma 1209:2 / 70 / 170).
+    func testWIPlanPath() throws {
+        // 1) From the Create tile "Plan my week" (no plan yet → Plan my week).
+        launchApp(fresh: true, extra: ["-CutSellPlanMock", "-CutSellProjectsMock", "-CutSellCatalogMock"])
+        pause(2)
+        let tile = element("hubPlanWeek")
+        check(tile.waitForExistence(timeout: 15), "Create · Plan my week tile")
+        tile.tap()
+        check(element("goalBuild").waitForExistence(timeout: 10), "Create tile opens Plan my week")
+        pause(1); shot("wi_path_hub_goal")
+
+        // 2) From Plan: "Plan my week ›" → Plan my week.
+        launchApp(fresh: true, extra: ["-CutSellPlanMock", "-CutSellProjectsMock", "-CutSellCatalogMock"])
+        element("tab_plan").tap()
+        let card = element("planMyWeek")
+        check(card.waitForExistence(timeout: 20), "Plan · Plan my week ›")
+        pause(1); shot("wi_path_1_plan")
+        log("plan card: \(element("planWeekCardTitle").label)")
+        card.tap()
+        let build = element("goalBuild")
+        check(build.waitForExistence(timeout: 10), "Plan my week (Goal)")
+        for id in ["goalMinus", "goalPlus", "goalCount", "goalAddTime", "goalStart", "goalSummary"] {
+            check(element(id).exists, "Goal shows \(id)")
+        }
+        pause(1); shot("wi_path_2_goal")
+
+        // 3) Build my plan → This week.
+        build.tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        if springboard.buttons["Allow"].waitForExistence(timeout: 5) { springboard.buttons["Allow"].tap() }
+        let subtitle = element("weekSubtitle")
+        check(subtitle.waitForExistence(timeout: 15), "Build my plan opens This week", subtitle.label)
+        pause(1); shot("wi_path_3_week")
+
+        // 4) Tap a day → Today.
+        let firstDay = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'weekDay_'")).firstMatch
+        check(firstDay.waitForExistence(timeout: 5), "a day in This week")
+        firstDay.tap()
+        check(element("dayTitle").waitForExistence(timeout: 10), "a day opens Today")
+        pause(1); shot("wi_path_4_day")
+
+        // 5) Back on Plan with a plan: the card goes to This week.
+        element("tab_plan").tap(); pause(1)
+        element("tab_plan").tap(); pause(1)
+        check(card.waitForExistence(timeout: 10), "Plan again")
+        log("plan card with a plan: \(element("planWeekCardTitle").label)")
+        shot("wi_path_5_plan_with_week")
+        card.tap()
+        check(element("weekSubtitle").waitForExistence(timeout: 10), "with a plan, Plan opens This week")
+        shot("wi_path_6_week_again")
+        done()
+    }
+
     func testPlanWeekFlow() throws {
         launchApp(fresh: true, extra: ["-CutSellPlanMock", "-CutSellPlanTestReminder"])
         element("tab_plan").tap()
