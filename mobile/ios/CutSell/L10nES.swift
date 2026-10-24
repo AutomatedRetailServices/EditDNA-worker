@@ -892,6 +892,7 @@ enum L10nES {
         "Set speed and size": "Ajusta velocidad y tamaño",
         "Settings": "Ajustes",
         "Share": "Compartir",
+        "Share to TikTok": "Compartir en TikTok",
         "Sharp": "Nítido",
         "Short guides, 3–5 steps each.": "Guías cortas, de 3 a 5 pasos.",
         "Show all": "Ver todo",

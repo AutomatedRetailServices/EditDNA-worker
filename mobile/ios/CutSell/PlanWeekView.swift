@@ -985,17 +985,17 @@ struct PlanWeekView: View {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(L10n.tr("Videos for \(missing.coveredDays) of \(missing.totalDays) days"))
-                                    .font(CS.inter(13, .semibold)).foregroundStyle(Color(hex: 0xFFB840))
+                                    .font(CS.inter(13, .semibold)).foregroundStyle(Color(fixed: 0xD97706))
                                 Text(L10n.tr("Make \(missing.videos) more to fill \(Self.list(missing.days.compactMap { PlanDay.date($0) == nil ? nil : PlanDay.weekdayName($0) }))."))
                                     .font(CS.inter(12)).foregroundStyle(PlanStyle.muted).lineLimit(2)
                             }
                             Spacer()
-                            Button(L10n.tr("New Sales Mix ›"), action: onNewMix).font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
+                            Button(L10n.tr("New Sales Mix ›"), action: onNewMix).font(CS.inter(13, .semibold)).foregroundStyle(CS.accent)
                                 .accessibilityIdentifier("weekNewMix")
                         }
                         .padding(.horizontal, 13).padding(.vertical, 10)
-                        .background(Color(hex: 0x1F170D), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color(hex: 0x73521F), lineWidth: 1))
+                        .background(Color(fixed: 0xFFF7E6), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color(fixed: 0xF5D9A8), lineWidth: 1))
                         .padding(.top, 10)
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("weekMissing")
@@ -1279,13 +1279,17 @@ struct PlanDayView: View {
 
     private func actions(_ slot: PlanSlot) -> some View {
         VStack(spacing: 10) {
-            PostToTikTokButton(title: exporter.progress[slot.projectID].map { "Preparing… \(Int($0 * 100)) %" } ?? "Post to TikTok") {
-                Task { await postToTikTok(slot) }
+            // Figma 1209:170: one blue "Share to TikTok" (the video to Photos, the caption copied, TikTok opens), then
+            // "Save to Photos" and "✓ Mark as posted".
+            Button { Task { await postToTikTok(slot) } } label: {
+                Text(L10n.tr(exporter.progress[slot.projectID].map { "Preparing… \(Int($0 * 100)) %" } ?? "Share to TikTok"))
+                    .font(CS.inter(16, .semibold)).foregroundStyle(Color(fixed: 0xFFFFFF))
+                    .frame(maxWidth: .infinity).frame(height: 50)
+                    .background(CS.accent, in: Capsule())
             }
+            .buttonStyle(.plain)
             .disabled(busy)
-            Button { Task { await share(slot) } } label: { outline("Share") }
-                .disabled(busy)
-                .accessibilityIdentifier("dayShare")
+            .accessibilityIdentifier("dayShare")
             HStack(spacing: 8) {
                 Button { Task { await save(slot) } } label: { outline("Save to Photos") }.disabled(busy)
                     .accessibilityIdentifier("daySave")
@@ -1297,8 +1301,9 @@ struct PlanDayView: View {
     }
 
     private func outline(_ title: String) -> some View {
-        Text(L10n.tr(title)).font(CS.inter(13, .semibold)).foregroundStyle(Color.ink).frame(maxWidth: .infinity).frame(height: 46)
-            .overlay(Capsule().stroke(Color(hex: 0x596685), lineWidth: 1))
+        Text(L10n.tr(title)).font(CS.inter(13, .semibold)).foregroundStyle(CS.wiInk).frame(maxWidth: .infinity).frame(height: 46)
+            .background(CS.wiPage, in: Capsule())
+            .overlay(Capsule().stroke(CS.wiBorder, lineWidth: 1))
     }
 
     private func otherCard(_ slot: PlanSlot) -> some View {
