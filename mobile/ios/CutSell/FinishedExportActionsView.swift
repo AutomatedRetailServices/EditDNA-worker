@@ -57,7 +57,7 @@ struct FinishedExportActionsView: View {
                     Task { await download() }
                 } label: {
                     if isDownloading {
-                        HStack { ProgressView(); Text(L10n.tr("Preparing video…")) }
+                        HStack { BrandRing(size: 28); Text(L10n.tr("Preparing video…")) }
                             .frame(maxWidth: .infinity)
                     } else {
                         Label(L10n.tr("Prepare to share"), systemImage: "arrow.down.circle")

@@ -425,7 +425,7 @@ struct MixSetupView: View {
             if sending {
                 Color.black.opacity(0.7).ignoresSafeArea()
                 VStack(spacing: 14) {
-                    ProgressView().tint(CS.cyan)
+                    BrandRing(size: 84)
                     Text(L10n.tr(submitter.step.isEmpty ? "Preparing your Sales Mix…" : submitter.step))
                         .font(CS.inter(14, .semibold)).foregroundStyle(.white).multilineTextAlignment(.center)
                     Text(L10n.tr("Keep CutSell open until the audio is sent. The videos keep uploading in the background."))

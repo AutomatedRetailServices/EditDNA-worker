@@ -763,7 +763,7 @@ struct EditorV4View: View {
                 CountdownOverlayV5(value: countdown).frame(width: size.width, height: size.height)
             }
             if playback.isBuilding && !playback.isReady {
-                ProgressView().tint(CS.cyan)
+                BrandRing(size: 64)
             } else if let message = playback.message, !playback.isReady {
                 Text(L10n.tr(message)).font(CS.inter(12)).foregroundStyle(CS.textSecondaryF)
                     .multilineTextAlignment(.center).padding(20)
