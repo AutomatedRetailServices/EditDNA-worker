@@ -208,7 +208,7 @@ struct PlanMyWeekView: View {
         .onChange(of: settings) { _, value in value.save() }
         .sheet(item: $editing) { which in
             PlanSettingSheet(which: which, settings: $settings)
-                .presentationDetents([.height(which == .days ? 360 : which == .between ? 440 : 400)])
+                .presentationDetents([.height(which == .days ? 360 : 400)])
                 .presentationBackground(CS.wiPage)
         }
         .alert(L10n.tr("CutSell"), isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
@@ -407,10 +407,12 @@ struct PlanSettingSheet: View {
                 Text(L10n.tr("From 1 to 50 a day. The times are spread evenly inside “Between”."))
                     .font(CS.inter(12)).foregroundStyle(CS.wiSecondary)
             case .between:
-                HStack(spacing: 10) {
-                    timeBox("From", $from)
-                    timeBox("To", $to)
+                VStack(spacing: 0) {
+                    timeRow("From", $from).accessibilityIdentifier("betweenFrom")
+                    Rectangle().fill(CS.wiBorder).frame(height: 1)
+                    timeRow("To", $to).accessibilityIdentifier("betweenTo")
                 }
+                .wiCard(radius: 14, shadow: false)
                 Text(L10n.tr("\(settings.perDay) a day: \(PlanScheduler.times(perDay: settings.perDay, from: minutes(from), to: max(minutes(from), minutes(to))).prefix(6).map(PlanDay.clock).joined(separator: " · "))\(settings.perDay > 6 ? " …" : "")"))
                     .font(CS.inter(12)).foregroundStyle(CS.wiSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -481,16 +483,14 @@ struct PlanSettingSheet: View {
         }
     }
 
-    private func timeBox(_ label: String, _ value: Binding<Date>) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(L10n.tr(label)).font(CS.inter(12, .medium)).foregroundStyle(CS.wiSecondary)
+    private func timeRow(_ label: String, _ value: Binding<Date>) -> some View {
+        HStack {
+            Text(L10n.tr(label)).font(CS.inter(15, .semibold)).foregroundStyle(CS.wiInk)
+            Spacer()
             DatePicker("", selection: value, displayedComponents: .hourAndMinute)
-                .datePickerStyle(.wheel).labelsHidden()
-                .frame(maxWidth: .infinity).frame(height: 130).clipped()
-                .scaleEffect(0.85)
+                .datePickerStyle(.compact).labelsHidden().tint(CS.accent)
         }
-        .frame(maxWidth: .infinity)
-        .padding(8).wiCard(shadow: false)
+        .padding(.horizontal, 14).frame(height: 56)
     }
 
     private func round(_ text: String, enabled: Bool, action: @escaping () -> Void) -> some View {
