@@ -1375,7 +1375,7 @@ final class Build24UITests: XCTestCase {
         check(tiles.element(boundBy: 0).value as? String == "1" && tiles.element(boundBy: 3).value as? String == "2"
               && tiles.element(boundBy: 5).value as? String == "6", "numbers follow the taps (1–6)",
               "\(tiles.element(boundBy: 0).value ?? "") \(tiles.element(boundBy: 3).value ?? "") \(tiles.element(boundBy: 5).value ?? "")")
-        log("button: \(element("pmwBuild").label) · \(element("pmwSummary").label)")
+        log("button: \(element("pmwBuild").label) · \(element("pmwBuild").value ?? "")")
         shot("pmw_six_tapped")
         // Tap again: it leaves and the numbers move up, then back.
         tiles.element(boundBy: 3).tap(); pause(0.4)

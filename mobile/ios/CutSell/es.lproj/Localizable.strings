@@ -27,6 +27,7 @@
 "4K from your original, with its own detail." = "4K desde tu original, con todo su detalle.";
 "A CutSell multi-clip project can contain up to %@ source clips." = "Un proyecto de varios clips en CutSell puede tener hasta %1$@ clips.";
 "A CutSell multi-clip project can contain up to %lld source clips." = "Un proyecto de varios clips en CutSell puede tener hasta %1$lld clips.";
+"A notification at each video’s time, to post it in one tap." = "Un aviso a la hora de cada video, para publicarlo con un toque.";
 "A sound didn't download" = "Un sonido no se descargó";
 "A video ready at each time you pick." = "Un video listo en cada horario que elijas.";
 "AI & CONTENT" = "IA Y CONTENIDO";
@@ -53,6 +54,7 @@
 "Add photo or video" = "Añadir foto o video";
 "Add text" = "Añadir texto";
 "Add text manually" = "Añadir texto a mano";
+"Add to Plan to post" = "Agregar al Plan para publicar";
 "Add to Sales Mix" = "Agregar a Sales Mix";
 "Add to %@" = "Añadir a %1$@";
 "Add to %lld" = "Añadir a %1$lld";
@@ -74,6 +76,7 @@
 "Adding video… %lld%%" = "Añadiendo video… %1$lld%%";
 "Agree" = "Acepto";
 "All" = "Todo";
+"All products" = "Todos los productos";
 "All %@" = "Todo %1$@";
 "All %lld" = "Todo %1$lld";
 "Allow CutSell to add the finished video to Photos." = "Permite que CutSell agregue el video terminado a Fotos.";
@@ -127,6 +130,7 @@
 "Background upload failed (HTTP %lld)." = "La subida en segundo plano falló (HTTP %1$lld).";
 "Before your first cut" = "Antes de tu primer corte";
 "Benefit" = "Beneficio";
+"Between" = "Entre";
 "Black box, white words" = "Caja negra, letras blancas";
 "Blue" = "Azul";
 "Bodies" = "Cuerpos";
@@ -137,6 +141,10 @@
 "Brand" = "Marca";
 "Brand (e.g. CeraVe)" = "Marca (ej. CeraVe)";
 "Build my plan" = "Crear mi plan";
+"Build plan · %@ video%@" = "Armar plan · %1$@ video%2$@";
+"Build plan · %@ video%lld" = "Armar plan · %1$@ video%2$lld";
+"Build plan · %lld video%@" = "Armar plan · %1$lld video%2$@";
+"Build plan · %lld video%lld" = "Armar plan · %1$lld video%2$lld";
 "Building your sales edit" = "Armando tu edición de venta";
 "Bulk" = "Varios";
 "Bulk · %@ videos" = "Bulk · %1$@ videos";
@@ -156,6 +164,8 @@
 "Caption and video are ready." = "El caption y el video están listos.";
 "Caption copied" = "Caption copiado";
 "Caption copied · paste it in TikTok" = "Caption copiado · pégalo en TikTok";
+"Caption copied · paste it in %@" = "Texto copiado · pégalo en %1$@";
+"Caption copied · paste it in %lld" = "Texto copiado · pégalo en %1$lld";
 "Caption copied, paste it in TikTok" = "Caption copiado, pégalo en TikTok";
 "Caption deleted" = "Subtítulo eliminado";
 "Caption ready" = "Caption listo";
@@ -170,6 +180,7 @@
 "Center" = "Centro";
 "Change" = "Cambiar";
 "Change a voice-over's volume from its panel in the editor." = "Cambia el volumen de una voz en off desde su panel en el editor.";
+"Change day or time" = "Cambiar día u hora";
 "Change export settings" = "Cambiar ajustes de exportación";
 "Change permission" = "Cambiar permiso";
 "Change the language" = "Cambiar el idioma";
@@ -278,8 +289,10 @@
 "Couldn’t save the caption. Please try again." = "No se pudo guardar el caption. Vuelve a intentarlo.";
 "Couldn’t save the video. Please try again." = "No se pudo guardar el video. Vuelve a intentarlo.";
 "Couldn’t save this change. Please try again." = "No se pudo guardar este cambio. Vuelve a intentarlo.";
+"Couldn’t schedule it. Check your connection and try again." = "No se pudo programar. Revisa tu conexión e inténtalo de nuevo.";
 "Couldn’t start CutSell" = "No se pudo iniciar CutSell";
 "Couldn’t start the cut" = "No se pudo iniciar el corte";
+"Couldn’t swap it. Please try again." = "No se pudo cambiar. Inténtalo de nuevo.";
 "Create" = "Crear";
 "Create 1 cut" = "Crear 1 corte";
 "Create more" = "Crear más";
@@ -339,6 +352,8 @@
 "DRAFT" = "BORRADOR";
 "Dark" = "Oscuro";
 "Day" = "Día";
+"Days" = "Días";
+"Decide later" = "Decidir después";
 "Default export quality" = "Calidad de exportación";
 "Delete" = "Eliminar";
 "Delete Account" = "Eliminar cuenta";
@@ -405,6 +420,8 @@
 "Error: %lld." = "Error: %1$lld.";
 "Estimated file size" = "Tamaño estimado";
 "Evening" = "Tarde";
+"Every Ready video is already in your plan." = "Todos los videos listos ya están en tu plan.";
+"Every day" = "Todos los días";
 "Everything is posted 🎉" = "Todo está publicado 🎉";
 "Expand" = "Expandir";
 "Expand timeline" = "Expandir la línea de tiempo";
@@ -413,6 +430,7 @@
 "Export 4K to Photos" = "Exportar 4K a Fotos";
 "Export all %@" = "Exportar todos %1$@";
 "Export all %lld" = "Exportar todos %1$lld";
+"Export and keep it on this iPhone" = "Exportar y guardarlo en este iPhone";
 "Export and save" = "Exportar y guardar";
 "Export failed" = "La exportación falló";
 "Export on our server (1080p)" = "Exportar en nuestro servidor (1080p)";
@@ -454,6 +472,8 @@
 "Free up space" = "Liberar espacio";
 "Freed %@" = "Liberado: %1$@";
 "Freed %lld" = "Liberado: %1$lld";
+"From" = "Desde";
+"From 1 to 50 a day. The times are spread evenly inside “Between”." = "De 1 a 50 al día. Las horas se reparten parejas dentro de “Entre”.";
 "From CutSell to TikTok in a few taps." = "De CutSell a TikTok en unos toques.";
 "From the cut to TikTok" = "Del corte a TikTok";
 "From the reminder or in Plan, open the video and tap Post to TikTok." = "Desde el aviso o en Plan, abre el video y toca Publicar en TikTok.";
@@ -626,6 +646,7 @@
 "Microphone" = "Micrófono";
 "Mirror" = "Espejo";
 "Mirror off" = "Espejo apagado";
+"Mix products automatically" = "Mezclar productos automáticamente";
 "Mixed products? Detect for me" = "¿Varios productos? Detéctalos por mí";
 "Mode" = "Modo";
 "Mode: %@" = "Modo: %1$@";
@@ -687,6 +708,7 @@
 "Night" = "Noche";
 "No B-roll placed on the timeline yet." = "Todavía no hay B-roll en la línea de tiempo.";
 "No B-roll yet" = "Todavía no hay B-roll";
+"No Ready videos yet. Finished cuts show here." = "Aún no hay videos listos. Los cortes terminados salen aquí.";
 "No account (this iPhone only)" = "Sin cuenta (solo este iPhone)";
 "No clips available yet." = "Todavía no hay clips.";
 "No connection. Check your internet and try again." = "Sin conexión. Revisa tu internet y vuelve a intentarlo.";
@@ -728,10 +750,12 @@
 "Notifications" = "Notificaciones";
 "Off" = "Apagado";
 "Off is the safest default. You can change audio later in the editor." = "Apagado es lo más seguro. Puedes cambiar el audio luego en el editor.";
+"Off: posts in the order you tapped (1, 2, 3…)." = "Apagado: publica en el orden en que los tocaste (1, 2, 3…).";
 "Offer" = "Oferta";
 "On" = "Activado";
 "On the day, you get a reminder to post." = "Ese día te llega un recordatorio para publicar.";
 "On this iPhone" = "En este iPhone";
+"On: never the same product twice in a row." = "Prendido: nunca el mismo producto dos veces seguidas.";
 "One" = "Uno";
 "One clip couldn’t be added. Try another one." = "No se pudo añadir un clip. Prueba con otro.";
 "One edit in the order you selected." = "Una edición en el orden que elegiste.";
@@ -763,6 +787,8 @@
 "Original quality detected" = "Calidad original detectada";
 "Other audio playing: %@" = "Otro audio sonando: %1$@";
 "Other audio playing: %lld" = "Otro audio sonando: %1$lld";
+"Other time" = "Otra hora";
+"Other time ›" = "Otra hora ›";
 "Overlap audio" = "Superponer audio";
 "Overlay" = "Superponer";
 "Overlay deleted" = "Superposición eliminada";
@@ -795,6 +821,7 @@
 "Paste or write what you'll say…" = "Pega o escribe lo que vas a decir…";
 "Pause" = "Pausa";
 "Paused · " = "En pausa · ";
+"Per day" = "Por día";
 "Permanently removes account and eligible data" = "Borra para siempre la cuenta y sus datos";
 "Permission" = "Permiso";
 "Permissions, consent and deletion" = "Permisos, consentimiento y eliminación";
@@ -832,6 +859,7 @@
 "Post and track your videos" = "Publica y sigue tus videos";
 "Post at your times" = "Publica a tus horas";
 "Post it in TikTok and come back to CutSell." = "Publícalo en TikTok y vuelve a CutSell.";
+"Post on" = "Publicar en";
 "Post to TikTok" = "Publicar en TikTok";
 "Posted" = "Publicado";
 "Preferences" = "Preferencias";
@@ -895,6 +923,7 @@
 "REJECTED" = "RECHAZADO";
 "Read your script while you record." = "Lee tu guion mientras grabas.";
 "Ready" = "Listos";
+"Ready to post" = "Listo para publicar";
 "Ready %@" = "Listos %1$@";
 "Ready %lld" = "Listos %1$lld";
 "Recent" = "Recientes";
@@ -928,6 +957,7 @@
 "Remove" = "Quitar";
 "Remove a clip" = "Quitar un clip";
 "Remove clip" = "Quitar clip";
+"Remove from plan" = "Quitar del plan";
 "Remove from this week" = "Quitar de esta semana";
 "Removes background noise and sounds, so only your voice is heard." = "Quita el ruido y los sonidos de fondo, para que solo se escuche tu voz.";
 "Removes background noise from the voice" = "Quita el ruido de fondo de la voz";
@@ -992,6 +1022,10 @@
 "Saving your changes…" = "Guardando tus cambios…";
 "Saving…" = "Guardando…";
 "Scale" = "Tamaño";
+"Schedule · %@ · %@" = "Programar · %1$@ · %2$@";
+"Schedule · %@ · %lld" = "Programar · %1$@ · %2$lld";
+"Schedule · %lld · %@" = "Programar · %1$lld · %2$@";
+"Schedule · %lld · %lld" = "Programar · %1$lld · %2$lld";
 "Script" = "Guion";
 "Script settings" = "Ajustes del guion";
 "Scroll speed" = "Velocidad";
@@ -1003,11 +1037,13 @@
 "See all in Edits" = "Ver todo en Mis videos";
 "See all in Edits ›" = "Ver todo en Mis videos ›";
 "See the 4 welcome screens again" = "Mira de nuevo las 4 pantallas de bienvenida";
+"See this week ›" = "Ver esta semana ›";
 "Select" = "Seleccionar";
 "Select More Photos…" = "Elegir más fotos…";
 "Select a clip" = "Elige un clip";
 "Select a clip or an overlay, then tap ◇." = "Elige un clip o una superposición y toca ◇.";
 "Select a clip, voice-over, overlay or caption first." = "Primero elige un clip, voz en off, superposición o subtítulo.";
+"Select all" = "Seleccionar todo";
 "Select more photos" = "Elegir más fotos";
 "Select the video or an overlay and move the white line to where the movement starts." = "Selecciona el video o una superposición y lleva la línea blanca a donde empieza el movimiento.";
 "Select the video or an overlay and put the white line where the movement starts." = "Selecciona el video o una superposición y pon la línea blanca donde empieza el movimiento.";
@@ -1022,6 +1058,8 @@
 "Settings" = "Ajustes";
 "Share" = "Compartir";
 "Share to TikTok" = "Compartir en TikTok";
+"Share to %@" = "Compartir en %1$@";
+"Share to %lld" = "Compartir en %1$lld";
 "Sharp" = "Nítido";
 "Short guides, 3–5 steps each." = "Guías cortas, de 3 a 5 pasos.";
 "Show all" = "Ver todo";
@@ -1081,6 +1119,7 @@
 "Starting the export…" = "Empezando la exportación…";
 "Starting your Sales Mix…" = "Empezando tu Sales Mix…";
 "Starting your cut" = "Empezando tu corte";
+"Starts" = "Empieza";
 "Starts at %@s on the timeline." = "Empieza en el segundo %1$@ de la línea de tiempo.";
 "Starts at %llds on the timeline." = "Empieza en el segundo %1$lld de la línea de tiempo.";
 "Stay here" = "Quedarme aquí";
@@ -1098,6 +1137,7 @@
 "Supported video files" = "Videos compatibles";
 "Swap Take (%@)" = "Cambiar toma (%1$@)";
 "Swap Take (%lld)" = "Cambiar toma (%1$lld)";
+"Swap video" = "Cambiar video";
 "Swipe the sheet down or tap outside it. Tap the voice track to change it later." = "Desliza la hoja hacia abajo o toca fuera de ella. Toca la pista de voz para cambiarla después.";
 "System Default" = "Predeterminado del sistema";
 "THIS MONTH" = "ESTE MES";
@@ -1128,6 +1168,7 @@
 "Tap to retry" = "Toca para reintentar";
 "Tap to review it" = "Toca para revisarlo";
 "Tap to stop" = "Toca para detener";
+"Tap videos in the order you want to post." = "Toca los videos en el orden en que quieres publicarlos.";
 "Tap ◇ to add a keyframe, then move the white line and pinch, drag or turn the picture: a new ◇ appears." = "Toca ◇ para agregar un keyframe; luego mueve la línea blanca y pellizca, arrastra o gira la imagen: aparece un nuevo ◇.";
 "Tap ◇ to keep this framing" = "Toca ◇ para guardar este encuadre";
 "Tap ◇. Then move the white line and pinch, drag or turn the picture: a new ◇ appears there." = "Toca ◇. Luego mueve la línea blanca y pellizca, arrastra o gira la imagen: ahí aparece un nuevo ◇.";
@@ -1214,11 +1255,17 @@
 "Time to post: Rhino Straps 🔥" = "Hora de publicar: Rhino Straps 🔥";
 "Time to post: %@" = "Hora de publicar: %1$@";
 "Time to post: %lld" = "Hora de publicar: %1$lld";
+"Time to post: %@ on %@" = "Hora de publicar: %1$@ en %2$@";
+"Time to post: %@ on %lld" = "Hora de publicar: %1$@ en %2$lld";
+"Time to post: %lld on %@" = "Hora de publicar: %1$lld en %2$@";
+"Time to post: %lld on %lld" = "Hora de publicar: %1$lld en %2$lld";
 "Timeline" = "Línea de tiempo";
 "Tip: post these over several days, between other products. Feeds reward variety." = "Consejo: publícalos en varios días, entre otros productos. El feed premia la variedad.";
+"To" = "Hasta";
 "To close the sheet, swipe it down or tap outside it." = "Para cerrar la hoja, deslízala hacia abajo o toca fuera de ella.";
 "To make a cut, agree to the AI processing notice." = "Para hacer un corte, acepta el aviso de procesamiento con IA.";
 "To make your cut, CutSell uses these two AI services:" = "Para hacer tu corte, CutSell usa estos dos servicios de IA:";
+"Today" = "Hoy";
 "Today · " = "Hoy · ";
 "Today · %@" = "Hoy · %1$@";
 "Today · %lld" = "Hoy · %1$lld";
@@ -1226,6 +1273,7 @@
 "Today: post %@ video%lld" = "Hoy: publica %1$@ video%2$lld";
 "Today: post %lld video%@" = "Hoy: publica %1$lld video%2$@";
 "Today: post %lld video%lld" = "Hoy: publica %1$lld video%2$lld";
+"Tomorrow" = "Mañana";
 "Tomorrow · " = "Mañana · ";
 "Top" = "Arriba";
 "Top left" = "Arriba a la izquierda";
@@ -1352,6 +1400,7 @@
 "Voiceover %lld added · tap ↶ to undo" = "Voz en off %1$lld añadida · toca ↶ para deshacer";
 "Voices and sounds" = "Voces y sonidos";
 "Volume" = "Volumen";
+"WHERE TO?" = "¿A DÓNDE?";
 "Wait until it finishes uploading, then split it." = "Espera a que termine de subir y luego divídelo.";
 "Waiting for CutSell" = "Esperando a CutSell";
 "Waiting for a processing slot" = "Esperando un espacio para procesar";
@@ -1367,6 +1416,7 @@
 "We spread your ready videos so every day has variety. Tap one to move it to another day or time." = "Repartimos tus videos listos para que cada día tenga variedad. Toca uno para moverlo a otro día u hora.";
 "We'll mark the video as posted in your plan." = "Marcaremos el video como publicado en tu plan.";
 "We'll notify you when your videos are ready. You can keep using CutSell." = "Te avisamos cuando tus videos estén listos. Puedes seguir usando CutSell.";
+"We'll remind you at that time to post it in one tap." = "Te avisaremos a esa hora para publicarlo con un toque.";
 "We’ll let you know in CutSell when your cut is ready." = "Te avisamos en CutSell cuando tu corte esté listo.";
 "We’ll notify you as each cut is ready." = "Te avisamos cuando cada corte esté listo.";
 "We’ll notify you when processing begins." = "Te avisaremos cuando empiece el procesamiento.";
@@ -1486,6 +1536,7 @@
 "untitled cut" = "corte sin título";
 "upload failed" = "la subida falló";
 "video ready" = "video listo";
+"videos a day" = "videos al día";
 "waiting for the download" = "esperando la descarga";
 "your final cut" = "tu corte final";
 "your footage" = "tu material";
@@ -1502,6 +1553,10 @@
 "%lld / %lld cuts ·" = "%1$lld / %2$lld cortes ·";
 "%@ MB" = "%1$@ MB";
 "%lld MB" = "%1$lld MB";
+"%@ a day: %@" = "%1$@ al día: %2$@";
+"%@ a day: %lld" = "%1$@ al día: %2$lld";
+"%lld a day: %@" = "%1$lld al día: %2$@";
+"%lld a day: %lld" = "%1$lld al día: %2$lld";
 "%@ active" = "%1$@ activos";
 "%lld active" = "%1$lld activos";
 "%@ added" = "%1$@ añadido";
@@ -1626,6 +1681,30 @@
 "%@ · %lld MB" = "%1$@ · %2$lld MB";
 "%lld · %@ MB" = "%1$lld · %2$@ MB";
 "%lld · %lld MB" = "%1$lld · %2$lld MB";
+"%@ · %@ a day · reminders off" = "%1$@ · %2$@ al día · recordatorios apagados";
+"%@ · %lld a day · reminders off" = "%1$@ · %2$lld al día · recordatorios apagados";
+"%lld · %@ a day · reminders off" = "%1$lld · %2$@ al día · recordatorios apagados";
+"%lld · %lld a day · reminders off" = "%1$lld · %2$lld al día · recordatorios apagados";
+"%@ · %@ a day · reminders on" = "%1$@ · %2$@ al día · recordatorios prendidos";
+"%@ · %lld a day · reminders on" = "%1$@ · %2$lld al día · recordatorios prendidos";
+"%lld · %@ a day · reminders on" = "%1$lld · %2$@ al día · recordatorios prendidos";
+"%lld · %lld a day · reminders on" = "%1$lld · %2$lld al día · recordatorios prendidos";
+"%@ → %@ · %@ a day · reminders off" = "%1$@ → %2$@ · %3$@ al día · recordatorios apagados";
+"%@ → %@ · %lld a day · reminders off" = "%1$@ → %2$@ · %3$lld al día · recordatorios apagados";
+"%@ → %lld · %@ a day · reminders off" = "%1$@ → %2$lld · %3$@ al día · recordatorios apagados";
+"%@ → %lld · %lld a day · reminders off" = "%1$@ → %2$lld · %3$lld al día · recordatorios apagados";
+"%lld → %@ · %@ a day · reminders off" = "%1$lld → %2$@ · %3$@ al día · recordatorios apagados";
+"%lld → %@ · %lld a day · reminders off" = "%1$lld → %2$@ · %3$lld al día · recordatorios apagados";
+"%lld → %lld · %@ a day · reminders off" = "%1$lld → %2$lld · %3$@ al día · recordatorios apagados";
+"%lld → %lld · %lld a day · reminders off" = "%1$lld → %2$lld · %3$lld al día · recordatorios apagados";
+"%@ → %@ · %@ a day · reminders on" = "%1$@ → %2$@ · %3$@ al día · recordatorios prendidos";
+"%@ → %@ · %lld a day · reminders on" = "%1$@ → %2$@ · %3$lld al día · recordatorios prendidos";
+"%@ → %lld · %@ a day · reminders on" = "%1$@ → %2$lld · %3$@ al día · recordatorios prendidos";
+"%@ → %lld · %lld a day · reminders on" = "%1$@ → %2$lld · %3$lld al día · recordatorios prendidos";
+"%lld → %@ · %@ a day · reminders on" = "%1$lld → %2$@ · %3$@ al día · recordatorios prendidos";
+"%lld → %@ · %lld a day · reminders on" = "%1$lld → %2$@ · %3$lld al día · recordatorios prendidos";
+"%lld → %lld · %@ a day · reminders on" = "%1$lld → %2$lld · %3$@ al día · recordatorios prendidos";
+"%lld → %lld · %lld a day · reminders on" = "%1$lld → %2$lld · %3$lld al día · recordatorios prendidos";
 "%@, muted" = "%1$@, silenciado";
 "%lld, muted" = "%1$lld, silenciado";
 "%@, %@ seconds" = "%1$@, %2$@ segundos";

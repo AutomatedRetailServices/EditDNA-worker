@@ -279,7 +279,8 @@ private struct ExportPreview: View {
     @ObservedObject private var router = AppRouter.shared
 
     var body: some View {
-        Group {
+        ZStack {
+            CS.wiPage.ignoresSafeArea()
             if scheduled {
                 NavigationStack { PlanWeekView(onNewMix: {}, onOpenDay: { _ in }) }
             } else if let model = holder.model {

@@ -305,7 +305,6 @@ struct PlanMyWeekView: View {
                         Text(L10n.tr("Build plan · \(chosen.count) video\(chosen.count == 1 ? "" : "s")")).font(CS.inter(17, .bold))
                         Text(L10n.tr(PlanScheduler.summary(placed, perDay: settings.perDay, reminders: reminders)))
                             .font(CS.inter(11, .medium)).opacity(0.9)
-                            .accessibilityIdentifier("pmwSummary")
                     }
                 }
                 .foregroundStyle(Color(fixed: 0xFFFFFF))
@@ -315,6 +314,10 @@ struct PlanMyWeekView: View {
             .buttonStyle(.plain)
             .disabled(chosen.isEmpty || building)
             .padding(.top, 4)
+            .accessibilityElement(children: .ignore)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel(L10n.tr("Build plan · \(chosen.count) video\(chosen.count == 1 ? "" : "s")"))
+            .accessibilityValue(L10n.tr(PlanScheduler.summary(placed, perDay: settings.perDay, reminders: reminders)))
             .accessibilityIdentifier("pmwBuild")
         }
         .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 10)
