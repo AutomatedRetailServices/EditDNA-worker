@@ -268,6 +268,7 @@
 "Couldn’t read upload part %lld." = "No se pudo leer la parte %1$lld de la subida.";
 "Couldn’t rename it. Please try again." = "No se pudo cambiar el nombre. Vuelve a intentarlo.";
 "Couldn’t rename the cut. Please try again." = "No se pudo cambiar el nombre del corte. Vuelve a intentarlo.";
+"Couldn’t retry this cut. Please upload it again." = "No se pudo reintentar este corte. Vuelve a subirlo.";
 "Couldn’t save that. Please try again." = "No se pudo guardar. Vuelve a intentarlo.";
 "Couldn’t save the caption. Please try again." = "No se pudo guardar el caption. Vuelve a intentarlo.";
 "Couldn’t save the video. Please try again." = "No se pudo guardar el video. Vuelve a intentarlo.";
@@ -854,6 +855,7 @@
 "Processing continues if you leave this screen." = "El procesamiento sigue aunque salgas de esta pantalla.";
 "Processing failed" = "El procesamiento falló";
 "Processing issue" = "Problema al procesar";
+"Processing stopped" = "El procesamiento se detuvo";
 "Processing %@" = "Procesando %1$@";
 "Processing %lld" = "Procesando %1$lld";
 "Processing %@%%" = "Procesando %1$@%%";
@@ -939,6 +941,7 @@
 "Retrieving %lld of %@ from Photos / iCloud…" = "Trayendo %1$lld de %2$@ de Fotos / iCloud…";
 "Retrieving %lld of %lld from Photos / iCloud…" = "Trayendo %1$lld de %2$lld de Fotos / iCloud…";
 "Retry" = "Reintentar";
+"Retry processing" = "Reintentar procesamiento";
 "Review & edit" = "Revisar y editar";
 "Review clips" = "Revisar clips";
 "Review the clips and continue; CutSell makes the cut." = "Revisa los clips y continúa; CutSell hace el corte.";
@@ -1219,6 +1222,7 @@
 "Try Upload now" = "Prueba Subir ahora";
 "Try Voice over now" = "Prueba la voz en off ahora";
 "Try again" = "Intentar de nuevo";
+"Try again—the engine will resume from this stage." = "Inténtalo de nuevo: el motor seguirá desde esta etapa.";
 "Try another name." = "Prueba otro nombre.";
 "Try it now" = "Pruébalo ahora";
 "Try keyframes now" = "Prueba los keyframes ahora";
@@ -1335,6 +1339,7 @@
 "Waiting for CutSell" = "Esperando a CutSell";
 "Watching and choosing best takes" = "Mirando y eligiendo las mejores tomas";
 "We couldn't hear anyone talking in this video" = "No escuchamos a nadie hablando en este video";
+"We couldn’t finish this cut" = "No pudimos terminar este corte";
 "We couldn’t tell from the video" = "No pudimos saberlo por el video";
 "We mix the clips so each video starts and ends differently." = "Mezclamos los clips para que cada video empiece y termine distinto.";
 "We save the video, copy your caption and open TikTok. Pick the video, paste the caption and post." = "Guardamos el video, copiamos tu caption y abrimos TikTok. Elige el video, pega el caption y publica.";
@@ -1399,6 +1404,7 @@
 "Your finished and draft edits will appear here." = "Aquí aparecerán tus ediciones terminadas y tus borradores.";
 "Your name" = "Tu nombre";
 "Your original isn't on this iPhone: exporting from the 1080p copy." = "Tu original no está en este iPhone: se exporta desde la copia 1080p.";
+"Your original recording is safe" = "Tu grabación original está a salvo";
 "Your original video is safe" = "Tu video original está a salvo";
 "Your original wasn't on this iPhone, so this export used the 1080p copy." = "Tu original no estaba en este iPhone, así que se usó la copia 1080p.";
 "Your originals stay in Photos. Freeing space only removes CutSell's copies; they come back when needed." = "Tus originales se quedan en Fotos. Liberar espacio solo borra las copias de CutSell; vuelven cuando hagan falta.";
