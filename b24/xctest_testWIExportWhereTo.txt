@@ -1,11 +1,11 @@
-B24UI    22.5 PASS WHERE TO? Save to Photos · Add to Plan
-B24UI    34.4 PASS Saved to Photos · Share · Done
-B24UI    44.8 PASS the scheduling sheet
-B24UI    47.5 button: Schedule · Mon 26 · 7:00 PM
-B24UI    49.3 PASS Schedule → This week · 1 video · 1 product · 1 per day
-B24UI    49.3 PASS the video at 7:00 PM in This week
-B24UI    50.5 FAILURES: none
-Test Case '-[CutSellUITests.Build24UITests testWIExportWhereTo]' passed (50.806 seconds).
-Test Suite 'Build24UITests' passed at 2026-10-24 21:05:54.592.
-Test Suite 'CutSellUITests.xctest' passed at 2026-10-24 21:05:54.594.
-Test Suite 'Selected tests' passed at 2026-10-24 21:05:54.595.
+B24UI    20.7 PASS WHERE TO? Save to Photos · Add to Plan
+B24UI    31.4 PASS Saved to Photos · Share · Done
+B24UI    43.1 PASS the scheduling sheet
+B24UI    45.7 button: Schedule · Mon 26 · 7:00 PM
+B24UI    48.7 PASS Schedule → This week · 1 video · 1 product · 1 per day
+B24UI    48.7 PASS the video at 7:00 PM in This week
+B24UI    49.9 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testWIExportWhereTo]' passed (50.220 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-24 21:22:21.120.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-24 21:22:21.121.
+Test Suite 'Selected tests' passed at 2026-10-24 21:22:21.121.
