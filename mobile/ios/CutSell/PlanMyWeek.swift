@@ -214,6 +214,7 @@ struct PlanMyWeekView: View {
         .alert(L10n.tr("CutSell"), isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
             Button(L10n.tr("OK"), role: .cancel) {}
         } message: { Text(L10n.tr(errorMessage ?? "")) }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("planMyWeekSimple")
     }
 
@@ -545,6 +546,7 @@ struct SlotActionsSheet: View {
         }
         .padding(.horizontal, 20)
         .environment(\.colorScheme, .light)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("slotSheet")
     }
 
@@ -612,6 +614,7 @@ struct SwapVideoSheet: View {
         }
         .padding(.horizontal, 20)
         .environment(\.colorScheme, .light)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("swapSheet")
     }
 

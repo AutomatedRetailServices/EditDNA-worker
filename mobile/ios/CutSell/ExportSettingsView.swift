@@ -555,6 +555,7 @@ struct ExportScheduleContent: View {
             .buttonStyle(.plain)
             .accessibilityIdentifier("scheduleLater")
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("scheduleSheet")
         .task { await catalog.refresh(session: appState.session, projects: appState.projects) }
         .sheet(isPresented: $pickingTime) {
