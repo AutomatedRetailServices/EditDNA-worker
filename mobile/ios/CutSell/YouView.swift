@@ -317,12 +317,12 @@ struct YouScreen<Content: View>: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 8) {
                     Button(action: back) {
-                        Image("ControlBack").resizable().frame(width: 44, height: 44).frame(width: 48, height: 48)
+                        WIHeaderIcon(image: "WIBack").frame(width: 48, height: 48)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(L10n.tr("Back"))
                     .accessibilityIdentifier("youBack")
-                    Text(L10n.tr(title)).font(CS.inter(22, .semibold)).foregroundStyle(YouStyle.primary)
+                    Text(L10n.tr(title)).font(CS.inter(22, .heavy)).foregroundStyle(CS.wiInk)
                 }
                 .padding(.leading, -16)
                 Text(L10n.tr(subtitle)).font(CS.inter(13, .medium)).foregroundStyle(YouStyle.secondary).padding(.top, 11)

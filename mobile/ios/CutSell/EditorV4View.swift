@@ -658,7 +658,7 @@ struct EditorV4View: View {
     private var header: some View {
         HStack(spacing: 0) {
             Button { dismiss() } label: {
-                Image("ControlBack").resizable().frame(width: 44, height: 44).frame(width: 46, height: 47)
+                WIHeaderIcon(image: "WIBack").frame(width: 46, height: 47)
             }
             .accessibilityLabel(L10n.tr("Back"))
             Button {
