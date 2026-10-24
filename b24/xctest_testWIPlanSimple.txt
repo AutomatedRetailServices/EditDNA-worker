@@ -1,25 +1,25 @@
-B24UI    20.0 PASS Plan · Plan my week ›
-B24UI    22.3 PASS Plan my week opens the one-screen picker
-B24UI    22.6 PASS Ready videos in the grid · 9
-B24UI    22.8 PASS Build plan is off with no video
-B24UI    29.1 PASS numbers follow the taps (1–6) · 1 2 6
-B24UI    29.3 button: Build plan · 6 videos · Mon 26 → Tue 27 · 4 a day · reminders on
-B24UI    33.9 PASS untapping renumbers · 2
-B24UI    39.5 PASS Between selector
-B24UI    39.6 between: 4 a day: 9:00 AM · 1:00 PM · 5:00 PM · 9:00 PM
-B24UI    47.1 PASS Build plan opens This week · 6 videos · 4 products · 4 per day
-B24UI    47.5 PASS the 6 videos are planned · 6 videos · 4 products · 4 per day
-B24UI    50.9 PASS tapping a video opens its sheet
-B24UI    51.1 PASS Swap · Change · Remove
-B24UI    55.6 PASS Swap video lists other videos
-B24UI    58.8 PASS after the swap: still 6 videos · 6 videos · 4 products · 4 per day
-B24UI    64.2 PASS Plan: See this week › and Plan my week ›
-B24UI    67.1 PASS See this week › opens This week
-B24UI    70.6 PASS the day: Share to … · Share to TikTok
-B24UI    78.6 PASS the reminder arrives · CUTSELL, now, Time to post: Power Bank on TikTok, Caption and video are ready.
-B24UI    82.9 PASS the reminder opens its video
-B24UI    83.1 FAILURES: none
-Test Case '-[CutSellUITests.Build24UITests testWIPlanSimple]' passed (83.878 seconds).
-Test Suite 'Build24UITests' passed at 2026-10-24 21:36:58.824.
-Test Suite 'CutSellUITests.xctest' passed at 2026-10-24 21:36:58.825.
-Test Suite 'Selected tests' passed at 2026-10-24 21:36:58.825.
+B24UI    20.6 PASS Plan · Plan my week ›
+B24UI    23.3 PASS Plan my week opens the one-screen picker
+B24UI    23.7 PASS Ready videos in the grid · 9
+B24UI    23.9 PASS Build plan is off with no video
+B24UI    31.2 PASS numbers follow the taps (1–6) · 1 2 6
+B24UI    31.6 button: Build plan · 6 videos · Mon 26 → Tue 27 · 4 a day · reminders on
+B24UI    33.7 PASS untapping renumbers · 2
+B24UI    37.2 PASS Between selector
+B24UI    37.3 between: 4 a day: 9:00 AM · 1:00 PM · 5:00 PM · 9:00 PM
+B24UI    53.1 PASS Build plan opens This week · 6 videos · 4 products · 4 per day
+B24UI    60.2 PASS the 6 videos are planned · 6 videos · 4 products · 4 per day
+B24UI    64.5 PASS tapping a video opens its sheet
+B24UI    65.4 PASS Swap · Change · Remove
+B24UI    68.6 PASS Swap video lists other videos
+B24UI    71.9 PASS after the swap: still 6 videos · 6 videos · 4 products · 4 per day
+B24UI    78.9 PASS Plan: See this week › and Plan my week ›
+B24UI    82.0 PASS See this week › opens This week
+B24UI    84.7 PASS the day: Share to … · Share to TikTok
+B24UI    93.6 PASS the reminder arrives · CUTSELL, now, Time to post: Power Bank on TikTok, Caption and video are ready.
+B24UI    98.0 PASS the reminder opens its video
+B24UI    98.2 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testWIPlanSimple]' passed (98.470 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-24 21:54:52.665.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-24 21:54:52.666.
+Test Suite 'Selected tests' passed at 2026-10-24 21:54:52.666.
