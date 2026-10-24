@@ -25,6 +25,12 @@ enum DesignScreenshots {
 
     /// White Indigo review set (Figma 12_Prototype): the screens the Product Owner asked to see.
     static let whiteIndigo = [
+        "editor_v4_base", "editor_v4_caption_edit", "editor_v4_cap_highlight", "editor_v4_cap_box", "editor_v4_cap_fonts",
+        "editor_v4_overlay_gallery", "editor_v4_overlay_selected", "editor_v4_vo_record", "editor_v4_vo_review",
+        "editor_v4_mic", "editor_v4_style", "editor_v4_sel_video",
+    ]
+    /// The full White Indigo review set (main screens).
+    static let whiteIndigoMain = [
         "camera_style", "mix_setup", "you_account", "you_prefs", "you_plan", "you_help", "ai_consent",
         "hub", "promoting_sheet", "promoting_bulk", "edits_ready", "product_detail", "assign", "plan_goal", "plan_week", "plan_today", "edits", "edits_products", "edits_processing", "plan", "you", "processing", "processing_failed", "ready",
         "err_too_long", "err_unsupported", "err_could_not_add", "perm_camera", "gallery_single", "gallery_access", "style",
