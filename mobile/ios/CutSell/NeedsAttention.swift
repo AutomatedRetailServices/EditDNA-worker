@@ -104,6 +104,14 @@ struct NeedsAttentionRow: View {
     let onRetry: () -> Void
 
     private var failed: Bool { if case .failed = row.state { return true }; return false }
+    private var status: String {
+        switch row.state {
+        case .ready: return "COMPLETED"
+        case .failed: return "FAILED"
+        case .queued: return "QUEUED"
+        case .uploading, .processing: return "PROCESSING"
+        }
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -120,7 +128,7 @@ struct NeedsAttentionRow: View {
                 HStack {
                     Text(verbatim: QueueRowView.clock(row.duration)).font(CS.inter(12, .medium)).foregroundStyle(CS.wiSecondary)
                     Spacer()
-                    Text(L10n.tr(failed ? "FAILED" : "COMPLETED")).font(CS.inter(10, .semibold)).foregroundStyle(CS.accent)
+                    Text(L10n.tr(status)).font(CS.inter(10, .semibold)).foregroundStyle(CS.accent)
                 }
             }
             .padding(.leading, 10)
@@ -134,9 +142,14 @@ struct NeedsAttentionRow: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("needsAttentionRetry")
-                } else {
+                } else if row.state == .ready {
                     Image(systemName: "checkmark.circle.fill").font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(CS.wiReady)
+                } else if row.state == .queued {
+                    Image("WIClock").renderingMode(.template).resizable().frame(width: 22, height: 22)
+                        .foregroundStyle(CS.wiSecondary)
+                } else {
+                    ProgressRing(fraction: nil).frame(width: 22, height: 22)
                 }
             }
             .padding(.leading, 10)
