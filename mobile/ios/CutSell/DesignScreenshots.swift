@@ -27,7 +27,8 @@ enum DesignScreenshots {
     static let whiteIndigo = [
         "editor_v4_base", "editor_v4_caption_edit", "editor_v4_cap_highlight", "editor_v4_cap_box", "editor_v4_cap_fonts",
         "editor_v4_overlay_gallery", "editor_v4_overlay_selected", "editor_v4_vo_record", "editor_v4_vo_review",
-        "editor_v4_mic", "editor_v4_style", "editor_v4_sel_video",
+        "editor_v4_mic", "editor_v4_style", "editor_v4_sel_video", "editor_v4_vo_track", "editor_v4_vo_selected",
+        "hub", "promoting_sheet", "processing_failed",
     ]
     /// The full White Indigo review set (main screens).
     static let whiteIndigoMain = [
@@ -164,6 +165,10 @@ struct DesignScreenshotRoot: View {
             SampleEditor(state: EditorPreviewState(panel: .micPermission), overlays: true)
         case "editor_v4_style":
             SampleEditor(state: EditorPreviewState(panel: .style))
+        case "editor_v4_vo_track":
+            SampleEditor(state: EditorPreviewState(), voice: true)
+        case "editor_v4_vo_selected":
+            SampleEditor(state: EditorPreviewState(selection: .voiceOver("vo1")), voice: true)
         case "editor_v4_sel_video":
             SampleEditor(state: EditorPreviewState(selection: .video("c2")))
         case "camera":
@@ -369,6 +374,7 @@ private struct SampleEditor: View {
     var preset = "classic"
     var font = "montserrat"
     var overlays = false
+    var voice = false
     @StateObject private var holder = SampleEditorHolder()
 
     var body: some View {
@@ -377,7 +383,7 @@ private struct SampleEditor: View {
                 EditorV4View(model: model, project: holder.project, previewState: state)
             }
         }
-        .onAppear { holder.build(preset: preset, font: font, overlays: overlays) }
+        .onAppear { holder.build(preset: preset, font: font, overlays: overlays, voice: voice) }
     }
 }
 
@@ -387,7 +393,7 @@ private final class SampleEditorHolder: ObservableObject {
     let project = Project(projectID: "sample", userID: "sample", title: "Untitled Cut", state: "draft_ready",
                           latestJobID: nil, sourceCount: 1, updatedAt: nil, createdAt: "2026-10-13T08:00:00+00:00")
 
-    func build(preset: String, font: String, overlays: Bool) {
+    func build(preset: String, font: String, overlays: Bool, voice: Bool = false) {
         guard model == nil else { return }
         let model = DraftEditorViewModel(project: project, session: CutSellSession(userID: "sample", accessToken: "sample"))
         let clips: [JSONValue] = [
@@ -412,6 +418,10 @@ private final class SampleEditorHolder: ObservableObject {
             object["media_overlays"] = .array([.object(["overlay_id": .string("m1"), "kind": .string("photo"),
                                                         "x": .number(0.5), "y": .number(0.3), "width": .number(0.55),
                                                         "start": .number(0), "end": .number(30)])])
+        }
+        if voice {
+            object["audio_clips"] = .array([.object(["audio_id": .string("vo1"), "kind": .string("voice"), "asset_id": .string("a1"),
+                                                     "start": .number(0.4), "source_in": .number(0), "source_out": .number(8)])])
         }
         model.snapshot = DraftSnapshot(projectID: "sample", userID: "sample", revision: 1, draft: .object(object), sources: [])
         model.setPreviewComposition(TimelineComposition(
