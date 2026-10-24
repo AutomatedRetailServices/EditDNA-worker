@@ -26,7 +26,7 @@ struct CaptionStylePanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                Text(L10n.tr("Captions")).font(CS.inter(15, .semibold)).foregroundStyle(.white)
+                Text(L10n.tr("Captions")).font(CS.inter(15, .semibold)).foregroundStyle(CS.wiInk)
                 Spacer()
                 Text(L10n.tr("On")).font(CS.inter(12)).foregroundStyle(CS.textSecondaryF)
                 Toggle("", isOn: Binding(
@@ -34,14 +34,14 @@ struct CaptionStylePanel: View {
                     set: { model.applyCaptionSettings(enabled: $0) }
                 ))
                 .labelsHidden()
-                .tint(Color(hex: 0x1677FF))
+                .tint(CS.accent)
                 .accessibilityIdentifier("captionsOnToggle")
                 Button(action: onDone) {
                     Text(L10n.tr("Done"))
-                        .font(CS.inter(14, .semibold)).foregroundStyle(.white)
+                        .font(CS.inter(14, .semibold)).foregroundStyle(CS.wiInk)
                         .frame(width: 62, height: 28)
-                        .background(Color(hex: 0x040813), in: Capsule())
-                        .overlay(Capsule().stroke(LinearGradient(colors: [CS.cyan, Color(hex: 0xFF21D7)], startPoint: .leading, endPoint: .trailing), lineWidth: 1.5))
+                        .background(CS.accentSoft, in: Capsule())
+                        .overlay(Capsule().stroke(CS.accent, lineWidth: 1.5))
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("captionsDone")
@@ -63,11 +63,11 @@ struct CaptionStylePanel: View {
                         Button { model.applyCaptionSettings(font: spec.key) } label: {
                             Text(spec.displayName)
                                 .font(.custom(spec.postScriptName, size: 14))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(CS.wiInk)
                                 .padding(.horizontal, 12)
                                 .frame(height: 34)
-                                .background(Color(hex: 0x060B18), in: RoundedRectangle(cornerRadius: 10))
-                                .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? Color(hex: 0x1AA6FF) : Color(hex: 0x1C2E52), lineWidth: selected ? 2 : 1))
+                                .background(CS.wiSurface2, in: RoundedRectangle(cornerRadius: 10))
+                                .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? CS.accent : CS.wiBorder, lineWidth: selected ? 2 : 1))
                         }
                         .buttonStyle(.plain)
                         .id(spec.key)
@@ -91,7 +91,7 @@ struct CaptionStylePanel: View {
                 .frame(maxWidth: .infinity)
         }
         .padding(.top, 6)
-        .overlay(alignment: .top) { Rectangle().fill(Color(hex: 0x14336B, opacity: 0.7)).frame(height: 1).offset(y: -4) }
+        .overlay(alignment: .top) { Rectangle().fill(CS.wiBorder).frame(height: 1).offset(y: -4) }
         .accessibilityIdentifier("captionMenu2b")
     }
 
@@ -108,11 +108,12 @@ struct CaptionStylePanel: View {
             VStack(spacing: 4) {
                 Group {
                     switch item {
-                    case .classic: Text(L10n.tr("Aa")).foregroundStyle(.white)
+                    case .classic: Text(L10n.tr("Aa")).foregroundStyle(CS.wiInk)
                     case .highlight: Text(L10n.tr("Aa")).foregroundStyle(Color(hex: 0x39FF78))
                     case .box:
                         Text(L10n.tr("Aa")).foregroundStyle(.black)
-                            .padding(.horizontal, 6).background(.white, in: RoundedRectangle(cornerRadius: 3))
+                            .padding(.horizontal, 6).background(Color.white, in: RoundedRectangle(cornerRadius: 3))
+                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(CS.wiBorder, lineWidth: 1))
                     case .yellow: Text(L10n.tr("Aa")).foregroundStyle(Color(hex: 0xFFD60A))
                     }
                 }
@@ -120,8 +121,8 @@ struct CaptionStylePanel: View {
                 Text(L10n.tr(item.rawValue.capitalized)).font(CS.inter(10)).foregroundStyle(CS.textSecondaryF)
             }
             .frame(maxWidth: .infinity).frame(height: 54)
-            .background(Color(hex: 0x060B18), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(selected ? Color(hex: 0x1AA6FF) : Color(hex: 0x1C2E52), lineWidth: selected ? 2 : 1))
+            .background(CS.wiSurface2, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(selected ? CS.accent : CS.wiBorder, lineWidth: selected ? 2 : 1))
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("captionLook_\(item.rawValue)")
@@ -135,7 +136,7 @@ struct CaptionStylePanel: View {
                 Button { model.applyCaptionSettings(preset: preset) } label: {
                     Circle().fill(Color(hex: UInt32(color))).frame(width: 22, height: 22)
                         .padding(3)
-                        .overlay(Circle().stroke(selected ? Color.white : .clear, lineWidth: 2))
+                        .overlay(Circle().stroke(selected ? CS.wiInk : .clear, lineWidth: 2))
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("wordColor_\(preset)")
@@ -161,14 +162,14 @@ struct CaptionStylePanel: View {
                     .foregroundStyle(dark ? .white : .black)
                     .frame(width: 22, height: 16)
                     .background(dark ? Color.black : Color.white.opacity(0.85), in: RoundedRectangle(cornerRadius: 2))
-                    .overlay(RoundedRectangle(cornerRadius: 2).stroke(Color.white.opacity(0.6), lineWidth: 0.5))
-                Text(L10n.tr(title)).font(CS.inter(10)).foregroundStyle(selected ? .white : CS.textMutedF).lineLimit(1)
+                    .overlay(RoundedRectangle(cornerRadius: 2).stroke(CS.wiBorder, lineWidth: 0.5))
+                Text(L10n.tr(title)).font(CS.inter(10)).foregroundStyle(selected ? CS.wiInk : CS.textMutedF).lineLimit(1)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity).frame(height: 30)
-            .background(Color(hex: 0x060B18), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(selected ? Color(hex: 0x1AA6FF) : Color(hex: 0x1C2E52), lineWidth: selected ? 2 : 1))
+            .background(CS.wiSurface2, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(selected ? CS.accent : CS.wiBorder, lineWidth: selected ? 2 : 1))
         }
         .buttonStyle(.plain)
     }
@@ -186,13 +187,13 @@ struct StylePanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(L10n.tr("Style")).font(.system(size: 15, weight: .semibold)).foregroundStyle(Color(hex: 0xF2F7FF))
+                Text(L10n.tr("Style")).font(CS.inter(15, .semibold)).foregroundStyle(CS.wiInk)
                 Spacer()
                 Button(action: onDone) {
-                    Text(L10n.tr("Done")).font(.system(size: 13, weight: .semibold)).foregroundStyle(Color(hex: 0xFAFCFF))
+                    Text(L10n.tr("Done")).font(CS.inter(14, .semibold)).foregroundStyle(CS.wiInk)
                         .frame(width: 62, height: 28)
-                        .background(Color(hex: 0x040813, opacity: 0.95), in: Capsule())
-                        .overlay(Capsule().stroke(Color(hex: 0x1AA6FF), lineWidth: 1))
+                        .background(CS.accentSoft, in: Capsule())
+                        .overlay(Capsule().stroke(CS.accent, lineWidth: 1.5))
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("styleDone")
@@ -204,8 +205,7 @@ struct StylePanel: View {
                 identifier: "editorAutoZoomToggle"
             )
             .frame(height: 66)
-            .background(Color(hex: 0x040812), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color(hex: 0x14336B), lineWidth: 1))
+            .wiCard(radius: 16, shadow: false)
         }
         .padding(.horizontal, 10)
     }
@@ -550,7 +550,7 @@ struct LiveWave: View {
             HStack(alignment: .center, spacing: 2) {
                 ForEach(Array(padded.enumerated()), id: \.offset) { index, level in
                     RoundedRectangle(cornerRadius: 1.5)
-                        .fill(index >= count - 6 && level > 0.07 ? Color(hex: 0xFF4D6D) : CS.cyan)
+                        .fill(index >= count - 6 && level > 0.07 ? Color(hex: 0xFF4D6D) : CS.accent)
                         .frame(width: 3, height: max(3, proxy.size.height * 0.9 * CGFloat(level)))
                 }
             }
@@ -571,7 +571,7 @@ struct PlayedWave: View {
             HStack(alignment: .center, spacing: 2) {
                 ForEach(Array(values.enumerated()), id: \.offset) { index, level in
                     RoundedRectangle(cornerRadius: 1.5)
-                        .fill(Double(index) / Double(values.count) <= progress ? CS.cyan : Color(hex: 0x7F8DB0))
+                        .fill(Double(index) / Double(values.count) <= progress ? CS.accent : Color(fixed: 0xC9CFD9))
                         .frame(maxWidth: .infinity)
                         .frame(height: max(3, proxy.size.height * 0.9 * CGFloat(level)))
                 }
@@ -651,9 +651,9 @@ struct OverlayGallerySheet: View {
     var body: some View {
         VStack(spacing: 0) {
             if sampleTiles {
-                Capsule().fill(Color(hex: 0x3A5280)).frame(width: 40, height: 4).padding(.top, 8)
+                Capsule().fill(Color(fixed: 0xD5D9E2)).frame(width: 40, height: 4).padding(.top, 8)
                 ZStack {
-                    Text(L10n.tr(title)).font(CS.inter(17, .bold)).foregroundStyle(.white)
+                    Text(L10n.tr(title)).font(CS.inter(17, .bold)).foregroundStyle(CS.wiInk)
                     HStack {
                         Button(L10n.tr("Cancel")) { dismiss() }.font(CS.inter(15)).foregroundStyle(CS.cyan)
                         Spacer()
@@ -686,9 +686,9 @@ struct OverlayGallerySheet: View {
                 }
             }
         }
-        .background(Color(hex: 0x0A1326).ignoresSafeArea())
+        .background(CS.wiPage.ignoresSafeArea())
         .presentationDetents(sampleTiles ? [.fraction(0.55), .large] : [.large])
-        .presentationBackground(Color(hex: 0x0A1326))
+        .presentationBackground(CS.wiPage)
         .accessibilityIdentifier("overlayGallery")
     }
 
@@ -702,21 +702,21 @@ struct OverlayGallerySheet: View {
         VStack(spacing: 10) {
             ProgressView(value: value).tint(CS.cyan).frame(width: 180)
             Text(L10n.tr(value < 0.02 ? "Getting it ready…" : "Getting it from iCloud… \(Int((value * 100).rounded()))%"))
-                .font(CS.inter(14, .medium)).monospacedDigit().foregroundStyle(.white)
+                .font(CS.inter(14, .medium)).monospacedDigit().foregroundStyle(CS.wiInk)
                 .accessibilityIdentifier("galleryProgress")
         }
         .padding(22)
-        .background(Color(hex: 0x040812, opacity: 0.95), in: RoundedRectangle(cornerRadius: 18))
+        .wiCard(radius: 18)
     }
 
     private func problemCard(_ text: String) -> some View {
         VStack(spacing: 12) {
-            Text(L10n.tr(text)).font(CS.inter(14)).foregroundStyle(.white).multilineTextAlignment(.center)
+            Text(L10n.tr(text)).font(CS.inter(14)).foregroundStyle(CS.wiInk).multilineTextAlignment(.center)
             Button(L10n.tr("OK")) { problem = nil }.font(CS.inter(15, .semibold)).foregroundStyle(CS.cyan)
         }
         .padding(22)
         .frame(maxWidth: 280)
-        .background(Color(hex: 0x040812, opacity: 0.95), in: RoundedRectangle(cornerRadius: 18))
+        .wiCard(radius: 18)
         .accessibilityIdentifier("galleryProblem")
     }
 

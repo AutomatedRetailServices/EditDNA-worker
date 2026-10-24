@@ -121,6 +121,9 @@ final class ProcessingQueue: ObservableObject {
         }
     }
 
+    /// An upload that stopped can be sent again from this iPhone.
+    func canRetry(_ id: UUID) -> Bool { retries[id] != nil }
+
     func retry(_ id: UUID) {
         guard let action = retries.removeValue(forKey: id) else { return }
         if let group = items.first(where: { $0.id == id })?.group { GroupNotify.replacePlaceholder(group, itemID: id) }

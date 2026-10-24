@@ -30,6 +30,9 @@ final class CutTracker: ObservableObject {
         var trackedAt = Date()
         var lastStep = ""
         var clips = 1
+        /// 23 Oct: "Retry processing" started a fresh job (POST /v1/jobs/{id}/retry); followed until the server
+        /// records it on the project.
+        var retriedJobID: String?
     }
 
     @Published private(set) var cuts: [String: Cut] = [:]
@@ -72,6 +75,35 @@ final class CutTracker: ObservableObject {
 
     func cut(_ projectID: String) -> Cut? { cuts[projectID] }
 
+    /// 23 Oct (PO): "Retry processing" (Single error screen and Edits › Processing): the server makes the same cut
+    /// again from the videos it already has (POST /v1/jobs/{job_id}/retry). Returns false when it cannot (e.g. the
+    /// failed job is older than a day): the caller then keeps its error.
+    func retry(projectID: String) async -> Bool {
+        guard let session = await APIClient.shared.session, var cut = cuts[projectID], let jobID = cut.jobID else { return false }
+        struct Body: Encodable { let user_id: String }
+        struct Answer: Decodable { let job_id: String }
+        do {
+            let answer: Answer = try await APIClient.shared.request("/v1/jobs/\(jobID)/retry", method: "POST",
+                                                                    body: Body(user_id: session.userID), timeout: 30)
+            cut.retriedJobID = answer.job_id
+            cut.jobID = answer.job_id
+            cut.jobState = "queued"
+            cut.jobProgress = 0
+            cut.projectState = "processing"
+            cut.error = nil
+            cut.gone = false
+            cut.clientErrors = 0
+            cut.trackedAt = Date()
+            cuts[projectID] = cut
+            CutSellDiagnostics.log("cut_retried", ["ok": "1"])
+            startLoop()
+            return true
+        } catch {
+            CutSellDiagnostics.log("cut_retried", ["ok": "0", "error": String(describing: error).prefix(60).description])
+            return false
+        }
+    }
+
     /// Build 24: cuts still being made (followed in the background, remembered for App Refresh).
     var activeCount: Int { cuts.values.filter { !$0.isReady && !$0.isFailed }.count }
     var hasActiveCuts: Bool { activeCount > 0 }
@@ -101,8 +133,12 @@ final class CutTracker: ObservableObject {
                 "/v1/projects/\(projectID)",
                 query: [URLQueryItem(name: "user_id", value: session.userID)]
             )
-            cut.projectState = project.state
-            cut.jobID = project.latestJobID ?? cut.jobID
+            if let retried = cut.retriedJobID, project.latestJobID != retried, project.state == "failed" {
+                cut.projectState = "processing"          // the retry is queued; the project still shows the old failure
+            } else {
+                cut.projectState = project.state
+            }
+            cut.jobID = cut.retriedJobID ?? project.latestJobID ?? cut.jobID
             if let jobID = cut.jobID {
                 let status: JobStatus = try await APIClient.shared.request("/v1/jobs/\(jobID)")
                 cut.jobState = status.state

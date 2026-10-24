@@ -90,7 +90,7 @@ struct TimelineV4: View {
             let cursorAt = Self.playheadX(width: width)
             let x: (Double) -> CGFloat = { seconds in cursorAt + CGFloat(seconds - now) * pps }
             ZStack(alignment: .topLeading) {
-                Color(hex: 0x081226)
+                Color(fixed: 0xE9ECF1)             // White Indigo timeline: light grey
                 timeLabel(now).offset(x: 16, y: 6)
                 ruler(width: width, x: x).offset(y: 24)
                 band(width: width, y: Self.videoBandY, height: 56)
@@ -127,7 +127,7 @@ struct TimelineV4: View {
                 rowIcons(scrollY: scrollY, height: height)
 
                 // The fixed cursor: from the top of the video track down to the last row shown.
-                RoundedRectangle(cornerRadius: 1).fill(Color.white)
+                RoundedRectangle(cornerRadius: 1).fill(CS.wiInk)
                     .frame(width: 2, height: height - Self.videoBandY - 6)
                     .offset(x: cursorAt - 1, y: Self.videoBandY + 1)
                     .allowsHitTesting(false)
@@ -139,7 +139,7 @@ struct TimelineV4: View {
             .simultaneousGesture(zoom)
         }
         .frame(height: timelineHeight)
-        .overlay(alignment: .top) { Rectangle().fill(CS.borderDefault).frame(height: 1).offset(y: -1) }
+        .overlay(alignment: .top) { Rectangle().fill(CS.wiBorder).frame(height: 1).offset(y: -1) }
         .animation(.easeOut(duration: 0.2), value: rows.count)
         // Build 18: the selected voice / sound / overlay's row is always in view (with a panel open
         // only two rows show; the selected overlay's row was hidden below, so it could not be
@@ -198,7 +198,7 @@ struct TimelineV4: View {
     }
 
     private func band(width: CGFloat, y: CGFloat, height: CGFloat) -> some View {
-        Rectangle().fill(Color(hex: 0x050814))
+        Rectangle().fill(Color(fixed: 0xDDE1E8))
             .frame(width: max(0, width - Self.cursorX), height: height)
             .offset(x: Self.cursorX, y: y)
             .allowsHitTesting(false)
@@ -206,8 +206,8 @@ struct TimelineV4: View {
 
     private func timeLabel(_ now: Double) -> some View {
         HStack(spacing: 4) {
-            Text(EditorTime.clock(now)).font(.system(size: 12, weight: .semibold)).foregroundStyle(CS.textPrimaryF)
-            Text(L10n.tr("/ \(EditorTime.clock(duration))")).font(.system(size: 12, weight: .medium)).foregroundStyle(CS.textMutedF)
+            Text(EditorTime.clock(now)).font(CS.inter(12, .semibold)).foregroundStyle(Color(fixed: 0x4A5263))
+            Text(L10n.tr("/ \(EditorTime.clock(duration))")).font(CS.inter(12, .medium)).foregroundStyle(CS.wiSecondary)
         }
         .monospacedDigit()
         .accessibilityElement(children: .combine)
@@ -216,9 +216,10 @@ struct TimelineV4: View {
 
     private func plusButton(action: @escaping () -> Void, label: String) -> some View {
         Button(action: action) {
-            Text(L10n.tr("+")).font(.system(size: 18, weight: .medium)).foregroundStyle(Color(hex: 0x050814))
+            Text(L10n.tr("+")).font(.system(size: 18, weight: .medium)).foregroundStyle(CS.wiInk)
                 .frame(width: 24, height: 24)
-                .background(Color.white, in: RoundedRectangle(cornerRadius: 6))
+                .background(Color(fixed: 0xFFFFFF), in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(fixed: 0xC9CFD9), lineWidth: 1))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
@@ -247,11 +248,10 @@ struct TimelineV4: View {
                             rowIcon("Ed4RowMic", label: "Voice-over", action: onAddVoice)
                         case .sounds:
                             Image(systemName: "music.note").font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(LinearGradient(colors: [CS.cyan, Color(hex: 0x7C3AED), Color(hex: 0xFF21D7)],
-                                                                startPoint: .topLeading, endPoint: .bottomTrailing))
+                                .foregroundStyle(CS.wiInk)
                                 .frame(width: 32, height: 32)
-                                .background(CS.surfaceCard, in: RoundedRectangle(cornerRadius: 8))
-                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(CS.borderDefault, lineWidth: 1))
+                                .background(Color(fixed: 0xFFFFFF), in: RoundedRectangle(cornerRadius: 8))
+                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(fixed: 0xC9CFD9), lineWidth: 1))
                                 .accessibilityLabel(L10n.tr("Sounds"))
                         case .layer(let layer):
                             rowIcon("Ed4RowLayers", label: "Overlay layer \(layer + 1)", action: onAddOverlay)
@@ -272,10 +272,11 @@ struct TimelineV4: View {
 
     private func rowIcon(_ image: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(image).resizable().frame(width: 18, height: 18)
+            Image(image).renderingMode(.template).resizable().frame(width: 18, height: 18)
+                .foregroundStyle(CS.wiInk)
                 .frame(width: 32, height: 32)
-                .background(CS.surfaceCard, in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(CS.borderDefault, lineWidth: 1))
+                .background(Color(fixed: 0xFFFFFF), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(fixed: 0xC9CFD9), lineWidth: 1))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
@@ -338,14 +339,14 @@ struct TimelineV4: View {
                 let px = x(seconds)
                 if seconds <= duration + 0.01, px > 38 + 12, px < width - 14 {
                     Text(EditorTime.clock(seconds))
-                        .font(.system(size: 10, weight: .medium)).monospacedDigit()
-                        .foregroundStyle(CS.textMutedF)
+                        .font(CS.inter(10, .medium)).monospacedDigit()
+                        .foregroundStyle(CS.wiSecondary)
                         .fixedSize()
                         .position(x: px, y: 6)
                 }
                 let mid = x(seconds + step / 2)
                 if seconds + step / 2 <= duration, mid > 44, mid < width - 4 {
-                    Text(L10n.tr("•")).font(.system(size: 8, weight: .bold)).foregroundStyle(CS.textMutedF)
+                    Text(L10n.tr("•")).font(.system(size: 8, weight: .bold)).foregroundStyle(CS.wiSecondary)
                         .position(x: mid, y: 6)
                 }
             }
@@ -773,7 +774,8 @@ struct TimelineV4: View {
             // end and the next voice's label moves over so no label is ever cut or covered.
             ForEach(labels, id: \.key) { label in
                 if label.x + label.width > 0, label.x < width + 20 {
-                    VoiceLabelV4(title: label.title, status: label.status, onTab: !label.inside)
+                    VoiceLabelV4(title: label.title, status: label.status, onTab: !label.inside,
+                                 selected: label.inside && selection == .voiceOver(label.key))
                         .offset(x: label.x, y: 5)
                 }
             }
@@ -909,7 +911,7 @@ struct TimelineV4: View {
         let isTop = layer == max(0, model.topOverlayLayer)
         let ends = items.map(\.end) + legacy.map(\.end)
         return ZStack(alignment: .topLeading) {
-            RoundedRectangle(cornerRadius: 7).fill(CS.surfaceControl)
+            RoundedRectangle(cornerRadius: 7).fill(Color(fixed: 0xDDE1E8))
                 .frame(width: max(0, width - Self.cursorX), height: 30)
                 .offset(x: Self.cursorX)
                 .accessibilityIdentifier(items.isEmpty && legacy.isEmpty ? "overlayTrackEmpty" : "overlayTrack")
@@ -918,11 +920,12 @@ struct TimelineV4: View {
                 let itemWidth = max(10, CGFloat(item.end - item.start) * pixelsPerSecond - 2)
                 if left + itemWidth > 0, left < width + 20 {
                     Text(L10n.tr(item.title))
-                        .font(.system(size: 10, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
+                        .font(CS.inter(10, .semibold))
+                        .foregroundStyle(selection == item.selection ? CS.accent : Color(fixed: 0xFFFFFF)).lineLimit(1)
                         .padding(.horizontal, 7)
                         .frame(width: itemWidth, height: 30, alignment: .leading)
-                        .background(Color(hex: 0x1A3A7A), in: RoundedRectangle(cornerRadius: 7))
-                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(selection == item.selection ? CS.cyan : .clear, lineWidth: 2))
+                        .background(selection == item.selection ? Color(fixed: 0xFFFFFF) : CS.accent, in: RoundedRectangle(cornerRadius: 7))
+                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(selection == item.selection ? CS.accent : .clear, lineWidth: 2))
                         .offset(x: left)
                         .onTapGesture { selection = selection == item.selection ? nil : item.selection }
                 }
@@ -1109,7 +1112,7 @@ private struct ClipBlockV4: View {
         }
         .frame(width: width, height: 50)
         .clipShape(RoundedRectangle(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7).stroke(isSelected ? CS.cyan : Color.white, lineWidth: isSelected ? 2 : 1))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(isSelected ? CS.accent : Color(fixed: 0xFFFFFF), lineWidth: isSelected ? 2 : 1))
         .overlay {
             if isSelected {
                 HStack {
@@ -1152,6 +1155,8 @@ struct VoiceLabelV4: View {
     let title: String
     let status: VoiceBlockV4.Status
     let onTab: Bool
+    /// Inside the selected (white) block: blue text.
+    var selected = false
 
     /// Room the label takes (text at 10 pt semibold, plus the upload / retry mark and the tab).
     static func width(title: String, status: VoiceBlockV4.Status) -> CGFloat {
@@ -1166,15 +1171,15 @@ struct VoiceLabelV4: View {
                 Image(systemName: "arrow.clockwise").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
             }
             Text(L10n.tr(title))
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.white)
+                .font(CS.inter(10, .semibold))
+                .foregroundStyle(selected ? CS.accent : Color(fixed: 0xFFFFFF))
                 .lineLimit(1)
                 .fixedSize()
         }
         .padding(.horizontal, onTab ? 6 : 0)
         .frame(height: 20)
         .background {
-            if onTab { Capsule().fill(Color(hex: 0x1769FF)).overlay(Capsule().stroke(CS.cyan, lineWidth: 1)) }
+            if onTab { Capsule().fill(CS.accent) }
         }
         .fixedSize()
         .allowsHitTesting(false)
@@ -1220,8 +1225,7 @@ struct LayerBadge: View {
         Text(L10n.tr("\(number)"))
             .font(.system(size: 9, weight: .semibold)).foregroundStyle(.white)
             .frame(width: 14, height: 14)
-            .background(LinearGradient(colors: [CS.cyan, Color(hex: 0x1769FF), Color(hex: 0x7C3AED), Color(hex: 0xFF21D7)],
-                                       startPoint: .leading, endPoint: .trailing), in: Circle())
+            .background(CS.accent, in: Circle())
             .allowsHitTesting(false)
             .accessibilityIdentifier("layerBadge")
     }
@@ -1243,14 +1247,13 @@ struct SoundBlockV5: View {
                 .font(.system(size: 9, weight: .bold))
             Text(L10n.tr(title)).font(.system(size: 10, weight: .semibold)).lineLimit(1)
         }
-        .foregroundStyle(.white)
+        // White Indigo: solid blue with white text; the selected one white with a blue border.
+        .foregroundStyle(isSelected ? CS.accent : Color(fixed: 0xFFFFFF))
         .padding(.horizontal, 6)
         .frame(width: width, height: 30, alignment: .leading)
-        .background(LinearGradient(colors: [Color(hex: 0x7C3AED, opacity: 0.75), Color(hex: 0xFF21D7, opacity: 0.55)],
-                                   startPoint: .leading, endPoint: .trailing), in: RoundedRectangle(cornerRadius: 7))
+        .background(isSelected ? Color(fixed: 0xFFFFFF) : CS.accent, in: RoundedRectangle(cornerRadius: 7))
         .clipShape(RoundedRectangle(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7).stroke(isSelected ? Color.white : Color(hex: 0xFF21D7, opacity: 0.6),
-                                                          lineWidth: isSelected ? 2 : 1))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(CS.accent, lineWidth: isSelected ? 2 : 0))
         // A short sound (Tap is 0.6 s) is still easy to touch: the touch area is at least 32 wide.
         .frame(width: max(width, 32), alignment: .leading)
         .contentShape(Rectangle())
@@ -1309,10 +1312,10 @@ struct OverlayBlockV4: View {
             .frame(width: width, height: 30, alignment: .leading)
             .clipped()
             if !title.isEmpty, item.uploading == nil, !item.failed {
-                LinearGradient(colors: [CS.cyan.opacity(0.45), Color(hex: 0x1769FF, opacity: 0.45),
-                                        Color(hex: 0x7C3AED, opacity: 0.45), Color(hex: 0xFF21D7, opacity: 0.45)],
-                               startPoint: .leading, endPoint: .trailing)
-                Text(L10n.tr(title)).font(.system(size: 12, weight: .semibold)).foregroundStyle(CS.textPrimaryF)
+                // White Indigo (Figma 04_Editor 9): solid blue with white text; the selected one white, blue border.
+                (isSelected ? Color(fixed: 0xFFFFFF) : CS.accent)
+                Text(L10n.tr(title)).font(CS.inter(12, .semibold))
+                    .foregroundStyle(isSelected ? CS.accent : Color(fixed: 0xFFFFFF))
                     .lineLimit(1).padding(.leading, 8)
             }
             if let progress = item.uploading {
@@ -1328,7 +1331,7 @@ struct OverlayBlockV4: View {
         }
         .frame(width: width, height: 30)
         .clipShape(RoundedRectangle(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7).stroke(isSelected ? Color.white : CS.cyan.opacity(0.7), lineWidth: isSelected ? 2 : 1))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(CS.accent, lineWidth: isSelected ? 2 : 1))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(item.kind == .video ? "Video overlay" : "Photo overlay")
         .accessibilityIdentifier("overlayBlock")
@@ -1415,11 +1418,12 @@ struct VoiceBlockV4: View {
         let waveStart: CGFloat = labelInside ? room - 6 : 4
         let bars = max(2, Int((width - waveStart - 4) / 3.4))
         ZStack(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 7).fill(Color(hex: 0x1769FF).opacity(status == .saved ? 1 : 0.7))
+            // White Indigo: solid blue with a white waveform; the selected one white with a blue border.
+            RoundedRectangle(cornerRadius: 7).fill(isSelected ? Color(fixed: 0xFFFFFF) : CS.accent.opacity(status == .saved ? 1 : 0.7))
             HStack(alignment: .center, spacing: 1.4) {
                 ForEach(0..<bars, id: \.self) { index in
                     RoundedRectangle(cornerRadius: 1)
-                        .fill(CS.cyan)
+                        .fill(isSelected ? CS.accent : Color(fixed: 0xFFFFFF))
                         .frame(width: 2, height: max(3, 17 * CGFloat(level(index, of: bars))))
                 }
             }
@@ -1438,8 +1442,8 @@ struct VoiceBlockV4: View {
     }
 
     private var borderColor: Color {
-        if isSelected { return .white }
-        return status == .failed ? CS.error : CS.cyan
+        if isSelected { return CS.accent }
+        return status == .failed ? CS.error : CS.accent
     }
 
     private var borderStyle: StrokeStyle {
@@ -1454,15 +1458,15 @@ struct VoiceBlockV4: View {
                 Image(systemName: "arrow.clockwise").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
             }
             Text(L10n.tr(title))
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.white)
+                .font(CS.inter(10, .semibold))
+                .foregroundStyle(isSelected && inside ? CS.accent : Color(fixed: 0xFFFFFF))
                 .lineLimit(1)
                 .fixedSize()
         }
         .padding(.horizontal, inside ? 0 : 6)
         .frame(height: 20)
         .background {
-            if !inside { Capsule().fill(Color(hex: 0x1769FF)).overlay(Capsule().stroke(CS.cyan, lineWidth: 1)) }
+            if !inside { Capsule().fill(CS.accent) }
         }
         .padding(.leading, 7)
         .fixedSize()

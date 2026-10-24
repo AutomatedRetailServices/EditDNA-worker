@@ -357,10 +357,15 @@ struct ProjectsView: View {
     @ViewBuilder
     private func processingRow(_ order: Int, _ row: ProcessingQueue.Row) -> some View {
         let retry: () -> Void = {
-            if let item = row.itemID {
-                queue.retry(item)
+            if let item = row.itemID, queue.canRetry(item) {
+                queue.retry(item)                                   // the upload stopped: sent again from this iPhone
             } else if let pending = pendingCuts.first(where: { $0.projectID == row.projectID }) {
                 resumeCut = pending
+            } else if let id = row.projectID {
+                // The server could not finish it: "Retry processing" makes it again from the videos it has.
+                Task {
+                    if !(await tracker.retry(projectID: id)) { errorMessage = "Couldn’t retry this cut. Please upload it again." }
+                }
             }
         }
         if let id = row.projectID, let project = appState.projects.first(where: { $0.projectID == id }),

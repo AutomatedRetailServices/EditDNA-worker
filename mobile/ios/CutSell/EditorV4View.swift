@@ -658,7 +658,7 @@ struct EditorV4View: View {
     private var header: some View {
         HStack(spacing: 0) {
             Button { dismiss() } label: {
-                WIHeaderIcon(image: "WIBack").frame(width: 46, height: 47)
+                EditorBackButton().frame(width: 46, height: 47)
             }
             .accessibilityLabel(L10n.tr("Back"))
             Button {
@@ -666,8 +666,8 @@ struct EditorV4View: View {
                 renaming = true
             } label: {
                 Text(L10n.tr("\(shownTitle) ✎"))
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(CS.textPrimaryF)
+                    .font(CS.inter(14, .semibold))
+                    .foregroundStyle(CS.wiInk)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: 124, alignment: .leading)
@@ -683,10 +683,10 @@ struct EditorV4View: View {
                 showExport = true
             } label: {
                 Text(L10n.tr("Export"))
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .font(CS.inter(14, .semibold))
+                    .foregroundStyle(Color(fixed: 0xFFFFFF))
                     .frame(width: 74, height: 32)
-                    .background(Color(hex: 0x1769FF), in: RoundedRectangle(cornerRadius: 10))
+                    .background(CS.accent, in: RoundedRectangle(cornerRadius: 10))
             }
             .buttonStyle(.plain)
             .padding(.leading, 8)
@@ -1392,6 +1392,15 @@ struct EditorV4View: View {
                 if case .style = panel {} else { Spacer(minLength: 0) }
                 ToolbarV4(active: activeTool) { tool in toolTapped(tool) }
             }
+            // White Indigo: the timeline's light grey reaches the toolbar (no white gap); panels stay white.
+            .background(timelineShown ? Color(fixed: 0xE9ECF1) : CS.wiPage)
+        }
+    }
+
+    private var timelineShown: Bool {
+        switch panel {
+        case .captions, .style: return false
+        default: return true
         }
     }
 
@@ -1900,15 +1909,12 @@ struct ToolbarV4: View {
                 ForEach(EditorTool.allCases, id: \.self) { tool in
                     Button { onTap(tool) } label: {
                         VStack(spacing: 4) {
-                            if active == tool {
-                                Image(tool.icon).renderingMode(.template).resizable().foregroundStyle(CS.cyan)
-                                    .frame(width: 34, height: 34)
-                            } else {
-                                Image(tool.icon).resizable().frame(width: 34, height: 34)
-                            }
+                            // White Indigo (Figma 04_Editor): every icon black (Voice Over too), names grey.
+                            Image(tool.icon).renderingMode(.template).resizable().foregroundStyle(CS.wiInk)
+                                .frame(width: 34, height: 34)
                             Text(L10n.tr(tool.title))
                                 .font(CS.inter(10.5, .medium))
-                                .foregroundStyle(active == tool ? CS.cyan : CS.textSecondaryF)
+                                .foregroundStyle(CS.wiSecondary)
                                 .lineLimit(1)
                                 .fixedSize()
                         }
@@ -1918,7 +1924,7 @@ struct ToolbarV4: View {
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("tool_\(tool.rawValue)")
                     if tool == .rotate {
-                        Rectangle().fill(Color(hex: 0x14336B)).frame(width: 1, height: 40)
+                        Rectangle().fill(CS.wiBorder).frame(width: 1, height: 40)
                     }
                 }
             }
@@ -1927,8 +1933,8 @@ struct ToolbarV4: View {
         }
         .padding(.top, 6)
         .frame(height: Self.height, alignment: .top)
-        .background(Color(hex: 0x02040A))
-        .overlay(alignment: .top) { Rectangle().fill(Color(hex: 0x14336B, opacity: 0.7)).frame(height: 1) }
+        .background(Color(fixed: 0xF3F5F9).ignoresSafeArea(edges: .bottom))
+        .overlay(alignment: .top) { Rectangle().fill(CS.wiBorder).frame(height: 1) }
     }
 }
 
@@ -1958,16 +1964,16 @@ struct ExportQualityMenu: View {
         } label: {
             HStack(spacing: 6) {
                 Text(L10n.tr(on4K ? "4K Ultra HD" : "1080p HD"))
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(Self.gradient)
+                    .font(CS.inter(13, .bold))
+                    .foregroundStyle(CS.accent)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
-                Image("Ed4Chevron").resizable().frame(width: 10, height: 10)
+                Image("Ed4Chevron").renderingMode(.template).resizable().frame(width: 10, height: 10).foregroundStyle(CS.accent)
             }
             .padding(.leading, 12).padding(.trailing, 10)
             .frame(width: 108, height: 32)
-            .background(CS.surfaceCard, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(CS.borderDefault, lineWidth: 1))
+            .background(Color(fixed: 0xF3F5F9), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(CS.wiBorder, lineWidth: 1))
         }
         .accessibilityLabel(L10n.tr(on4K ? "Export quality: 4K" : "Export quality: 1080p"))
         .accessibilityIdentifier("exportQuality")
@@ -2375,3 +2381,18 @@ private struct SelectionHandles: View {
 }
 
 /// The overlay's picture: its preview link if the server sent one, else a labelled tile.
+
+
+/// The editor's own back control (its original small rounded square, ~26 pt), White Indigo colours:
+/// #EEF3FF fill, #1769FF border at 35 %, blue arrow.
+struct EditorBackButton: View {
+    var body: some View {
+        Image(systemName: "chevron.left")
+            .font(.system(size: 12, weight: .bold))
+            .foregroundStyle(CS.accent)
+            .frame(width: 26, height: 26)
+            .background(CS.accentSoft, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(Color(fixed: 0x1769FF, opacity: 0.35), lineWidth: 1))
+            .contentShape(Rectangle())
+    }
+}

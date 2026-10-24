@@ -139,7 +139,10 @@ struct ProblemScreen: View {
                 Spacer()
 
                 VStack(spacing: 0) {
-                    WIStatusBadge(kind: tone == .error ? .error : .info)
+                    // White Indigo · ERROR (Figma 1233:3066…): the big blue "!".
+                    Text(verbatim: "!")
+                        .font(CS.inter(54, .bold))
+                        .foregroundStyle(CS.accent)
                     Text(L10n.tr(heading))
                         .font(CS.inter(22, .heavy))
                         .foregroundStyle(CS.wiInk)
@@ -153,13 +156,21 @@ struct ProblemScreen: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 8)
                         .padding(.horizontal, 10)
-                    VStack(spacing: 10) {
+                    VStack(spacing: 12) {
                         WIPillButton(title: primaryTitle, action: primaryAction)
                         if let secondaryTitle, let secondaryAction {
-                            WIPillButton(title: secondaryTitle, style: .outline, action: secondaryAction)
+                            Button(action: secondaryAction) {
+                                Text(L10n.tr(secondaryTitle)).font(CS.inter(15, .semibold)).foregroundStyle(CS.wiInk)
+                                    .lineLimit(2).multilineTextAlignment(.center)
+                                    .frame(maxWidth: .infinity).frame(height: 52)
+                                    .background(CS.wiSurface2, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
-                    .padding(.top, 32)
+                    .frame(width: 270)
+                    .padding(.top, 48)
                 }
                 .frame(maxWidth: .infinity)
 

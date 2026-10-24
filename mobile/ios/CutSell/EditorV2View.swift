@@ -96,7 +96,7 @@ struct EditorV2View: View {
             BrandLogo()
             HStack {
                 Button { dismiss() } label: {
-                    WIHeaderIcon(image: "WIBack").frame(width: 44, height: 44)
+                    EditorBackButton().frame(width: 44, height: 44)
                 }
                 .accessibilityLabel(L10n.tr("Back"))
                 Spacer()

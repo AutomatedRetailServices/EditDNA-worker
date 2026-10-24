@@ -54,7 +54,7 @@ enum CS {
 
     /// Main call-to-action ("Create 1 cut", "Allow camera"...).
     static let ctaGradient = LinearGradient(          // White Indigo: accent #1769FF → #4A5BFF
-        colors: [Color(fixed: 0x1769FF), Color(fixed: 0x4A5BFF)],
+        colors: [Color(fixed: 0x1769FF), Color(fixed: 0x1769FF)],     // 23 Oct (PO): solid #1769FF everywhere
         startPoint: .leading, endPoint: .trailing
     )
     /// White Indigo accent (#1769FF), its soft tint (#EEF3FF) and the neutral black button (#0B1020).
@@ -69,7 +69,7 @@ enum CS {
     static let wiBorder = Color(fixed: 0xE6E9EF), wiInk = Color(fixed: 0x0B1020), wiSecondary = Color(fixed: 0x6B7385)
     /// Smaller primary buttons on alert screens (cyan → pink).
     static let alertButtonGradient = LinearGradient(
-        colors: [Color(fixed: 0x1769FF), Color(fixed: 0x4A5BFF)],
+        colors: [Color(fixed: 0x1769FF), Color(fixed: 0x1769FF)],     // 23 Oct (PO): solid #1769FF everywhere
         startPoint: .leading, endPoint: .trailing
     )
     /// Selected segment / filter chip.

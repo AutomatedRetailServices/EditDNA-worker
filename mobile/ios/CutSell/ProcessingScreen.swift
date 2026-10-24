@@ -39,6 +39,10 @@ struct CutProgressView: View {
                     stalled: uploading ? submitter?.stalled : nil,
                     background: projectID.flatMap { videos.status($0)?.text },
                     onTryAgain: { submitter?.restartStuckParts() },
+                    onRetryProcessing: {
+                        guard let projectID else { return false }
+                        return await tracker.retry(projectID: projectID)
+                    },
                     onClose: onClose,
                     onOpenEdits: onOpenEdits
                 )
@@ -116,8 +120,14 @@ struct ProcessingContent: View {
     var background: String? = nil
     /// "Try again": restarts only the parts in flight.
     var onTryAgain: () -> Void = {}
+    /// "Retry processing" (Figma 1233:3123): the server makes the cut again. false = it could not.
+    var onRetryProcessing: () async -> Bool = { false }
     let onClose: () -> Void
     let onOpenEdits: () -> Void
+    @State private var retrying = false
+    @State private var retryFailed = false
+
+    private static let errorRed = Color(fixed: 0xE5484D)
 
     /// White Indigo (Figma 1179:2 "Single · Processing ✅ APROBADO").
     var body: some View {
@@ -136,23 +146,43 @@ struct ProcessingContent: View {
             }
             .padding(.top, 14)
 
+            if failed {
+                // White Indigo · ERROR · Processing/Error (Figma 1233:3123).
+                Text(L10n.tr("We couldn’t finish this cut"))
+                    .font(CS.inter(22, .heavy))
+                    .foregroundStyle(Color(fixed: 0x4A5263))
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 14)
+                BrandRing(animating: false)
+                    .frame(width: 150, height: 150)
+                    .overlay(alignment: .bottomTrailing) {
+                        Text(verbatim: "!").font(CS.inter(13, .heavy)).foregroundStyle(Color(fixed: 0xFFFFFF))
+                            .frame(width: 22, height: 22)
+                            .background(Self.errorRed, in: Circle())
+                            .overlay(Circle().stroke(Color(fixed: 0xFFFFFF), lineWidth: 2))
+                            .padding(.trailing, 34).padding(.bottom, 34)
+                    }
+                    .padding(.top, 8)
+                VStack(spacing: 4) {
+                    Text(L10n.tr("Processing stopped")).font(CS.inter(15, .semibold)).foregroundStyle(Self.errorRed)
+                    Text(L10n.tr("Error")).font(CS.inter(22, .heavy)).foregroundStyle(Self.errorRed)
+                        .accessibilityIdentifier("processingStage")
+                    Text(L10n.tr("Your original recording is safe")).font(CS.inter(12, .medium)).foregroundStyle(CS.wiSecondary)
+                }
+                .padding(.top, 6)
+            } else {
             VStack(spacing: 6) {
-                Text(L10n.tr(failed ? "This cut needs another try" : "Hold on…"))
-                    .font(CS.inter(failed ? 26 : 30, .heavy))
-                    .tracking(failed ? -0.52 : -0.6)
+                Text(L10n.tr("Hold on…"))
+                    .font(CS.inter(30, .heavy))
+                    .tracking(-0.6)
                     .foregroundStyle(CS.wiInk)
-                Text(L10n.tr(failed ? "Something went wrong on our side." : "We’re saving you hours per day…"))
+                Text(L10n.tr("We’re saving you hours per day…"))
                     .font(CS.inter(15, .medium))
                     .foregroundStyle(CS.wiSecondary)
             }
             .multilineTextAlignment(.center)
             .padding(.top, 14)
 
-            if failed {
-                // White Indigo error (Figma 1176:2858): red mark in a circle and the green "original is safe" card.
-                WIStatusBadge(kind: .error).padding(.top, 22)
-                WIOriginalSafeCard().padding(.top, 22)
-            } else {
                 BrandRing(animating: true)
                     .frame(width: 150, height: 150)
                     .padding(.top, 16)
@@ -201,6 +231,7 @@ struct ProcessingContent: View {
 
             Spacer(minLength: 12)
 
+            if failed { failedFooter } else {
             VStack(spacing: 12) {
                 // Figma 1179:22 "Note": 52 high, radius 18, info icon + Medium 13.
                 HStack(spacing: 8) {
@@ -231,8 +262,50 @@ struct ProcessingContent: View {
                     .foregroundStyle(CS.wiSecondary)
             }
             .padding(.bottom, 8)
+            }
         }
         .padding(.horizontal, 20)
+    }
+
+    /// Figma 1233:3123: the "nothing was lost" note, the red "Retry processing" and its line.
+    private var failedFooter: some View {
+        VStack(spacing: 12) {
+            Text(L10n.tr(retryFailed ? "Couldn’t retry this cut. Please upload it again." : "Your original video is safe. Nothing was lost."))
+                .font(CS.inter(13, .medium))
+                .foregroundStyle(retryFailed ? Self.errorRed : CS.wiSecondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .background(Color(fixed: 0xF3F7FF), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(CS.accent, lineWidth: 1))
+                .accessibilityIdentifier("originalSafe")
+            Button {
+                guard !retrying else { return }
+                retrying = true
+                retryFailed = false
+                Task { @MainActor in
+                    let ok = await onRetryProcessing()
+                    retrying = false
+                    retryFailed = !ok
+                }
+            } label: {
+                Group {
+                    if retrying { ProgressView().tint(.white) } else {
+                        Text(L10n.tr("Retry processing")).font(CS.inter(16, .bold))
+                    }
+                }
+                .foregroundStyle(Color(fixed: 0xFFFFFF))
+                .frame(maxWidth: .infinity)
+                .frame(height: 52)
+                .background(Self.errorRed, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("retryProcessing")
+            Text(L10n.tr("Try again—the engine will resume from this stage."))
+                .font(CS.inter(12, .medium))
+                .foregroundStyle(CS.wiSecondary)
+        }
+        .padding(.bottom, 8)
     }
 }
 

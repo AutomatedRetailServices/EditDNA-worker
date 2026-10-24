@@ -60,7 +60,7 @@ struct PanelCardV5<Accessory: View, Content: View>: View {
                 Spacer(minLength: 4)
                 accessory()
                 Button(action: onClose) {
-                    Image(closeIsCheck ? "Ed5CloseCheck" : "Ed5CloseX").resizable().frame(width: 22, height: 22)
+                    Image(closeIsCheck ? "Ed5CloseCheck" : "Ed5CloseX").renderingMode(.template).resizable().foregroundStyle(closeIsCheck ? CS.accent : CS.wiInk).frame(width: 22, height: 22)
                         .frame(width: 34, height: 34).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -73,7 +73,7 @@ struct PanelCardV5<Accessory: View, Content: View>: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(Color(hex: 0x0C1730), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(CS.wiPage, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Color(hex: 0x19345F), lineWidth: 1))
         .padding(.horizontal, 16)
     }
@@ -101,7 +101,7 @@ struct PillButtonV5: View {
                 Image(systemName: systemImage).font(.system(size: 14, weight: .semibold))
                 Text(L10n.tr(title)).font(.system(size: 15, weight: .medium)).lineLimit(1).minimumScaleFactor(0.85)
             }
-            .foregroundStyle(destructive ? Color(hex: 0xFF4D6D) : .white)
+            .foregroundStyle(destructive ? Color(hex: 0xFF4D6D) : (isOn ? Color(fixed: 0xFFFFFF) : CS.wiInk))
             .padding(.horizontal, 14)
             .frame(height: 36)
             .background(isOn ? Color(hex: 0x1769FF) : Color(hex: 0x0A1326), in: RoundedRectangle(cornerRadius: 18))
@@ -124,12 +124,12 @@ struct GradientSliderV5: View {
             let usable = max(1, width - Self.knob)
             let center = Self.knob / 2 + usable * CGFloat(min(max(0, value / maximum), 1))
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.18)).frame(height: 4).padding(.horizontal, Self.knob / 2)
-                Capsule().fill(LinearGradient(colors: [CS.cyan, Color(hex: 0x7C3AED), Color(hex: 0xFF21D7)],
+                Capsule().fill(Color(fixed: 0xD5DAE3)).frame(height: 4).padding(.horizontal, Self.knob / 2)
+                Capsule().fill(LinearGradient(colors: [CS.accent, CS.accent],
                                               startPoint: .leading, endPoint: .trailing))
                     .frame(width: max(0, center - Self.knob / 2), height: 4)
                     .offset(x: Self.knob / 2)
-                Circle().fill(.white).frame(width: Self.knob, height: Self.knob)
+                Circle().fill(Color(fixed: 0xFFFFFF)).frame(width: Self.knob, height: Self.knob).overlay(Circle().stroke(CS.accent, lineWidth: 2))
                     .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
                     .offset(x: center - Self.knob / 2)
             }
@@ -228,7 +228,7 @@ struct OverlayPanelV5: View {
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .frame(height: EditorPanelKind.overlay(overlayID).height(isVideoOverlay: isVideo))
-        .background(Color(hex: 0x0C1730), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(CS.wiPage, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Color(hex: 0x19345F), lineWidth: 1))
         .padding(.horizontal, 16)
         .accessibilityElement(children: .contain)
@@ -237,9 +237,9 @@ struct OverlayPanelV5: View {
 
     private var header: some View {
         HStack(alignment: .top, spacing: 0) {
-            Image("Ed5Film").resizable().frame(width: 18, height: 18)
+            Image("Ed5Film").renderingMode(.template).resizable().frame(width: 18, height: 18).foregroundStyle(CS.accent)
                 .frame(width: 30, height: 30)
-                .background(Tornasol.horizontal(opacity: 0.5), in: RoundedRectangle(cornerRadius: 8))
+                .background(CS.accentSoft, in: RoundedRectangle(cornerRadius: 8))
                 .padding(.top, 4)
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.overlayTitle(overlayID)).font(.system(size: 16, weight: .semibold)).foregroundStyle(CS.textPrimaryF)
@@ -264,7 +264,7 @@ struct OverlayPanelV5: View {
             }
             .accessibilityIdentifier("overlayFront")
             Button(action: onClose) {
-                Image("Ed5CloseCheck").resizable().frame(width: 22, height: 22).frame(width: 34, height: 34)
+                Image("Ed5CloseCheck").renderingMode(.template).resizable().foregroundStyle(CS.accent).frame(width: 22, height: 22).frame(width: 34, height: 34)
             }
             .buttonStyle(.plain)
             .padding(.top, 4)
@@ -280,7 +280,7 @@ struct OverlayPanelV5: View {
             VStack(spacing: 4) {
                 ZStack {
                     Circle().fill(Color(hex: 0x0A1326))
-                    if isOn { Circle().strokeBorder(Tornasol.angular, lineWidth: 2) }
+                    if isOn { Circle().strokeBorder(CS.accent, lineWidth: 2) }
                     if let systemImage {
                         Image(systemName: systemImage).font(.system(size: 15, weight: .semibold)).foregroundStyle(CS.cyan)
                     } else {
@@ -304,7 +304,7 @@ struct OverlayPanelV5: View {
             VStack(spacing: 5) {
                 LayoutMiniPhone(layout: layout)
                     .frame(width: 33.6, height: 53.76)
-                    .overlay(RoundedRectangle(cornerRadius: 6.7).stroke(chosen ? Color.white : .clear, lineWidth: 1.7))
+                    .overlay(RoundedRectangle(cornerRadius: 6.7).stroke(chosen ? CS.accent : .clear, lineWidth: 1.7))
                 Text(L10n.tr(layout.title)).font(.system(size: 8.8, weight: .medium))
                     .foregroundStyle(chosen ? CS.cyan : CS.textSecondaryF).lineLimit(1).fixedSize()
             }
@@ -322,9 +322,9 @@ struct OverlayPanelV5: View {
                 let chosen = style.edge == edge
                 Button { model.setOverlayStyle(id: overlayID) { $0.edge = edge } } label: {
                     Text(L10n.tr(edge.title)).font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(chosen ? .white : CS.textSecondaryF)
+                        .foregroundStyle(chosen ? Color(fixed: 0xFFFFFF) : CS.textSecondaryF)
                         .frame(maxWidth: .infinity).frame(height: 28)
-                        .background { if chosen { Capsule().fill(Tornasol.horizontal) } }
+                        .background { if chosen { Capsule().fill(CS.accent) } }
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("edge_\(edge.rawValue)")
@@ -349,11 +349,11 @@ struct LayoutMiniPhone: View {
                     Color(hex: 0x6F86AE).frame(width: w * base.width, height: h * base.height)
                 }
                 if let region = layout.region {
-                    Tornasol.horizontal(opacity: 0.55)
+                    CS.accent.opacity(0.55)
                         .frame(width: w * region.width, height: h * region.height)
                         .offset(x: w * region.minX, y: h * region.minY)
                 } else {
-                    RoundedRectangle(cornerRadius: 2.5).fill(Tornasol.horizontal)
+                    RoundedRectangle(cornerRadius: 2.5).fill(CS.accent)
                         .frame(width: 16, height: 20.4)
                         .offset(x: 14.1, y: 6.45)
                 }
@@ -386,7 +386,7 @@ struct VolumePanelV5: View {
                 GradientSliderV5(value: $value, maximum: 2) { model.setVolume(target, value) }
                     .opacity(muted ? 0.45 : 1)
                 Text(L10n.tr(muted ? "Muted" : "\(Int((value * 100).rounded()))%"))
-                    .font(.system(size: 15, weight: .semibold)).monospacedDigit().foregroundStyle(.white)
+                    .font(.system(size: 15, weight: .semibold)).monospacedDigit().foregroundStyle(CS.wiInk)
                     .frame(width: 58, alignment: .trailing)
                     .accessibilityIdentifier("volumePercent")
             }
@@ -419,7 +419,7 @@ struct CleanUpRowV5: View {
             HStack(spacing: 10) {
                 Toggle(isOn: Binding(get: { on }, set: { model.setCleanUp(target, $0) })) {
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(L10n.tr("Clean up voice")).font(.system(size: 15, weight: .medium)).foregroundStyle(.white)
+                        Text(L10n.tr("Clean up voice")).font(.system(size: 15, weight: .medium)).foregroundStyle(CS.wiInk)
                         Text(L10n.tr("Removes background noise from the voice"))
                             .font(.system(size: 12)).foregroundStyle(CS.textSecondaryF).lineLimit(1).minimumScaleFactor(0.8)
                     }
@@ -461,7 +461,7 @@ struct SpeedPanelV5: View {
                     Button {
                         if let clipID { model.setClipSpeed(clipID: clipID, speed: speed) }
                     } label: {
-                        Text(ClipSpeed.label(speed)).font(.system(size: 15, weight: .medium)).foregroundStyle(.white)
+                        Text(ClipSpeed.label(speed)).font(.system(size: 15, weight: .medium)).foregroundStyle(chosen ? Color.white : CS.wiInk)
                             .frame(maxWidth: .infinity).frame(height: 42)
                             .background(chosen ? Color(hex: 0x1769FF) : Color(hex: 0x0A1326), in: RoundedRectangle(cornerRadius: 12))
                     }
@@ -491,11 +491,11 @@ struct VoiceClipPanelV5: View {
     @State private var value: Double = 1
 
     private var clip: AudioClipItem? { model.audioClips.first { $0.id == clipID } }
-    private static let cardBG = Color(hex: 0x0C1730), border = Color(hex: 0x19345F), control = Color(hex: 0x0A1326)
+    private static let cardBG = CS.wiPage, border = Color(hex: 0x19345F), control = Color(hex: 0x0A1326)
     private static let secondary = Color(hex: 0xAFC4E8), muted = Color(hex: 0x6F86AE), error = Color(hex: 0xFF4D67)
 
     // White Indigo (23 Oct): the voice over keeps its approved (dark) design.
-    var body: some View { voiceOverContent.environment(\.colorScheme, .dark) }
+    var body: some View { voiceOverContent.environment(\.colorScheme, .light) }
 
     @ViewBuilder private var voiceOverContent: some View {
         let duck = clip?.duckVideo ?? false
@@ -503,10 +503,9 @@ struct VoiceClipPanelV5: View {
         ZStack(alignment: .topLeading) {
             // mic tile
             RoundedRectangle(cornerRadius: 8)
-                .fill(LinearGradient(colors: [Color(hex: 0x19E6FF), Color(hex: 0x1769FF), Color(hex: 0x7C3AED), Color(hex: 0xFF21D7)],
-                                     startPoint: .leading, endPoint: .trailing).opacity(0.5))
+                .fill(CS.accentSoft)
                 .frame(width: 30, height: 30)
-                .overlay(Image("VoPanelMic").resizable().frame(width: 18, height: 18))
+                .overlay(Image(systemName: "mic").font(.system(size: 15, weight: .semibold)).foregroundStyle(CS.accent))
                 .offset(x: 15, y: 13)
             Text(L10n.tr(clip.map { model.title(of: $0) } ?? "Voiceover"))
                 .font(.system(size: 16, weight: .semibold)).foregroundStyle(CS.textPrimaryF).lineLimit(1)
@@ -525,7 +524,7 @@ struct VoiceClipPanelV5: View {
             action("VoPanelRetake", label: "Retake", on: false, id: "recordAgain", action: onRecordAgain)
                 .offset(x: 259, y: 9)
             Button(action: onClose) {
-                Image("VoPanelCheck").resizable().frame(width: 22, height: 22).frame(width: 40, height: 40)
+                Image("VoPanelCheck").renderingMode(.template).resizable().foregroundStyle(CS.accent).frame(width: 22, height: 22).frame(width: 40, height: 40)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -547,7 +546,7 @@ struct VoiceClipPanelV5: View {
                 .accessibilityIdentifier("volumePercent")
             Button(action: onDelete) {
                 HStack(spacing: 8) {
-                    Image("VoPanelTrash").resizable().frame(width: 18, height: 18)
+                    Image("VoPanelTrash").renderingMode(.template).resizable().foregroundStyle(Self.error).frame(width: 18, height: 18)
                     Text(L10n.tr("Delete voiceover")).font(.system(size: 13.5, weight: .medium)).foregroundStyle(Self.error)
                 }
                 .frame(width: 326, height: 38)
@@ -580,12 +579,13 @@ struct VoiceClipPanelV5: View {
             VStack(spacing: 4) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 18).fill(Self.control)
-                    if on { RoundedRectangle(cornerRadius: 18).stroke(Color(hex: 0x19E6FF), lineWidth: 2) }
-                    Image(icon).resizable().frame(width: 20, height: 20)
+                    if on { RoundedRectangle(cornerRadius: 18).stroke(CS.accent, lineWidth: 2) }
+                    Image(icon).renderingMode(.template).resizable().frame(width: 20, height: 20)
+                        .foregroundStyle(on ? CS.accent : CS.wiInk)
                 }
                 .frame(width: 36, height: 36)
                 Text(L10n.tr(label)).font(.system(size: 10.5, weight: .medium)).multilineTextAlignment(.center)
-                    .lineSpacing(0).foregroundStyle(on ? Color(hex: 0x19E6FF) : Self.secondary)
+                    .lineSpacing(0).foregroundStyle(on ? CS.accent : Self.secondary)
                     .fixedSize()
             }
             .frame(width: 54, alignment: .top)
@@ -603,8 +603,7 @@ struct VoiceClipPanelV5: View {
         let x = track * CGFloat(min(max(0, value / 2), 1))
         return ZStack(alignment: .leading) {
             Capsule().fill(Self.control).frame(width: track, height: 6)
-            Capsule().fill(LinearGradient(colors: [Color(hex: 0x19E6FF), Color(hex: 0x1769FF), Color(hex: 0x7C3AED), Color(hex: 0xFF21D7)],
-                                          startPoint: .leading, endPoint: .trailing))
+            Capsule().fill(CS.accent)
                 .frame(width: x, height: 6)
             Image("VoPanelKnob").resizable().frame(width: 22, height: 22).offset(x: x - 11)
         }
@@ -649,7 +648,7 @@ struct SoundClipPanelV5: View {
             HStack(spacing: 12) {
                 GradientSliderV5(value: $value, maximum: 2) { setVolume(value) }
                 Text(L10n.tr("\(Int((value * 100).rounded()))%"))
-                    .font(.system(size: 15, weight: .semibold)).monospacedDigit().foregroundStyle(.white)
+                    .font(.system(size: 15, weight: .semibold)).monospacedDigit().foregroundStyle(CS.wiInk)
                     .frame(width: 52, alignment: .trailing)
             }
             .padding(.top, 4)
@@ -704,14 +703,14 @@ struct AudioPanelV5: View {
                         chosen = sound.id
                         library.play(sound.id)
                     } label: {
-                        Text(sound.name).font(.system(size: 16, weight: .medium)).foregroundStyle(.white)
+                        Text(sound.name).font(.system(size: 16, weight: .medium)).foregroundStyle(CS.wiInk)
                             .frame(maxWidth: .infinity).frame(height: 54)
                             .background(Color(hex: 0x0A1326), in: RoundedRectangle(cornerRadius: 14))
                             .overlay(RoundedRectangle(cornerRadius: 14).stroke(chosen == sound.id ? CS.cyan : .clear, lineWidth: 1.5))
                             .overlay(alignment: .topTrailing) {
                                 // Still downloading: a spinner, and the sound can't be added yet.
                                 if !library.ready.contains(sound.id) {
-                                    ProgressView().controlSize(.mini).tint(.white).padding(6)
+                                    ProgressView().controlSize(.mini).tint(CS.wiInk).padding(6)
                                         .accessibilityIdentifier("soundDownloading")
                                 }
                             }
@@ -739,7 +738,7 @@ struct AudioPanelV5: View {
                         Text(L10n.tr(ready ? "Add at playhead" : "Getting sound…")).font(.system(size: 15, weight: .medium))
                     }
                     .foregroundStyle(.white).padding(.horizontal, 14).frame(height: 36)
-                    .background(Color(hex: 0x1769FF).opacity(ready ? 1 : 0.55), in: RoundedRectangle(cornerRadius: 12))
+                    .background(CS.accent.opacity(ready ? 1 : 0.55), in: RoundedRectangle(cornerRadius: 12))
                 }
                 .buttonStyle(.plain)
                 .disabled(!ready)
@@ -749,7 +748,7 @@ struct AudioPanelV5: View {
                         Image(systemName: "music.note").font(.system(size: 14, weight: .semibold))
                         Text(L10n.tr("Music from Files")).font(.system(size: 15, weight: .medium))
                     }
-                    .foregroundStyle(.white).padding(.horizontal, 12).frame(height: 36)
+                    .foregroundStyle(CS.wiInk).padding(.horizontal, 12).frame(height: 36)
                     .background(Color(hex: 0x0A1326), in: RoundedRectangle(cornerRadius: 12))
                 }
                 .buttonStyle(.plain)
@@ -795,20 +794,21 @@ struct VoiceOverSheetV5: View {
     private var isRecording: Bool { recorder.state == .recording }
     private var takeURL: URL? { recorder.recordedURL }
 
-    // White Indigo (23 Oct): the voice over keeps its approved (dark) design.
-    var body: some View { voiceOverContent.environment(\.colorScheme, .dark) }
+    // White Indigo (PO 23 Oct): the approved voice-over design, only its colours: white sheet, blue mics,
+    // black pause / stop, blue Save.
+    var body: some View { voiceOverContent.environment(\.colorScheme, .light) }
 
     @ViewBuilder private var voiceOverContent: some View {
         VStack(spacing: 0) {
-            Capsule().fill(Color(hex: 0x455987)).frame(width: 38, height: 5).padding(.top, 12)
+            Capsule().fill(Color(fixed: 0xD5D9E2)).frame(width: 38, height: 5).padding(.top, 12)
             if step == .record { recordStep } else { reviewStep }
             Spacer(minLength: 0)
         }
         // No X (Figma 1119:2316 / 1120:4): it closes by sliding down from the handle or tapping outside it.
         .frame(maxWidth: .infinity)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(Color(hex: 0x060D1F, opacity: 0.98), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(Color(hex: 0x294D85, opacity: 0.9), lineWidth: 1.5))
+        .background(CS.wiPage, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
         .onChange(of: recorder.recordedURL) { _, url in if url != nil { step = .review } }
         .task(id: takeURL) {
             if let url = takeURL { samples = await Waveform.samples(url: url, count: 60) } else { samples = [] }
@@ -823,27 +823,27 @@ struct VoiceOverSheetV5: View {
     private var recordStep: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Image("Ed4OfficialMic").resizable().frame(width: 26, height: 26)
-                Text(L10n.tr("Recording voice-over")).font(.system(size: 18, weight: .semibold)).foregroundStyle(CS.textPrimaryF)
+                Image(systemName: "mic").font(.system(size: 19, weight: .medium)).foregroundStyle(CS.accent).frame(width: 26, height: 26)
+                Text(L10n.tr("Recording voice-over")).font(CS.inter(18, .bold)).foregroundStyle(CS.wiInk)
             }
             .padding(.top, 14)
             Text(isRecording ? (recorder.isPaused ? "Paused · " : "● REC · ") + VoiceRecorder.formatted(recorder.elapsed)
                              : "Add your voice to this video")
-                .font(.system(size: 13, weight: .semibold)).foregroundStyle(Color(hex: 0x9EB5DB)).monospacedDigit()
+                .font(CS.inter(13, .semibold)).foregroundStyle(CS.wiSecondary).monospacedDigit()
                 .padding(.top, 4)
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(L10n.tr("Enhance voice")).font(.system(size: 15, weight: .medium)).foregroundStyle(CS.textPrimaryF)
+                    Text(L10n.tr("Enhance voice")).font(CS.inter(15, .semibold)).foregroundStyle(CS.wiInk)
                     Text(L10n.tr("Removes background noise and sounds, so only your voice is heard."))
-                        .font(.system(size: 12)).foregroundStyle(CS.textSecondaryF).fixedSize(horizontal: false, vertical: true)
+                        .font(CS.inter(12, .medium)).foregroundStyle(CS.wiSecondary).fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 4)
-                Toggle("", isOn: $enhance).labelsHidden().tint(CS.cyan)
+                Toggle("", isOn: $enhance).labelsHidden().tint(CS.accent)
                     .allowsHitTesting(!(isRecording || countdown != nil))   // stays bright (Figma), just not changeable
                     .accessibilityIdentifier("enhanceVoice")
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
-            .background(Color(hex: 0x0C1730), in: RoundedRectangle(cornerRadius: 14))
+            .background(CS.wiCard, in: RoundedRectangle(cornerRadius: 14))
             .padding(.horizontal, 22).padding(.top, 12)
             if isRecording {
                 LiveWave(levels: recorder.levels).frame(height: 22).padding(.horizontal, 40).padding(.top, 8)
@@ -856,8 +856,7 @@ struct VoiceOverSheetV5: View {
                         if recorder.isPaused { recorder.resume() } else { recorder.pause() }
                     } label: {
                         ZStack {
-                            Circle().fill(Color(hex: 0x1A0F2E))
-                            Circle().stroke(.white, lineWidth: 1.5)
+                            Circle().fill(Color(fixed: 0x0B1020))     // White Indigo: black circle, white bars
                             if recorder.isPaused {
                                 Image(systemName: "play.fill").font(.system(size: 18, weight: .bold)).foregroundStyle(.white)
                             } else {
@@ -891,9 +890,8 @@ struct VoiceOverSheetV5: View {
                 control("Tap to finish") {
                     Button { if isRecording { recorder.stop() } } label: {
                         ZStack {
-                            Circle().fill(Color(hex: 0x1A0F2E))
-                            Circle().stroke(Color(hex: 0xFF3861), lineWidth: 1.5)
-                            RoundedRectangle(cornerRadius: 5).fill(Color(hex: 0xFF3861)).frame(width: 20, height: 20)
+                            Circle().fill(Color(fixed: 0x0B1020))     // White Indigo: black circle, red square
+                            RoundedRectangle(cornerRadius: 5).fill(Color(fixed: 0xFF3861)).frame(width: 20, height: 20)
                         }
                         .frame(width: 48, height: 48)
                     }
@@ -911,7 +909,7 @@ struct VoiceOverSheetV5: View {
     private func control<Content: View>(_ label: String, @ViewBuilder _ content: () -> Content) -> some View {
         VStack(spacing: 8) {
             ZStack { content() }.frame(height: 88)
-            Text(L10n.tr(label)).font(.system(size: 10, weight: .medium)).foregroundStyle(Color(hex: 0xA3B2D6)).lineLimit(1)
+            Text(L10n.tr(label)).font(CS.inter(10, .medium)).foregroundStyle(CS.wiSecondary).lineLimit(1)
         }
         .frame(maxWidth: .infinity)
     }
@@ -940,12 +938,12 @@ struct VoiceOverSheetV5: View {
     private var reviewStep: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Image("Ed4OfficialMic").resizable().frame(width: 26, height: 26)
-                Text(L10n.tr("Voice-over")).font(.system(size: 18, weight: .semibold)).foregroundStyle(CS.textPrimaryF)
+                Image(systemName: "mic").font(.system(size: 19, weight: .medium)).foregroundStyle(CS.accent).frame(width: 26, height: 26)
+                Text(L10n.tr("Voice-over")).font(CS.inter(18, .bold)).foregroundStyle(CS.wiInk)
             }
             .padding(.top, 14)
             Text(L10n.tr("Preview your recording before saving."))
-                .font(.system(size: 13)).foregroundStyle(Color(hex: 0x8FA8D1)).padding(.top, 4)
+                .font(CS.inter(13, .medium)).foregroundStyle(CS.wiSecondary).padding(.top, 4)
             // Figma 1120:91 (Waveform/MinimalPeaks): 310 x 34 box, 42 rounded peaks, blue = heard, light = still to hear.
             GeometryReader { proxy in
                 let progress = listener.duration > 0 ? listener.time / listener.duration : 0
@@ -955,11 +953,11 @@ struct VoiceOverSheetV5: View {
                     ForEach(Array(peaks.enumerated()), id: \.offset) { index, level in
                         let h = max(6, 26 * CGFloat(level))
                         RoundedRectangle(cornerRadius: 1.6)
-                            .fill(Double(index) / Double(peaks.count) < progress ? Color(hex: 0x1677FF) : Color(hex: 0xD7DCE5))
+                            .fill(Double(index) / Double(peaks.count) < progress ? CS.accent : Color(fixed: 0xC9CFD9))
                             .frame(width: 3.2, height: h)
                             .offset(x: 4.4 + CGFloat(index) * pitch, y: (34 - h) / 2)
                     }
-                    RoundedRectangle(cornerRadius: 0.75).fill(Color(hex: 0xF4F6FA))
+                    RoundedRectangle(cornerRadius: 0.75).fill(CS.wiInk)
                         .frame(width: 1.5, height: 28)
                         .offset(x: max(0, min(proxy.size.width - 1.5, proxy.size.width * CGFloat(progress))), y: 3)
                 }
@@ -969,8 +967,8 @@ struct VoiceOverSheetV5: View {
                 })
             }
             .frame(height: 34)
-            .background(Color(hex: 0x10182A), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(hex: 0x26334D), lineWidth: 1))
+            .background(CS.wiCard, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(CS.wiBorder, lineWidth: 1))
             .padding(.horizontal, 40).padding(.top, 24)
             .accessibilityIdentifier("reviewWave")
             HStack {
@@ -978,15 +976,15 @@ struct VoiceOverSheetV5: View {
                 Spacer()
                 Text(VoiceRecorder.formatted(listener.duration > 0 ? listener.duration : recorder.elapsed))
             }
-            .font(.system(size: 12, weight: .medium)).monospacedDigit().foregroundStyle(Color(hex: 0x8FA8D1))
+            .font(CS.inter(12, .medium)).monospacedDigit().foregroundStyle(CS.wiSecondary)
             .padding(.horizontal, 30).padding(.top, 8)
             HStack(spacing: 14) {
                 Button { if let url = takeURL { listener.toggle(url: url) } } label: {
                     Label(listener.isPlaying ? "Pause" : "Play", systemImage: listener.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+                        .font(CS.inter(15, .semibold)).foregroundStyle(CS.wiInk)
                         .frame(maxWidth: .infinity).frame(height: 46)
-                        .background(Color(hex: 0x0F081A), in: RoundedRectangle(cornerRadius: 14))
-                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(CS.magenta, lineWidth: 1))
+                        .background(Color(fixed: 0xFFFFFF), in: RoundedRectangle(cornerRadius: 14))
+                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(CS.wiInk, lineWidth: 1.5))
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("voicePlay")
@@ -996,19 +994,18 @@ struct VoiceOverSheetV5: View {
                     step = .record
                 } label: {
                     Label(L10n.tr("Retake"), systemImage: "arrow.counterclockwise")
-                        .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+                        .font(CS.inter(15, .semibold)).foregroundStyle(CS.wiInk)
                         .frame(maxWidth: .infinity).frame(height: 46)
-                        .background(Color(hex: 0x0F081A), in: RoundedRectangle(cornerRadius: 14))
-                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(hex: 0x731F8C), lineWidth: 1))
+                        .background(Color(fixed: 0xFFFFFF), in: RoundedRectangle(cornerRadius: 14))
+                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(CS.wiInk, lineWidth: 1.5))
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("voiceRetake")
                 Button { if let url = takeURL { Task { await save(url) } } } label: {
                     Label(saving ? "Saving…" : "Save", systemImage: "checkmark")
-                        .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+                        .font(CS.inter(15, .semibold)).foregroundStyle(Color(fixed: 0xFFFFFF))
                         .frame(maxWidth: .infinity).frame(height: 46)
-                        .background(LinearGradient(colors: [Color(hex: 0x0AD6FF), Color(hex: 0x3366FF), Color(hex: 0xF01FD6)],
-                                                   startPoint: .leading, endPoint: .trailing), in: RoundedRectangle(cornerRadius: 14))
+                        .background(CS.accent, in: RoundedRectangle(cornerRadius: 14))
                 }
                 .buttonStyle(.plain)
                 .disabled(saving)
