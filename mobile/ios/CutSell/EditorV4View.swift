@@ -1511,11 +1511,10 @@ struct EditorV4View: View {
             VStack(spacing: 0) {
                 Image(systemName: "mic")
                     .font(.system(size: 40, weight: .regular))
-                    .foregroundStyle(CS.magenta)
-                    .shadow(color: CS.magenta.opacity(0.8), radius: 10)
+                    .foregroundStyle(CS.accent)
                     .padding(.top, 30)
                 Text(L10n.tr("Allow microphone access"))
-                    .font(CS.inter(21, .bold)).foregroundStyle(.white)
+                    .font(CS.inter(21, .bold)).foregroundStyle(CS.wiInk)
                     .padding(.top, 18)
                 Text(L10n.tr("CutSell.ai needs microphone access to record your voiceover."))
                     .font(CS.inter(14)).foregroundStyle(CS.textSecondaryF)
@@ -1535,8 +1534,8 @@ struct EditorV4View: View {
                     .padding(.top, 12).padding(.bottom, 22)
             }
             .frame(maxWidth: .infinity)
-            .background(Color(hex: 0x0A1326), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Color(hex: 0x2A4A80), lineWidth: 1))
+            .background(CS.wiPage, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
             .padding(.horizontal, 24)
         }
     }

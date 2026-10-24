@@ -284,7 +284,8 @@ struct OverlayPanelV5: View {
                     if let systemImage {
                         Image(systemName: systemImage).font(.system(size: 15, weight: .semibold)).foregroundStyle(CS.cyan)
                     } else {
-                        Image(image).resizable().frame(width: 20, height: 20)
+                        Image(image).renderingMode(.template).resizable().frame(width: 20, height: 20)
+                            .foregroundStyle(isOn ? CS.accent : CS.wiInk)
                     }
                 }
                 .frame(width: 36, height: 36)
@@ -344,9 +345,9 @@ struct LayoutMiniPhone: View {
         GeometryReader { proxy in
             let w = proxy.size.width, h = proxy.size.height
             ZStack(alignment: .topLeading) {
-                Color(hex: 0x6F86AE)
+                Color(fixed: 0xD5DAE3)
                 if let base = layout.baseRegion {
-                    Color(hex: 0x6F86AE).frame(width: w * base.width, height: h * base.height)
+                    Color(fixed: 0xD5DAE3).frame(width: w * base.width, height: h * base.height)
                 }
                 if let region = layout.region {
                     CS.accent.opacity(0.55)
@@ -359,7 +360,7 @@ struct LayoutMiniPhone: View {
                 }
             }
         }
-        .background(Color(hex: 0x0B1730))
+        .background(Color(fixed: 0xE9ECF1))
         .clipShape(RoundedRectangle(cornerRadius: 6.7))
     }
 }
