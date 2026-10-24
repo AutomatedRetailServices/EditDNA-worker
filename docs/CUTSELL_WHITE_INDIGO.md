@@ -47,3 +47,15 @@ Everything else takes the tokens through `LightPalette`. The teleprompter stays 
 ## Screenshots
 Workflow `cutsell-ios-white-indigo-shots.yml` (push to `feature/white-indigo`): small and large iPhone,
 list `DesignScreenshots.whiteIndigo`, pushed to the branch `design-screenshots-wi`.
+
+## Builds 45–49 (24 Oct)
+- 45: one continuous gradient `BrandRing` for every wait; Queued / Export failed / Bulk & Plan Needs attention;
+  neutral no-voice row; blue Retry processing.
+- 46: Today (1209:170) one "Share to TikTok". Probe `testWIPlanPath`.
+- 47–49: Plan my week is ONE screen (Figma 1258:3101, `PlanMyWeek.swift`): tap videos in order, Per day / Between /
+  Days / Starts, Mix products. Built with the existing server endpoints only (each video pinned with
+  `/v1/plan/slots/move`, then prefs + `/v1/plan/week/build`, which keeps pinned slots and adds none). This week: a video
+  opens Swap / Change day or time / Remove (1257:3329); Settings = reminders switch. Export: WHERE TO? (1259:3101) →
+  Save to Photos (Share / Done) or Add to Plan → scheduling sheet (1259:3199). The network per video and "Decide later"
+  are kept on the iPhone (`PostNetwork`, `PlanLater`); nothing is posted automatically.
+- Probes: `testWIPlanSimple`, `testWIExportWhereTo` (simulator, mock plan data).
