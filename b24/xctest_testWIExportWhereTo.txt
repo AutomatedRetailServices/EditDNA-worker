@@ -1,8 +1,11 @@
-B24UI    18.9 PASS WHERE TO? Save to Photos · Add to Plan
-B24UI    30.7 PASS Saved to Photos · Share · Done
-B24UI    41.3 PASS the scheduling sheet
-/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:1450: error: -[CutSellUITests.Build24UITests testWIExportWhereTo] : Failed to tap "scheduleNetwork_Instagram" Any: No matches found for first query match sequence: `Descendants matching type Any` -> `Elements matching predicate '"scheduleNetwork_Instagram" IN identifiers'`, given input App element pid: 25154
-Test Case '-[CutSellUITests.Build24UITests testWIExportWhereTo]' failed (45.079 seconds).
-Test Suite 'Build24UITests' failed at 2026-10-24 20:49:16.151.
-Test Suite 'CutSellUITests.xctest' failed at 2026-10-24 20:49:16.153.
-Test Suite 'Selected tests' failed at 2026-10-24 20:49:16.154.
+B24UI    22.5 PASS WHERE TO? Save to Photos · Add to Plan
+B24UI    34.4 PASS Saved to Photos · Share · Done
+B24UI    44.8 PASS the scheduling sheet
+B24UI    47.5 button: Schedule · Mon 26 · 7:00 PM
+B24UI    49.3 PASS Schedule → This week · 1 video · 1 product · 1 per day
+B24UI    49.3 PASS the video at 7:00 PM in This week
+B24UI    50.5 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testWIExportWhereTo]' passed (50.806 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-24 21:05:54.592.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-24 21:05:54.594.
+Test Suite 'Selected tests' passed at 2026-10-24 21:05:54.595.
