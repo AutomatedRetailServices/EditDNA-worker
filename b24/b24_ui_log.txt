@@ -1,28 +1,28 @@
-B24UI    39.2 PASS Plan · Plan my week ›
-B24UI    45.6 PASS Plan my week opens the one-screen picker
-B24UI    46.1 PASS Ready videos in the grid · 9
-B24UI    47.2 PASS Build plan is off with no video
-B24UI    53.7 PASS numbers follow the taps (1–6) · 1 2 6
-B24UI    54.2 button: Build plan · 6 videos · Mon 26 → Tue 27 · 4 a day · reminders on
-B24UI    55.6 PASS untapping renumbers · 2
-B24UI    59.3 PASS Between selector
-B24UI    59.4 between: 4 a day: 9:00 AM · 1:00 PM · 5:00 PM · 9:00 PM
-B24UI    71.0 PASS Build plan opens This week · 6 videos · 4 products · 4 per day
-B24UI    73.1 PASS the 6 videos are planned · 6 videos · 4 products · 4 per day
-B24UI    78.4 PASS tapping a video opens its sheet
-B24UI    79.8 PASS Swap · Change · Remove
-B24UI    83.2 PASS Swap video lists other videos
-B24UI    86.0 PASS after the swap: still 6 videos · 6 videos · 5 products · 4 per day
-B24UI    93.5 PASS Plan: See this week › and Plan my week ›
-B24UI    96.4 PASS See this week › opens This week
-B24UI    99.8 PASS the day: Share to … · Share to TikTok
-B24UI   109.1 PASS the reminder arrives · CUTSELL, now, Time to post: Hydrating Cleanser on TikTok, Caption and video are ready.
-B24UI   114.6 PASS the reminder opens its video
-B24UI   114.8 FAILURES: none
-B24UI    20.7 PASS WHERE TO? Save to Photos · Add to Plan
-B24UI    31.4 PASS Saved to Photos · Share · Done
-B24UI    43.1 PASS the scheduling sheet
-B24UI    45.7 button: Schedule · Mon 26 · 7:00 PM
-B24UI    48.7 PASS Schedule → This week · 1 video · 1 product · 1 per day
-B24UI    48.7 PASS the video at 7:00 PM in This week
-B24UI    49.9 FAILURES: none
+B24UI    20.0 PASS Plan · Plan my week ›
+B24UI    22.3 PASS Plan my week opens the one-screen picker
+B24UI    22.6 PASS Ready videos in the grid · 9
+B24UI    22.8 PASS Build plan is off with no video
+B24UI    29.1 PASS numbers follow the taps (1–6) · 1 2 6
+B24UI    29.3 button: Build plan · 6 videos · Mon 26 → Tue 27 · 4 a day · reminders on
+B24UI    33.9 PASS untapping renumbers · 2
+B24UI    39.5 PASS Between selector
+B24UI    39.6 between: 4 a day: 9:00 AM · 1:00 PM · 5:00 PM · 9:00 PM
+B24UI    47.1 PASS Build plan opens This week · 6 videos · 4 products · 4 per day
+B24UI    47.5 PASS the 6 videos are planned · 6 videos · 4 products · 4 per day
+B24UI    50.9 PASS tapping a video opens its sheet
+B24UI    51.1 PASS Swap · Change · Remove
+B24UI    55.6 PASS Swap video lists other videos
+B24UI    58.8 PASS after the swap: still 6 videos · 6 videos · 4 products · 4 per day
+B24UI    64.2 PASS Plan: See this week › and Plan my week ›
+B24UI    67.1 PASS See this week › opens This week
+B24UI    70.6 PASS the day: Share to … · Share to TikTok
+B24UI    78.6 PASS the reminder arrives · CUTSELL, now, Time to post: Power Bank on TikTok, Caption and video are ready.
+B24UI    82.9 PASS the reminder opens its video
+B24UI    83.1 FAILURES: none
+B24UI    16.5 PASS WHERE TO? Save to Photos · Add to Plan
+B24UI    26.6 PASS Saved to Photos · Share · Done
+B24UI    36.7 PASS the scheduling sheet
+B24UI    38.7 button: Schedule · Mon 26 · 7:00 PM
+B24UI    40.9 PASS Schedule → This week · 1 video · 1 product · 1 per day
+B24UI    40.9 PASS the video at 7:00 PM in This week
+B24UI    42.0 FAILURES: none
