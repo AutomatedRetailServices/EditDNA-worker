@@ -1179,17 +1179,11 @@ struct PlanWeekView: View {
                 .onTapGesture { onOpenDay(day) }
                 .accessibilityAddTraits(.isButton)
                 .accessibilityIdentifier("weekDayOpen_\(day)")
-                if slots.count > 3 {                       // Goal v2: up to 8 times a day -> the day scrolls sideways
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(alignment: .top, spacing: 8) {
-                            ForEach(slots) { slot in slotCell(slot, highlight: isToday || !allPosted && slot.postedAt == nil).frame(width: 96) }
-                        }
-                    }
-                } else {
-                    HStack(alignment: .top, spacing: 8) {
-                        ForEach(slots) { slot in slotCell(slot, highlight: isToday || !allPosted && slot.postedAt == nil) }
-                        if slots.count < 2 { Spacer(minLength: 0) }
-                    }
+                // Figma 1209:70: two videos per row (a day with more videos has more rows).
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 8, alignment: .topLeading),
+                                    GridItem(.flexible(), spacing: 8, alignment: .topLeading)],
+                          alignment: .leading, spacing: 10) {
+                    ForEach(slots) { slot in slotCell(slot, highlight: isToday || !allPosted && slot.postedAt == nil) }
                 }
             }
             .padding(13)

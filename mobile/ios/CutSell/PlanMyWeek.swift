@@ -208,7 +208,7 @@ struct PlanMyWeekView: View {
         .onChange(of: settings) { _, value in value.save() }
         .sheet(item: $editing) { which in
             PlanSettingSheet(which: which, settings: $settings)
-                .presentationDetents([.height(which == .days ? 360 : 400)])
+                .presentationDetents([.height(which == .days ? 360 : which == .between ? 440 : 400)])
                 .presentationBackground(CS.wiPage)
         }
         .alert(L10n.tr("CutSell"), isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
@@ -413,6 +413,7 @@ struct PlanSettingSheet: View {
                 }
                 Text(L10n.tr("\(settings.perDay) a day: \(PlanScheduler.times(perDay: settings.perDay, from: minutes(from), to: max(minutes(from), minutes(to))).prefix(6).map(PlanDay.clock).joined(separator: " · "))\(settings.perDay > 6 ? " …" : "")"))
                     .font(CS.inter(12)).foregroundStyle(CS.wiSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("betweenPreview")
             case .days:
                 HStack(spacing: 6) {
@@ -484,7 +485,9 @@ struct PlanSettingSheet: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(L10n.tr(label)).font(CS.inter(12, .medium)).foregroundStyle(CS.wiSecondary)
             DatePicker("", selection: value, displayedComponents: .hourAndMinute)
-                .datePickerStyle(.wheel).labelsHidden().frame(height: 120).clipped()
+                .datePickerStyle(.wheel).labelsHidden()
+                .frame(maxWidth: .infinity).frame(height: 130).clipped()
+                .scaleEffect(0.85)
         }
         .frame(maxWidth: .infinity)
         .padding(8).wiCard(shadow: false)
