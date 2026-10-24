@@ -1,0 +1,22 @@
+B24UI    21.0 PASS Create · Plan my week tile
+B24UI    24.0 PASS Create tile opens Plan my week
+B24UI    34.8 PASS Plan · Plan my week ›
+B24UI    36.5 plan card: Plan your week
+B24UI    39.1 PASS Plan my week (Goal)
+B24UI    39.2 PASS Goal shows goalMinus
+B24UI    39.5 PASS Goal shows goalPlus
+B24UI    39.7 PASS Goal shows goalCount
+B24UI    39.9 PASS Goal shows goalAddTime
+B24UI    40.2 PASS Goal shows goalStart
+B24UI    40.5 PASS Goal shows goalSummary
+B24UI    46.5 PASS Build my plan opens This week · 9 videos · 6 products · 2 per day
+B24UI    48.8 PASS a day in This week
+B24UI    51.1 PASS a day opens Today
+B24UI    57.8 PASS Plan again
+B24UI    58.2 plan card with a plan: Nothing left to post today
+B24UI    61.3 PASS with a plan, Plan opens This week
+B24UI    61.5 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testWIPlanPath]' passed (61.814 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-24 18:44:58.568.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-24 18:44:58.569.
+Test Suite 'Selected tests' passed at 2026-10-24 18:44:58.569.

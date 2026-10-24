@@ -1,41 +1,18 @@
-B24UI    23.9 PASS no avatar on Create
-B24UI    24.1 PASS no plan meter on Create
-B24UI    24.1 PASS no 'Create more' title
-B24UI    24.3 PASS hubRecord shown
-B24UI    24.5 PASS hubFaceless shown
-B24UI    24.6 PASS hubMix shown
-B24UI    24.8 PASS hubPlanWeek shown
-B24UI    25.0 PASS hubMode_single shown
-B24UI    25.3 PASS hubMode_bulk shown
-B24UI    25.5 PASS hubMode_combine shown
-B24UI    27.8 PASS Record: 'What are you promoting?' first
-B24UI    28.0 PASS Record: no Detect for me
-B24UI    28.1 PASS Record: Continue off without a product
-B24UI    29.3 PASS Record: her products listed
-B24UI    32.4 PASS Record opens the camera
-B24UI    40.4 PASS Faceless: 'What are you promoting?' first
-B24UI    40.7 PASS Faceless: no Detect for me
-B24UI    40.8 PASS Faceless: Continue off without a product
-B24UI    42.1 PASS Faceless: her products listed
-B24UI    44.5 PASS Faceless shows Coming soon
-B24UI    52.5 PASS Sales Mix: 'What are you promoting?' first
-B24UI    52.7 PASS Sales Mix: no Detect for me
-B24UI    52.8 PASS Sales Mix: Continue off without a product
-B24UI    54.2 PASS Sales Mix: her products listed
-B24UI    56.7 PASS Sales Mix opens Sales Mix · Setup
-B24UI    64.1 PASS Plan my week opens Plan my week
-B24UI    72.0 PASS single: 'What are you promoting?' first
-B24UI    72.3 PASS single: no Detect for me
-B24UI    72.4 PASS single: Continue off without a product
-B24UI    73.5 PASS single: her products listed
-B24UI    80.1 Photos access allowed
-B24UI    82.3 PASS single opens the gallery in single
-B24UI    95.4 PASS bulk: 'What are you promoting?' first
-B24UI    95.4 PASS bulk: Detect for me (Bulk only)
-B24UI   100.7 PASS bulk opens the gallery in bulk
-B24UI   109.3 PASS combine: 'What are you promoting?' first
-B24UI   109.5 PASS combine: no Detect for me
-B24UI   109.6 PASS combine: Continue off without a product
-B24UI   110.8 PASS combine: her products listed
-B24UI   117.8 PASS combine opens the gallery in combine
-B24UI   118.0 FAILURES: none
+B24UI    21.0 PASS Create · Plan my week tile
+B24UI    24.0 PASS Create tile opens Plan my week
+B24UI    34.8 PASS Plan · Plan my week ›
+B24UI    36.5 plan card: Plan your week
+B24UI    39.1 PASS Plan my week (Goal)
+B24UI    39.2 PASS Goal shows goalMinus
+B24UI    39.5 PASS Goal shows goalPlus
+B24UI    39.7 PASS Goal shows goalCount
+B24UI    39.9 PASS Goal shows goalAddTime
+B24UI    40.2 PASS Goal shows goalStart
+B24UI    40.5 PASS Goal shows goalSummary
+B24UI    46.5 PASS Build my plan opens This week · 9 videos · 6 products · 2 per day
+B24UI    48.8 PASS a day in This week
+B24UI    51.1 PASS a day opens Today
+B24UI    57.8 PASS Plan again
+B24UI    58.2 plan card with a plan: Nothing left to post today
+B24UI    61.3 PASS with a plan, Plan opens This week
+B24UI    61.5 FAILURES: none
