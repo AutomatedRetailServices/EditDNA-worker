@@ -1,6 +1,6 @@
-B24UI    21.9 PASS Plan · Plan my week ›
-B24UI    24.3 PASS Plan my week opens the one-screen picker
-B24UI    24.9 PASS Ready videos in the grid · 9
-B24UI    29.4 FAIL WHERE TO? Save to Photos · Add to Plan
-B24UI    55.5 FAIL Saved to Photos · Share · Done
-B24UI    79.7 FAIL the scheduling sheet
+B24UI    28.6 PASS Plan · Plan my week ›
+B24UI    31.4 PASS Plan my week opens the one-screen picker
+B24UI    32.0 PASS Ready videos in the grid · 9
+B24UI    18.9 PASS WHERE TO? Save to Photos · Add to Plan
+B24UI    30.7 PASS Saved to Photos · Share · Done
+B24UI    41.3 PASS the scheduling sheet
