@@ -313,13 +313,13 @@ struct PlanMyWeekView: View {
                 .background(CS.accent.opacity(chosen.isEmpty ? 0.4 : 1), in: Capsule())
             }
             .buttonStyle(.plain)
-            .disabled(chosen.isEmpty || building)
             .padding(.top, 4)
             .accessibilityElement(children: .ignore)
             .accessibilityAddTraits(.isButton)
             .accessibilityLabel(L10n.tr("Build plan · \(chosen.count) video\(chosen.count == 1 ? "" : "s")"))
             .accessibilityValue(L10n.tr(PlanScheduler.summary(placed, perDay: settings.perDay, reminders: reminders)))
             .accessibilityIdentifier("pmwBuild")
+            .disabled(chosen.isEmpty || building)
         }
         .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 10)
         .background {
