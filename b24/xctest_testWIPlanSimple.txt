@@ -1,25 +1,20 @@
-B24UI    20.6 PASS Plan · Plan my week ›
-B24UI    23.3 PASS Plan my week opens the one-screen picker
-B24UI    23.7 PASS Ready videos in the grid · 9
-B24UI    23.9 PASS Build plan is off with no video
-B24UI    31.2 PASS numbers follow the taps (1–6) · 1 2 6
-B24UI    31.6 button: Build plan · 6 videos · Mon 26 → Tue 27 · 4 a day · reminders on
-B24UI    33.7 PASS untapping renumbers · 2
-B24UI    37.2 PASS Between selector
-B24UI    37.3 between: 4 a day: 9:00 AM · 1:00 PM · 5:00 PM · 9:00 PM
-B24UI    53.1 PASS Build plan opens This week · 6 videos · 4 products · 4 per day
-B24UI    60.2 PASS the 6 videos are planned · 6 videos · 4 products · 4 per day
-B24UI    64.5 PASS tapping a video opens its sheet
-B24UI    65.4 PASS Swap · Change · Remove
-B24UI    68.6 PASS Swap video lists other videos
-B24UI    71.9 PASS after the swap: still 6 videos · 6 videos · 4 products · 4 per day
-B24UI    78.9 PASS Plan: See this week › and Plan my week ›
-B24UI    82.0 PASS See this week › opens This week
-B24UI    84.7 PASS the day: Share to … · Share to TikTok
-B24UI    93.6 PASS the reminder arrives · CUTSELL, now, Time to post: Power Bank on TikTok, Caption and video are ready.
-B24UI    98.0 PASS the reminder opens its video
-B24UI    98.2 FAILURES: none
-Test Case '-[CutSellUITests.Build24UITests testWIPlanSimple]' passed (98.470 seconds).
-Test Suite 'Build24UITests' passed at 2026-10-24 21:54:52.665.
-Test Suite 'CutSellUITests.xctest' passed at 2026-10-24 21:54:52.666.
-Test Suite 'Selected tests' passed at 2026-10-24 21:54:52.666.
+B24UI    25.1 PASS Plan · Plan my week ›
+B24UI    27.8 PASS Plan my week opens the one-screen picker
+B24UI    28.0 PASS Ready videos in the grid · 6
+B24UI    28.2 PASS Build plan is off with no video
+B24UI    34.1 PASS numbers follow the taps (1–6) · 1 2 6
+B24UI    34.4 button: Build plan · 6 videos · Mon 26 → Tue 27 · 4 a day · reminders on
+B24UI    35.8 PASS untapping renumbers · 2
+B24UI    39.2 PASS Between selector
+B24UI    39.4 between: 4 a day: 9:00 AM · 1:00 PM · 5:00 PM · 9:00 PM
+B24UI    51.2 PASS Build plan opens This week · 6 videos · 4 products · 4 per day
+B24UI    52.4 PASS the 6 videos are planned · 6 videos · 4 products · 4 per day
+B24UI    55.8 PASS tapping a video opens its sheet
+B24UI    56.1 PASS Swap · Change · Remove
+B24UI    59.4 PASS Swap video lists other videos
+B24UI    70.6 FAIL Plan: See this week › and Plan my week ›
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:1462: error: -[CutSellUITests.Build24UITests testWIPlanSimple] : Failed to tap "planSeeWeek" Any: No matches found for first query match sequence: `Descendants matching type Any` -> `Elements matching predicate '"planSeeWeek" IN identifiers'`, given input App element pid: 21871
+Test Case '-[CutSellUITests.Build24UITests testWIPlanSimple]' failed (76.375 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-25 19:47:08.943.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-25 19:47:08.944.
+Test Suite 'Selected tests' failed at 2026-10-25 19:47:08.944.
