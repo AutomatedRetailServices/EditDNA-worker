@@ -1453,12 +1453,18 @@ final class Build24UITests: XCTestCase {
         if options.count > 0 {
             options.element(boundBy: 0).tap(); pause(1.5)
             check(element("weekSubtitle").label.hasPrefix("6 videos"), "after the swap: still 6 videos", element("weekSubtitle").label)
+        } else {
+            log("swap: every Ready video is already planned")
+            app.swipeDown(velocity: .fast); pause(1)
+            if element("swapSheet").exists { app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.05)).tap(); pause(1) }
         }
         shot("week_after_swap")
         // Back on Plan: "See this week ›" next to "Plan my week ›".
         element("tab_plan").tap(); pause(1); element("tab_plan").tap(); pause(1)
         check(element("planSeeWeek").waitForExistence(timeout: 5) && element("planMyWeek").exists, "Plan: See this week › and Plan my week ›")
         shot("plan_see_this_week")
+        element("planComingUp").swipeLeft(); pause(0.5)
+        shot("plan_coming_up_swiped")
         element("planSeeWeek").tap()
         check(element("weekSubtitle").waitForExistence(timeout: 5), "See this week › opens This week")
         // A day, then the reminder ("Time to post: … on TikTok").
