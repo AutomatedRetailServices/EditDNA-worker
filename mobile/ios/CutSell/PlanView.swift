@@ -218,9 +218,10 @@ struct PlanView: View {
         let days = (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: monday) }
         let slots = week.state?.week?.slots ?? []
         let todayKey = PlanDay.iso.string(from: today)
-        let chosen = shownDay ?? todayKey
-        let daySlots = slots.filter { $0.date == chosen }
         let upcoming = slots.filter { $0.date >= todayKey && $0.postedAt == nil }
+        // Nothing today: the next day with videos opens by itself (she sees what is coming without a tap).
+        let chosen = shownDay ?? (slots.contains { $0.date == todayKey } ? todayKey : (upcoming.first?.date ?? todayKey))
+        let daySlots = slots.filter { $0.date == chosen }
         let name = DateFormatter()
         name.locale = L10n.locale
         name.dateFormat = "EEE"
