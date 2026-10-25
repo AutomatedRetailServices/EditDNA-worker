@@ -132,6 +132,8 @@ final class PlanWeekStore: ObservableObject {
     @Published var lastError: String?
     /// A reminder was tapped: the Plan tab opens this day.
     @Published var requestedDay: String?
+    /// Edits › Select › "Add to Plan": the videos she picked, in her order (Plan my week opens with them chosen).
+    var preselect: [String] = []
     let mock = ProcessInfo.processInfo.arguments.contains("-CutSellPlanMock")
     private var mockSlots: [PlanSlot] = []
     private var mockPrefs = PlanPrefs(perDay: 2, days: [0, 1, 2, 3, 4, 5],
@@ -306,8 +308,13 @@ final class PlanWeekStore: ObservableObject {
     func plannable(projects: [Project], catalog: CatalogStore) -> [PlanPick] {
         if mock {
             let posted = Set(mockSlots.filter { $0.postedAt != nil }.map(\.projectID))
-            return Self.mockLibrary.enumerated().compactMap { k, v in
-                posted.contains("plan_\(k)") ? nil : PlanPick(projectID: "plan_\(k)", brand: v.brand, product: v.product)
+            // Her mock cuts when the probe has them (Edits › Select uses their ids), else the nine sample videos.
+            let ready = projects.filter { $0.state == "draft_ready" }.map(\.projectID)
+            let ids = ready.isEmpty ? (0..<Self.mockLibrary.count).map { "plan_\($0)" } : ready
+            return ids.enumerated().compactMap { k, id in
+                mockIndex[id] = k % Self.mockLibrary.count
+                let v = Self.mockLibrary[k % Self.mockLibrary.count]
+                return posted.contains(id) ? nil : PlanPick(projectID: id, brand: v.brand, product: v.product)
             }
         }
         let personal = Set(state?.personal ?? [])
@@ -381,8 +388,10 @@ final class PlanWeekStore: ObservableObject {
                            days: state?.prefs.days ?? Array(0..<7), start: state?.prefs.start ?? date, session: session)
     }
 
+    private var mockIndex: [String: Int] = [:]
+
     private func mockAdd(_ projectID: String, date: String, time: String) {
-        let k = Int(projectID.replacingOccurrences(of: "plan_", with: "")) ?? 0
+        let k = mockIndex[projectID] ?? Int(projectID.replacingOccurrences(of: "plan_", with: "")) ?? 0
         let v = Self.mockLibrary[min(max(0, k), Self.mockLibrary.count - 1)]
         mockSlots.removeAll { $0.projectID == projectID }
         mockSlots.append(PlanSlot(date: date, time: time, projectID: projectID, pinned: true, product: v.product, brand: v.brand,

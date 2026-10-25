@@ -1360,6 +1360,54 @@ final class Build24UITests: XCTestCase {
         XCTAssertTrue(failures.isEmpty, failures.joined(separator: " | "))
     }
 
+    /// PO 25 Oct: a product gets its brand (not only a new name); Edits › Select several videos → Plan (bulk or one).
+    func testBrandAndSelectToPlan() throws {
+        launchApp(fresh: true, extra: ["-CutSellPlanMock", "-CutSellProjectsMock", "-CutSellCatalogMock"])
+        element("tab_edits").tap(); pause(2)
+        // 1) Edits › Ready › Select: tap 3 videos in order → Add to Plan → Plan my week with 1, 2, 3.
+        let select = element("editsSelect")
+        check(select.waitForExistence(timeout: 20), "Edits: Select")
+        select.tap()
+        let picks = app.descendants(matching: .any).matching(identifier: "editsPick")
+        check(wait(10) { picks.count >= 3 }, "videos to pick", "\(picks.count)")
+        for i in [2, 0, 1] where picks.count > i { picks.element(boundBy: i).tap(); pause(0.4) }
+        check(picks.element(boundBy: 2).value as? String == "1" && picks.element(boundBy: 1).value as? String == "3",
+              "numbers in the tapped order", "\(picks.element(boundBy: 2).value ?? "") \(picks.element(boundBy: 1).value ?? "")")
+        shot("edits_select_three")
+        element("editsAddToPlan").tap()
+        check(element("planMyWeekSimple").waitForExistence(timeout: 10), "several → Plan my week")
+        pause(1)
+        log("build button: \(element("pmwBuild").label)")
+        check(element("pmwBuild").label.contains("3 videos"), "the 3 picked videos come chosen", element("pmwBuild").label)
+        shot("edits_to_plan_my_week")
+        // 2) One video → its day, time and network.
+        element("tab_edits").tap(); pause(1)
+        element("editsSelect").tap()
+        picks.element(boundBy: 0).tap(); pause(0.4)
+        element("editsAddToPlan").tap()
+        check(element("scheduleSheet").waitForExistence(timeout: 10), "one → the scheduling sheet")
+        shot("edits_one_schedule")
+        element("scheduleSave").tap(); pause(2)
+        // 3) Products › a product › Rename: Brand + Product.
+        element("tab_edits").tap(); pause(1)
+        element("editsFilterProducts").tap()
+        let row = element("productRow_Hydrating Cleanser")
+        check(row.waitForExistence(timeout: 15), "product row")
+        row.tap()
+        check(element("productTitle").waitForExistence(timeout: 15), "product view")
+        element("productRename").tap()
+        let brand = element("productBrandField")
+        check(brand.waitForExistence(timeout: 5), "Rename asks for the brand too")
+        brand.tap(); brand.clearAndType("La Roche-Posay")
+        let product = element("productRenameField")
+        product.tap(); product.clearAndType("Toleriane Cleanser")
+        shot("brand_product_sheet")
+        element("productBrandSave").tap()
+        check(element("productRow_Toleriane Cleanser").waitForExistence(timeout: 15), "the product now under its new brand")
+        pause(1); shot("brand_product_saved")
+        done()
+    }
+
     /// Build 47 (Figma 1258:3101 / 1257:3329): Plan my week in one screen, This week's video sheet, the reminder.
     func testWIPlanSimple() throws {
         launchApp(fresh: true, extra: ["-CutSellPlanMock", "-CutSellProjectsMock", "-CutSellCatalogMock", "-CutSellPlanTestReminder"])

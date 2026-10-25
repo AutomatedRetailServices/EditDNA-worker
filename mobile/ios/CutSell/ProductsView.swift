@@ -360,6 +360,9 @@ struct ProductDetailView: View {
     @State private var selected: Set<String> = []
     @State private var renaming = false
     @State private var newName = ""
+    /// PO 25 Oct: brand AND product (a "No brand" product gets its brand here).
+    @State private var newBrand = ""
+    @State private var scheduling: String?
     @State private var assigning: AssignRequest?
     @State private var openProject: Project?
     @State private var errorMessage: String?
@@ -400,7 +403,7 @@ struct ProductDetailView: View {
                         .accessibilityIdentifier("productBack")
                         Spacer()
                         Menu {
-                            Button(L10n.tr("Rename product")) { newName = detail?.name ?? ""; renaming = true }
+                            Button(L10n.tr("Brand & product")) { startEditing() }
                             Button(selecting ? "Done selecting" : "Select videos") { selecting.toggle(); selected = [] }
                         } label: {
                             WIHeaderIcon(image: "WIMore")
@@ -411,7 +414,7 @@ struct ProductDetailView: View {
                         Text(L10n.tr(detail?.name ?? " ")).font(CS.inter(26, .heavy)).tracking(-0.52).foregroundStyle(CS.wiInk).lineLimit(2)
                             .accessibilityIdentifier("productTitle")
                         Spacer(minLength: 8)
-                        Button { newName = detail?.name ?? ""; renaming = true } label: {
+                        Button { startEditing() } label: {
                             Text(L10n.tr("✎ Rename")).font(CS.inter(13, .semibold)).foregroundStyle(CS.accent)
                         }
                         .accessibilityIdentifier("productRename")
@@ -476,6 +479,15 @@ struct ProductDetailView: View {
                             .disabled(readyMixVideos.isEmpty || exporter.running)
                             .opacity(readyMixVideos.isEmpty ? 0.5 : 1)
                             .accessibilityIdentifier("mixExportAll")
+                        } else if selecting && !selected.isEmpty {
+                            // PO 25 Oct: the chosen videos go to Plan (one: its day and time; several: Plan my week).
+                            Button { addSelectedToPlan() } label: {
+                                Text(L10n.tr("Add to Plan · \(selected.count)"))
+                                    .font(CS.inter(15, .bold)).foregroundStyle(.white)
+                                    .frame(maxWidth: .infinity).frame(height: 52)
+                                    .background(Capsule().fill(CS.accent))
+                            }
+                            .accessibilityIdentifier("productAddToPlan")
                         } else {
                         Button { openFirstDraft() } label: {
                             Text(L10n.tr("Edit \(drafts.count) draft\(drafts.count == 1 ? "" : "s") in bulk"))
@@ -503,10 +515,20 @@ struct ProductDetailView: View {
         .refreshable { await load() }
         .onReceive(NotificationCenter.default.publisher(for: .mixProgress)) { _ in Task { await load() } }
         .navigationDestination(item: $openProject) { project in ProjectDetailView(project: project) }
-        .alert(L10n.tr("Rename product"), isPresented: $renaming) {
-            TextField(L10n.tr("Product name"), text: $newName).accessibilityIdentifier("productRenameField")
-            Button(L10n.tr("Save")) { Task { await rename() } }
-            Button(L10n.tr("Cancel"), role: .cancel) {}
+        .sheet(isPresented: $renaming) {
+            BrandProductSheet(brand: $newBrand, product: $newName) { Task { await rename() } }
+                .presentationDetents([.height(380)])
+                .presentationBackground(CS.wiPage)
+        }
+        .sheet(item: Binding(get: { scheduling.map { PlanPickID(id: $0) } }, set: { scheduling = $0?.id })) { item in
+            ScrollView {
+                ExportScheduleContent(projectID: item.id, seconds: 0, onDone: { scheduling = nil })
+                    .padding(.horizontal, 20).padding(.top, 24)
+            }
+            .environmentObject(appState)
+            .environment(\.colorScheme, .light)
+            .presentationDetents([.large])
+            .presentationBackground(CS.wiPage)
         }
         .sheet(item: $assigning, onDismiss: { selecting = false; selected = []; Task { await load() } }) { request in
             AssignProductSheet(request: request)
@@ -629,16 +651,49 @@ struct ProductDetailView: View {
         }
     }
 
+    private func startEditing() {
+        newName = detail?.name ?? ""
+        let brand = detail?.brand ?? ""
+        newBrand = brand.lowercased() == "no brand" ? "" : brand
+        renaming = true
+    }
+
+    /// Same brand: the product is renamed. A new brand (or a brand for a "No brand" product): every video of this product
+    /// moves to that brand + product (created or reused, POST /v1/catalog/assign), and the screen goes back to Products.
     private func rename() async {
         let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let brand = newBrand.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
+        let current = (detail?.brand ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let sameBrand = brand.isEmpty ? (current.isEmpty || current.lowercased() == "no brand")
+                                      : brand.lowercased() == current.lowercased()
         do {
-            try await store.rename(kind: "product", id: route.productID, name: name,
-                                   session: appState.session, projects: appState.projects)
-            await load()
+            if sameBrand {
+                if name != detail?.name {
+                    try await store.rename(kind: "product", id: route.productID, name: name,
+                                           session: appState.session, projects: appState.projects)
+                }
+                await load()
+            } else {
+                let ids = (detail?.videos ?? []).map(\.projectID)
+                guard !ids.isEmpty else { return }
+                try await store.assign(ids, brand: brand, product: name, session: appState.session, projects: appState.projects)
+                CutSellDiagnostics.log("catalog_brand_set", ["videos": String(ids.count)])
+                dismiss()
+            }
         } catch {
-            errorMessage = "Couldn’t rename it. Please try again."
+            errorMessage = "Couldn’t save it. Please try again."
         }
+    }
+
+    private func addSelectedToPlan() {
+        let ids = (detail?.videos ?? []).map(\.projectID).filter { selected.contains($0) }
+        if ids.count == 1 { scheduling = ids[0] } else {
+            PlanWeekStore.shared.preselect = ids
+            AppRouter.shared.pending = .planWeek
+        }
+        selecting = false
+        selected = []
     }
 
     /// "Edit N drafts in bulk": opens the drafts one after another, starting with the first.
@@ -890,5 +945,47 @@ final class MockCatalog {
 
     func addMix(productID: String, videos: [(String, String)]) {
         for (id, code) in videos { mixVideos[id] = (productID, code) }
+    }
+}
+
+/// Brand + product of a product (PO 25 Oct: a "No brand" product could only be renamed, never given its brand).
+struct BrandProductSheet: View {
+    @Binding var brand: String
+    @Binding var product: String
+    let onSave: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Capsule().fill(Color(fixed: 0xD5D9E2)).frame(width: 40, height: 5).frame(maxWidth: .infinity).padding(.top, 10)
+            Text(L10n.tr("Brand & product")).font(CS.inter(20, .bold)).foregroundStyle(CS.wiInk)
+            field("Brand", text: $brand, prompt: "e.g. CeraVe", id: "productBrandField")
+            field("Product", text: $product, prompt: "e.g. Hydrating Cleanser", id: "productRenameField")
+            Text(L10n.tr("A new brand moves this product's videos to that brand."))
+                .font(CS.inter(12)).foregroundStyle(CS.wiSecondary)
+            Spacer(minLength: 0)
+            Button { onSave(); dismiss() } label: {
+                Text(L10n.tr("Save")).font(CS.inter(16, .bold)).foregroundStyle(Color(fixed: 0xFFFFFF))
+                    .frame(maxWidth: .infinity).frame(height: 52).background(CS.accent, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(product.trimmingCharacters(in: .whitespaces).isEmpty)
+            .accessibilityIdentifier("productBrandSave")
+        }
+        .padding(.horizontal, 20).padding(.bottom, 16)
+        .environment(\.colorScheme, .light)
+    }
+
+    private func field(_ label: String, text: Binding<String>, prompt: String, id: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(L10n.tr(label)).font(CS.inter(13, .semibold)).foregroundStyle(CS.wiSecondary)
+            TextField("", text: text, prompt: Text(L10n.tr(prompt)).foregroundStyle(CS.wiSecondary))
+                .font(CS.inter(16, .medium)).foregroundStyle(CS.wiInk)
+                .textInputAutocapitalization(.words)
+                .padding(.horizontal, 14).frame(height: 50)
+                .background(CS.wiCard, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
+                .accessibilityIdentifier(id)
+        }
     }
 }

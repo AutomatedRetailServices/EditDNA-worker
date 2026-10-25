@@ -206,6 +206,7 @@ struct PlanMyWeekView: View {
             await catalog.refresh(session: appState.session, projects: appState.projects)
         }
         .onChange(of: settings) { _, value in value.save() }
+        .onAppear { if !store.preselect.isEmpty { chosen = store.preselect; store.preselect = [] } }
         .sheet(item: $editing) { which in
             PlanSettingSheet(which: which, settings: $settings)
                 .presentationDetents([.height(which == .days ? 360 : 400)])
@@ -695,3 +696,6 @@ enum PlanLater {
     }
     static func remove(_ projectID: String) { UserDefaults.standard.set(all.filter { $0 != projectID }, forKey: key) }
 }
+
+/// A project id as a sheet item.
+struct PlanPickID: Identifiable { let id: String }

@@ -486,7 +486,7 @@ struct ExportScheduleContent: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 VStack(alignment: .leading, spacing: 3) {
                     Text(L10n.tr("Ready to post")).font(CS.inter(17, .bold)).foregroundStyle(CS.wiInk)
-                    Text([pick?.brand, pick?.product, ExportSettingsView.clock(seconds)].compactMap { $0 }.joined(separator: " · "))
+                    Text([pick?.brand, pick?.product, seconds > 0 ? ExportSettingsView.clock(seconds) : nil].compactMap { $0 }.joined(separator: " · "))
                         .font(CS.inter(12, .medium)).foregroundStyle(CS.wiSuccess).lineLimit(1)
                 }
                 Spacer()

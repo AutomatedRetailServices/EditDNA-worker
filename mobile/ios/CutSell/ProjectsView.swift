@@ -41,6 +41,10 @@ struct ProjectsView: View {
     @ObservedObject private var catalog = CatalogStore.shared
     @ObservedObject private var mixCenter = MixCenter.shared
     @State private var assigning: AssignRequest?
+    /// PO 25 Oct: pick several videos by hand (in order) and send them to Plan.
+    @State private var selecting = false
+    @State private var picked: [String] = []
+    @State private var schedulingOne: String?
     @State private var mixRoute: ProductRoute?
 
     private var columns: [GridItem] { Array(repeating: GridItem(.flexible(), spacing: 10), count: 3) }
@@ -175,8 +179,18 @@ struct ProjectsView: View {
                             emptyState
                                 .padding(.top, 24)
                         } else {
+                            HStack {
+                                Spacer()
+                                Button(L10n.tr(selecting ? "Cancel" : "Select")) { selecting.toggle(); picked = [] }
+                                    .font(CS.inter(14, .semibold)).foregroundStyle(CS.accent)
+                                    .accessibilityIdentifier("editsSelect")
+                            }
+                            .padding(.top, 12)
                             LazyVGrid(columns: columns, spacing: 8) {
                                 ForEach(shownProjects) { project in
+                                    if selecting {
+                                        selectableTile(project)
+                                    } else {
                                     // The ••• menu sits OVER the link (not inside it): a tap on ••• opens the menu, never the cut.
                                     ZStack(alignment: .topTrailing) {
                                         NavigationLink(value: project) {
@@ -185,9 +199,10 @@ struct ProjectsView: View {
                                         .buttonStyle(.plain)
                                         EditTileMenu(project: project) { projectPendingDelete = project }
                                     }
+                                    }
                                 }
                             }
-                            .padding(.top, 10)
+                            .padding(.top, 8)
                         }
                         }
                     }
@@ -206,7 +221,23 @@ struct ProjectsView: View {
             }
             .wiStatusBarCover()
             .toolbar(.hidden, for: .navigationBar)
-            .safeAreaInset(edge: .bottom) { CSTabBar(current: .edits, select: selectTab) }
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 8) {
+                    if selecting && !picked.isEmpty { addToPlanBar }
+                    CSTabBar(current: .edits, select: selectTab)
+                }
+            }
+            .sheet(item: Binding(get: { schedulingOne.map { PlanPickID(id: $0) } }, set: { schedulingOne = $0?.id })) { item in
+                ScrollView {
+                    ExportScheduleContent(projectID: item.id, seconds: 0, onDone: { schedulingOne = nil })
+                        .padding(.horizontal, 20).padding(.top, 24)
+                }
+                .environmentObject(appState)
+                .environment(\.colorScheme, .light)
+                .presentationDetents([.large])
+                .presentationBackground(CS.wiPage)
+            }
+            .onChange(of: selectedTab) { _, _ in selecting = false; picked = [] }
             .navigationDestination(for: Project.self) { project in
                 ProjectDetailView(project: project)
             }
@@ -376,6 +407,57 @@ struct ProjectsView: View {
         } else {
             QueueRowView(order: order, row: row, onRetry: retry)
         }
+    }
+
+    /// Selecting: a Ready video gets a blue border and its number (the order she tapped); others can't be picked.
+    private func selectableTile(_ project: Project) -> some View {
+        let order = picked.firstIndex(of: project.projectID).map { $0 + 1 }
+        let ready = project.state == "draft_ready"
+        return Button {
+            guard ready else { return }
+            if let i = picked.firstIndex(of: project.projectID) { picked.remove(at: i) } else { picked.append(project.projectID) }
+        } label: {
+            EditTile(project: project, showsMenu: false) {}
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(order != nil ? CS.accent : .clear, lineWidth: 3))
+                .overlay(alignment: .topTrailing) {
+                    Group {
+                        if let order {
+                            Text(verbatim: "\(order)").font(CS.inter(12, .bold)).foregroundStyle(Color(fixed: 0xFFFFFF))
+                                .frame(width: 24, height: 24).background(CS.accent, in: Circle())
+                        } else if ready {
+                            Circle().fill(Color(fixed: 0xFFFFFF, opacity: 0.9)).frame(width: 24, height: 24)
+                                .overlay(Circle().stroke(CS.wiBorder, lineWidth: 1))
+                        }
+                    }
+                    .padding(7)
+                }
+                .opacity(ready ? 1 : 0.45)
+        }
+        .buttonStyle(.plain)
+        .disabled(!ready)
+        .accessibilityIdentifier("editsPick")
+        .accessibilityValue(order.map { "\($0)" } ?? "")
+    }
+
+    /// "Add to Plan · N": one video → choose its day, time and network; several → Plan my week with them, in order.
+    private var addToPlanBar: some View {
+        Button {
+            if picked.count == 1 {
+                schedulingOne = picked[0]
+            } else {
+                PlanWeekStore.shared.preselect = picked
+                AppRouter.shared.pending = .planWeek
+            }
+            selecting = false
+            picked = []
+        } label: {
+            Text(L10n.tr("Add to Plan · \(picked.count) video\(picked.count == 1 ? "" : "s")"))
+                .font(CS.inter(16, .bold)).foregroundStyle(Color(fixed: 0xFFFFFF))
+                .frame(maxWidth: .infinity).frame(height: 52).background(CS.accent, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 20)
+        .accessibilityIdentifier("editsAddToPlan")
     }
 
     /// Figma 1169:2 / 1169:6: logo, then search and ••• (40 pt, #F3F5F9).
