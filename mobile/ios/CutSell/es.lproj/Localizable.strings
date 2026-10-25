@@ -83,6 +83,7 @@
 "Adding video… %lld%%" = "Añadiendo video… %1$lld%%";
 "Agree" = "Acepto";
 "All" = "Todo";
+"All posted ✓" = "Todo publicado ✓";
 "All products" = "Todos los productos";
 "All %@" = "Todo %1$@";
 "All %lld" = "Todo %1$lld";
@@ -269,6 +270,7 @@
 "Combine %@ clips" = "Combinar %1$@ clips";
 "Combine %lld clips" = "Combinar %1$lld clips";
 "Coming soon. For now you can record a voice over inside the editor of any cut." = "Próximamente. Por ahora puedes grabar una voz en off dentro del editor de cualquier corte.";
+"Coming up" = "Próximos";
 "Confirm" = "Confirmar";
 "Connected with Apple" = "Conectada con Apple";
 "Connections" = "Conexiones";
@@ -719,6 +721,7 @@
 "No B-roll yet" = "Todavía no hay B-roll";
 "No Ready videos yet. Finished cuts show here." = "Aún no hay videos listos. Los cortes terminados salen aquí.";
 "No account (this iPhone only)" = "Sin cuenta (solo este iPhone)";
+"No brand" = "Sin marca";
 "No clips available yet." = "Todavía no hay clips.";
 "No connection. Check your internet and try again." = "Sin conexión. Revisa tu internet y vuelve a intentarlo.";
 "No data sent for 90 seconds while %@." = "No se enviaron datos durante 90 segundos mientras %1$@.";
@@ -754,6 +757,9 @@
 "Not yet" = "Todavía no";
 "Nothing in progress. Start a Sales Mix or a Bulk." = "Nada en proceso. Empieza un Sales Mix o varios videos.";
 "Nothing left to post today" = "No queda nada por publicar hoy";
+"Nothing planned for today" = "Nada planeado para hoy";
+"Nothing planned for %@" = "Nada planeado para el %1$@";
+"Nothing planned for %lld" = "Nada planeado para el %1$lld";
 "Nothing was lost" = "No se perdió nada";
 "Nothing was lost." = "No se perdió nada.";
 "Notifications" = "Notificaciones";
@@ -1638,6 +1644,8 @@
 "%lld selected videos could not be retrieved. The videos already loaded were kept." = "No se pudieron traer %1$lld videos seleccionados. Los videos que ya se cargaron se mantienen.";
 "%@ steps" = "%1$@ pasos";
 "%lld steps" = "%1$lld pasos";
+"%@ to post" = "%1$@ por publicar";
+"%lld to post" = "%1$lld por publicar";
 "%@ videos" = "%1$@ videos";
 "%lld videos" = "%1$lld videos";
 "%@ videos need action" = "%1$@ videos necesitan acción";

@@ -15,6 +15,8 @@ struct PlanView: View {
     @State private var showingMix = false
     @ObservedObject private var week = PlanWeekStore.shared
     @State private var path: [PlanRoute] = []
+    /// The day she tapped in the week strip (nil = today).
+    @State private var shownDay: String?
     @ObservedObject private var router = AppRouter.shared
     @Environment(\.colorScheme) private var scheme
 
@@ -206,7 +208,8 @@ struct PlanView: View {
         .wiCard()
     }
 
-    /// "This week": the days of this week with a dot per planned video (its product's color), and today's plan.
+    /// PO 25 Oct: a living Plan. The 7 days (tap one to see it), the chosen day's videos with their picture, brand,
+    /// product and time (tap → that day), then the whole week as a strip of large pictures (tap → This week).
     private var thisWeek: some View {
         let calendar = Calendar(identifier: .gregorian)
         let today = Date()
@@ -215,18 +218,21 @@ struct PlanView: View {
         let days = (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: monday) }
         let slots = week.state?.week?.slots ?? []
         let todayKey = PlanDay.iso.string(from: today)
-        let todays = slots.filter { $0.date == todayKey && $0.postedAt == nil }
+        let chosen = shownDay ?? todayKey
+        let daySlots = slots.filter { $0.date == chosen }
+        let upcoming = slots.filter { $0.date >= todayKey && $0.postedAt == nil }
         let name = DateFormatter()
         name.locale = L10n.locale
         name.dateFormat = "EEE"
         return VStack(alignment: .leading, spacing: 0) {
             Text(L10n.tr("This week")).font(CS.sectionTitle).foregroundStyle(CS.wiInk)
-            // Figma 1166:144-171: 7 days filling the width, 7 pt apart; today blue.
+            // Figma 1166:144-171: 7 days filling the width; today blue; the day she taps is outlined.
             HStack(spacing: 7) {
                 ForEach(Array(days.enumerated()), id: \.offset) { _, day in
                     let isToday = calendar.isDate(day, inSameDayAs: today)
                     let key = PlanDay.iso.string(from: day)
-                    Button { if week.hasWeek, slots.contains(where: { $0.date == key }) { path = [.week, .day(key)] } } label: {
+                    let picked = key == chosen
+                    Button { withAnimation(.easeOut(duration: 0.2)) { shownDay = key } } label: {
                         VStack(spacing: 2) {
                             Text(name.string(from: day).replacingOccurrences(of: ".", with: "").capitalizedFirst).font(CS.inter(11, .semibold))
                                 .foregroundStyle(isToday ? Color(fixed: 0xFFFFFF) : CS.wiInk)
@@ -244,38 +250,141 @@ struct PlanView: View {
                         .frame(maxWidth: .infinity).frame(height: 62)
                         .background(isToday ? CS.accent : CS.wiPage, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(isToday ? .clear : CS.wiBorder, lineWidth: 1))
+                            .stroke(picked && !isToday ? CS.accent : isToday ? .clear : CS.wiBorder, lineWidth: picked && !isToday ? 2 : 1))
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("planDay_\(key)")
                 }
             }
             .padding(.top, 10)
-            Button { path = [.goal] } label: {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(L10n.tr(cardTitle(todays: todays))).font(CS.inter(14, .semibold)).foregroundStyle(CS.wiInk)
-                        .accessibilityIdentifier("planWeekCardTitle")
-                    Text(L10n.tr(cardBody(slots: slots))).font(CS.inter(11)).foregroundStyle(CS.wiSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(L10n.tr("Plan my week ›")).font(CS.inter(12, .semibold)).foregroundStyle(CS.accent)
-                        .padding(.top, 2)
-                }
-                .padding(15)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .wiCard()
-            }
-            .buttonStyle(.plain)
-            .padding(.top, 12)
-            .accessibilityIdentifier("planMyWeek")
-            if week.hasWeek {
-                // A plan is built: its own way to This week (Plan my week stays as it is).
-                Button(L10n.tr("See this week ›")) { path = [.week] }
-                    .font(CS.inter(13, .semibold)).foregroundStyle(CS.accent)
-                    .padding(.top, 10)
-                    .accessibilityIdentifier("planSeeWeek")
+
+            dayCard(chosen, slots: daySlots, isToday: chosen == todayKey).padding(.top, 12)
+
+            if week.hasWeek && !upcoming.isEmpty {
+                weekStrip(upcoming).padding(.top, 22)
             }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("planThisWeek")
+    }
+
+    /// The chosen day: "Today · Sun 25 · 2 videos to post", each video (picture, brand, product, time, posted), and
+    /// "Plan my week ›". Nothing planned yet: what Plan my week does, with its button.
+    private func dayCard(_ day: String, slots: [PlanSlot], isToday: Bool) -> some View {
+        let left = slots.filter { $0.postedAt == nil }.count
+        return VStack(alignment: .leading, spacing: 10) {
+            if slots.isEmpty {
+                Text(L10n.tr(week.hasWeek ? "Nothing planned for \(isToday ? "today" : PlanDay.short(day))" : "Plan your week"))
+                    .font(CS.inter(15, .bold)).foregroundStyle(CS.wiInk)
+                    .accessibilityIdentifier("planWeekCardTitle")
+                Text(L10n.tr(cardBody(slots: week.state?.week?.slots ?? [])))
+                    .font(CS.inter(12)).foregroundStyle(CS.wiSecondary).fixedSize(horizontal: false, vertical: true)
+            } else {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(L10n.tr(isToday ? "Today · \(PlanDay.short(day))" : PlanDay.short(day)))
+                        .font(CS.inter(16, .bold)).foregroundStyle(CS.wiInk)
+                        .accessibilityIdentifier("planWeekCardTitle")
+                    Spacer()
+                    Text(L10n.tr(left == 0 ? "All posted ✓" : "\(left) to post")).font(CS.inter(12, .semibold))
+                        .foregroundStyle(left == 0 ? CS.wiSuccess : CS.accent)
+                }
+                ForEach(slots) { slot in
+                    Button { path = [.week, .day(day)] } label: { videoRow(slot) }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("planDayVideo")
+                }
+            }
+            Button { path = [.goal] } label: {
+                Text(L10n.tr("Plan my week ›")).font(CS.inter(13, .semibold)).foregroundStyle(CS.accent)
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 2)
+            .accessibilityIdentifier("planMyWeek")
+        }
+        .padding(15)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .wiCard()
+        .animation(.easeOut(duration: 0.2), value: day)
+    }
+
+    /// One video of the day: picture, brand dot + brand, product, time; posted ones fade with a check.
+    private func videoRow(_ slot: PlanSlot) -> some View {
+        HStack(spacing: 12) {
+            thumb(slot, width: 44, height: 60, radius: 9)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
+                    Image(week.dot(for: slot)).resizable().frame(width: 7, height: 7)
+                    Text(L10n.tr(slot.brand ?? "No brand")).font(CS.inter(13, .semibold)).foregroundStyle(CS.wiInk).lineLimit(1)
+                }
+                Text(L10n.tr(slot.product ?? "Video")).font(CS.inter(12)).foregroundStyle(CS.wiSecondary).lineLimit(1)
+            }
+            Spacer(minLength: 6)
+            if slot.postedAt != nil {
+                Label(L10n.tr("Posted"), systemImage: "checkmark").font(CS.inter(12, .semibold)).foregroundStyle(CS.wiSuccess)
+            } else {
+                Text(PlanDay.clock(slot.time)).font(CS.inter(13, .bold)).foregroundStyle(CS.accent)
+            }
+        }
+        .padding(8)
+        .background(CS.wiPage, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
+        .opacity(slot.postedAt == nil ? 1 : 0.6)
+    }
+
+    /// "Coming up": every video still to post, as large pictures with day, time and brand, sliding sideways.
+    private func weekStrip(_ upcoming: [PlanSlot]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(L10n.tr("Coming up")).font(CS.sectionTitle).foregroundStyle(CS.wiInk)
+                Text(verbatim: "\(upcoming.count)").font(CS.inter(13, .bold)).foregroundStyle(CS.accent)
+                Spacer()
+                Button(L10n.tr("See this week ›")) { path = [.week] }
+                    .font(CS.inter(13, .semibold)).foregroundStyle(CS.accent)
+                    .accessibilityIdentifier("planSeeWeek")
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(upcoming) { slot in
+                        Button { path = [.week, .day(slot.date)] } label: {
+                            ZStack(alignment: .bottomLeading) {
+                                thumb(slot, width: 112, height: 168, radius: 16)
+                                LinearGradient(colors: [.clear, Color(fixed: 0x000000, opacity: 0.6)], startPoint: .center, endPoint: .bottom)
+                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(verbatim: "\(PlanDay.short(slot.date)) · \(PlanDay.clock(slot.time))")
+                                        .font(CS.inter(10, .semibold)).foregroundStyle(Color(fixed: 0xFFFFFF, opacity: 0.85))
+                                    Text(L10n.tr(slot.brand ?? "No brand")).font(CS.inter(13, .bold)).foregroundStyle(Color(fixed: 0xFFFFFF))
+                                        .lineLimit(1)
+                                    Text(L10n.tr(slot.product ?? "Video")).font(CS.inter(11)).foregroundStyle(Color(fixed: 0xFFFFFF, opacity: 0.85))
+                                        .lineLimit(1)
+                                }
+                                .padding(9)
+                            }
+                            .frame(width: 112, height: 168)
+                            .overlay(alignment: .topLeading) {
+                                Image(week.dot(for: slot)).resizable().frame(width: 9, height: 9).padding(9)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("planStripVideo")
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("planComingUp")
+    }
+
+    private func thumb(_ slot: PlanSlot, width: CGFloat, height: CGFloat, radius: CGFloat) -> some View {
+        Color(fixed: 0xE9ECF1)
+            .frame(width: width, height: height)
+            .overlay { if let image = thumbnails.image(for: slot.projectID) { Image(uiImage: image).resizable().scaledToFill() } }
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .task {
+                if let project = appState.projects.first(where: { $0.projectID == slot.projectID }) {
+                    await thumbnails.load(project: project, session: appState.session)
+                }
+            }
     }
 
     /// "Today: post 1 CeraVe and 1 Dior video" (Figma 1137:2886) from the real plan.
