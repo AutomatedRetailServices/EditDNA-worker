@@ -213,9 +213,9 @@ struct PlanView: View {
     private var thisWeek: some View {
         let calendar = Calendar(identifier: .gregorian)
         let today = Date()
-        let weekday = (calendar.component(.weekday, from: today) + 5) % 7          // Monday = 0
-        let monday = calendar.date(byAdding: .day, value: -weekday, to: calendar.startOfDay(for: today)) ?? today
-        let days = (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: monday) }
+        // Option B (PO 26 Oct, to review): the next 7 days from today, today first.
+        let start = calendar.startOfDay(for: today)
+        let days = (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
         let slots = week.state?.week?.slots ?? []
         let todayKey = PlanDay.iso.string(from: today)
         let upcoming = slots.filter { $0.date >= todayKey && $0.postedAt == nil }
