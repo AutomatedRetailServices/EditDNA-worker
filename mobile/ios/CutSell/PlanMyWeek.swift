@@ -709,7 +709,12 @@ struct PlanPickID: Identifiable { let id: String }
 /// Plan my week. Filled from the plan (a slot marked posted) and kept on this iPhone, because the plan only returns the
 /// current week.
 enum PostedLedger {
-    private static let key = "cutsell.posted"
+    /// The simulator probe (-CutSellPlanMock) keeps its own list, emptied at each launch.
+    private static let key: String = {
+        guard ProcessInfo.processInfo.arguments.contains("-CutSellPlanMock") else { return "cutsell.posted" }
+        UserDefaults.standard.removeObject(forKey: "cutsell.posted.mock")
+        return "cutsell.posted.mock"
+    }()
     static var all: [String: String] { UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:] }
     static func contains(_ projectID: String) -> Bool { all[projectID] != nil }
     static func add(_ projectID: String, day: String = PlanDay.iso.string(from: Date())) {
