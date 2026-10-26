@@ -1,25 +1,25 @@
-B24UI    27.3 PASS Plan · Plan my week ›
-B24UI    30.9 PASS Plan my week opens the one-screen picker
-B24UI    31.3 PASS Ready videos in the grid · 6
-B24UI    31.8 PASS Build plan is off with no video
-B24UI    39.3 PASS numbers follow the taps (1–6) · 1 2 6
-B24UI    40.1 button: Build plan · 6 videos · Mon 26 → Tue 27 · 4 a day · reminders on
-B24UI    41.7 PASS untapping renumbers · 2
-B24UI    44.7 PASS Between selector
-B24UI    44.8 between: 4 a day: 9:00 AM · 1:00 PM · 5:00 PM · 9:00 PM
-B24UI    54.0 PASS Build plan opens This week · 6 videos · 4 products · 4 per day
-B24UI    56.4 PASS the 6 videos are planned · 6 videos · 4 products · 4 per day
-B24UI    60.0 PASS tapping a video opens its sheet
-B24UI    61.7 PASS Swap · Change · Remove
-B24UI    65.8 PASS Swap video lists other videos
-B24UI    65.9 swap: every Ready video is already planned
-B24UI    77.7 PASS Plan: See this week › and Plan my week ›
-B24UI    90.5 PASS See this week › opens This week
-B24UI    93.2 PASS the day: Share to … · Share to TikTok
-B24UI   105.5 PASS the reminder arrives · CUTSELL, now, Time to post: Hydrating Cleanser on TikTok, Caption and video are ready.
-B24UI   110.5 PASS the reminder opens its video
-B24UI   110.7 FAILURES: none
-Test Case '-[CutSellUITests.Build24UITests testWIPlanSimple]' passed (111.378 seconds).
-Test Suite 'Build24UITests' passed at 2026-10-25 20:04:17.506.
-Test Suite 'CutSellUITests.xctest' passed at 2026-10-25 20:04:17.506.
-Test Suite 'Selected tests' passed at 2026-10-25 20:04:17.506.
+B24UI    46.8 PASS Plan · Plan my week ›
+B24UI    52.9 PASS Plan my week opens the one-screen picker
+B24UI    53.3 PASS Ready videos in the grid · 6
+B24UI    54.7 PASS Build plan is off with no video
+B24UI    60.9 PASS numbers follow the taps (1–6) · 1 2 6
+B24UI    61.4 button: Build plan · 6 videos · Tue 27 → Wed 28 · 4 a day · reminders on
+B24UI    62.9 PASS untapping renumbers · 2
+B24UI    66.3 PASS Between selector
+B24UI    66.4 between: 4 a day: 9:00 AM · 1:00 PM · 5:00 PM · 9:00 PM
+B24UI    79.1 PASS Build plan opens This week · 6 videos · 4 products · 4 per day
+B24UI    80.5 PASS the 6 videos are planned · 6 videos · 4 products · 4 per day
+B24UI    83.9 PASS tapping a video opens its sheet
+B24UI    84.5 PASS Swap · Change · Remove
+B24UI    87.8 PASS Swap video lists other videos
+B24UI    87.9 swap: every Ready video is already planned
+B24UI    95.9 PASS Plan: See this week › and Plan my week ›
+B24UI   100.6 PASS See this week › opens This week
+B24UI   103.4 PASS the day: Share to … · Share to TikTok
+B24UI   120.5 PASS the reminder arrives · CUTSELL, now, Time to post: Hydrating Cleanser on TikTok, Caption and video are ready.
+B24UI   126.7 PASS the reminder opens its video
+B24UI   127.0 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testWIPlanSimple]' passed (127.786 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-26 17:01:10.431.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-26 17:01:10.431.
+Test Suite 'Selected tests' passed at 2026-10-26 17:01:10.431.
