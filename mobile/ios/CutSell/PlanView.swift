@@ -268,8 +268,15 @@ struct PlanView: View {
 
             dayCard(chosen, slots: daySlots, isToday: chosen == todayKey).padding(.top, 12)
 
-            if week.hasWeek && !upcoming.isEmpty {
-                weekStrip(upcoming).padding(.top, 22)
+            // PO 26 Oct (A): Coming up starts AFTER the day in the card, so nothing shows twice.
+            let after = upcoming.filter { $0.date > chosen }
+            if week.hasWeek && !after.isEmpty {
+                weekStrip(after).padding(.top, 22)
+            } else if week.hasWeek {
+                Button(L10n.tr("See this week ›")) { path = [.week] }
+                    .font(CS.inter(13, .semibold)).foregroundStyle(CS.accent)
+                    .padding(.top, 12)
+                    .accessibilityIdentifier("planSeeWeek")
             }
         }
         .accessibilityElement(children: .contain)
