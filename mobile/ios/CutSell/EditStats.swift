@@ -85,6 +85,7 @@ final class EditStats: ObservableObject {
 
     /// "6.7 h"
     static func hours(_ minutes: Double) -> String {
+        if minutes < 60 { return "\(Int(minutes)) min" }          // "20 min saved", never "0.3 h"
         let h = minutes / 60
         return h < 10 ? String(format: "%.1f h", h) : "\(Int(h.rounded())) h"
     }
