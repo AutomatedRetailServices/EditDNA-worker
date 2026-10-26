@@ -1,42 +1,43 @@
-B24UI    28.3 PASS Plan
-B24UI    30.2 PASS Ready videos · 6
-B24UI    37.9 PASS plan built
-B24UI    40.4 PASS the day
-B24UI    49.2 PASS Plan my week again
-B24UI    50.3 PASS scheduled / posted videos are not offered · 6 → 4
-B24UI    54.9 PASS Edits: Posted tab
-B24UI    58.2 PASS Posted: a month with the posted video
-B24UI    58.4 FAILURES: none
-B24UI    12.3 PASS Plan · Plan my week ›
-B24UI    14.7 PASS Plan my week opens the one-screen picker
-B24UI    15.1 PASS Ready videos in the grid · 6
-B24UI    15.2 PASS Build plan is off with no video
-B24UI    20.6 PASS numbers follow the taps (1–6) · 1 2 6
-B24UI    21.0 button: Build plan · 6 videos · Tue 27 → Wed 28 · 4 a day · reminders on
-B24UI    22.1 PASS untapping renumbers · 2
-B24UI    24.8 PASS Between selector
-B24UI    24.9 between: 4 a day: 9:00 AM · 1:00 PM · 5:00 PM · 9:00 PM
-B24UI    36.2 PASS Build plan opens This week · 6 videos · 4 products · 4 per day
-B24UI    36.5 PASS the 6 videos are planned · 6 videos · 4 products · 4 per day
-B24UI    39.6 PASS tapping a video opens its sheet
-B24UI    39.8 PASS Swap · Change · Remove
-B24UI    42.8 PASS Swap video lists other videos
-B24UI    42.9 swap: every Ready video is already planned
-B24UI    51.5 PASS Plan: See this week › and Plan my week ›
-B24UI    55.6 PASS See this week › opens This week
-B24UI    57.9 PASS the day: Share to … · Share to TikTok
-B24UI    68.5 PASS the reminder arrives · CUTSELL, now, Time to post: Hydrating Cleanser on TikTok, Caption and video are ready.
-B24UI    73.2 PASS the reminder opens its video
-B24UI    73.4 FAILURES: none
-B24UI    20.5 PASS Edits: Select
-B24UI    21.1 PASS videos to pick · 6
-B24UI    23.9 PASS numbers in the tapped order · 1 3
-B24UI    26.0 PASS several → Plan my week
-B24UI    27.1 build button: Build plan · 3 videos
-B24UI    29.1 PASS the 3 picked videos come chosen · Build plan · 3 videos
-B24UI    34.5 PASS one → the scheduling sheet
-B24UI    41.1 PASS product row
-B24UI    43.4 PASS product view
-B24UI    45.4 PASS Rename asks for the brand too
-B24UI    59.2 PASS the product now under its new brand
-B24UI    60.4 FAILURES: none
+B24UI    21.4 PASS Plan
+B24UI    22.8 PASS Ready videos · 6
+B24UI    30.4 PASS plan built
+B24UI    35.5 PASS the day
+B24UI    38.0 PASS Share asks to confirm · Post on TikTok now?
+B24UI    47.9 PASS Plan my week again
+B24UI    51.8 PASS scheduled / posted videos are not offered · 6 → 4
+B24UI    55.8 PASS Edits: Posted tab
+B24UI    58.7 PASS Posted: a month with the posted video
+B24UI    58.9 FAILURES: none
+B24UI    18.5 PASS Plan · Plan my week ›
+B24UI    21.5 PASS Plan my week opens the one-screen picker
+B24UI    21.9 PASS Ready videos in the grid · 6
+B24UI    22.6 PASS Build plan is off with no video
+B24UI    28.5 PASS numbers follow the taps (1–6) · 1 2 6
+B24UI    28.9 button: Build plan · 6 videos · Tue 27 → Wed 28 · 4 a day · reminders on
+B24UI    30.2 PASS untapping renumbers · 2
+B24UI    33.3 PASS Between selector
+B24UI    33.4 between: 4 a day: 9:00 AM · 1:00 PM · 5:00 PM · 9:00 PM
+B24UI    47.0 PASS Build plan opens This week · 6 videos · 4 products · 4 per day
+B24UI    47.6 PASS the 6 videos are planned · 6 videos · 4 products · 4 per day
+B24UI    50.5 PASS tapping a video opens its sheet
+B24UI    51.0 PASS Swap · Change · Remove
+B24UI    54.5 PASS Swap video lists other videos
+B24UI    54.6 swap: every Ready video is already planned
+B24UI    63.6 PASS Plan: See this week › and Plan my week ›
+B24UI    68.8 PASS See this week › opens This week
+B24UI    71.9 PASS the day: Share to … · Share to TikTok
+B24UI    79.9 PASS the reminder arrives · CUTSELL, now, Time to post: Hydrating Cleanser on TikTok, Caption and video are ready.
+B24UI    84.0 PASS the reminder opens its video
+B24UI    84.2 FAILURES: none
+B24UI    24.0 PASS Edits: Select
+B24UI    24.8 PASS videos to pick · 6
+B24UI    27.9 PASS numbers in the tapped order · 1 3
+B24UI    30.1 PASS several → Plan my week
+B24UI    31.2 build button: Build plan · 3 videos
+B24UI    31.4 PASS the 3 picked videos come chosen · Build plan · 3 videos
+B24UI    36.5 PASS one → the scheduling sheet
+B24UI    43.4 PASS product row
+B24UI    46.0 PASS product view
+B24UI    48.3 PASS Rename asks for the brand too
+B24UI    61.5 PASS the product now under its new brand
+B24UI    62.8 FAILURES: none
