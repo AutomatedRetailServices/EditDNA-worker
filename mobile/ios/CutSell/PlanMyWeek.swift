@@ -147,7 +147,12 @@ struct PlanMyWeekView: View {
     /// Her Ready videos; the ones she left with "Decide later" first.
     private var videos: [PlanPick] {
         let later = PlanLater.all
-        return store.plannable(projects: appState.projects, catalog: catalog).enumerated().sorted { a, b in
+        let planned = Set((store.state?.week?.slots ?? []).filter { $0.date >= (store.state?.today ?? "") || $0.postedAt != nil }
+            .map(\.projectID))
+        // PO 26 Oct: what is already scheduled or posted is not offered again.
+        return store.plannable(projects: appState.projects, catalog: catalog)
+            .filter { !planned.contains($0.projectID) && !PostedLedger.contains($0.projectID) }
+            .enumerated().sorted { a, b in
             let x = later.firstIndex(of: a.element.projectID) ?? Int.max, y = later.firstIndex(of: b.element.projectID) ?? Int.max
             return x == y ? a.offset < b.offset : x < y
         }.map(\.element)
@@ -699,3 +704,47 @@ enum PlanLater {
 
 /// A project id as a sheet item.
 struct PlanPickID: Identifiable { let id: String }
+
+/// Videos she already posted (TikTok or any network), with the day: Edits › Posted (by month) and never offered again in
+/// Plan my week. Filled from the plan (a slot marked posted) and kept on this iPhone, because the plan only returns the
+/// current week.
+enum PostedLedger {
+    private static let key = "cutsell.posted"
+    static var all: [String: String] { UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:] }
+    static func contains(_ projectID: String) -> Bool { all[projectID] != nil }
+    static func add(_ projectID: String, day: String = PlanDay.iso.string(from: Date())) {
+        var values = all
+        guard values[projectID] == nil else { return }
+        values[projectID] = day
+        UserDefaults.standard.set(values, forKey: key)
+    }
+
+    static func record(_ state: PlanState?) {
+        guard let slots = state?.week?.slots else { return }
+        var values = all
+        var changed = false
+        for slot in slots where slot.postedAt != nil && values[slot.projectID] == nil {
+            let stamp = String((slot.postedAt ?? "").prefix(10))
+            values[slot.projectID] = PlanDay.date(stamp) != nil ? stamp : slot.date
+            changed = true
+        }
+        if changed { UserDefaults.standard.set(values, forKey: key) }
+    }
+
+    /// "October 2026" → videos, newest month first.
+    static func byMonth(_ projects: [Project]) -> [(month: String, projects: [Project])] {
+        let posted = all
+        let f = DateFormatter(); f.locale = L10n.locale; f.dateFormat = "LLLL yyyy"
+        var groups: [String: (date: Date, projects: [Project])] = [:]
+        for project in projects {
+            guard let day = posted[project.projectID], let date = PlanDay.date(day) else { continue }
+            let name = f.string(from: date).capitalizedFirst
+            var entry = groups[name] ?? (date, [])
+            entry.projects.append(project)
+            entry.date = max(entry.date, date)
+            groups[name] = entry
+        }
+        return groups.sorted { $0.value.date > $1.value.date }
+            .map { ($0.key, $0.value.projects.sorted { (posted[$0.projectID] ?? "") > (posted[$1.projectID] ?? "") }) }
+    }
+}

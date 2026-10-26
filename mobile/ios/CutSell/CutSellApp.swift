@@ -97,6 +97,7 @@ struct CutSellApp: App {
                         } catch {
                             await appState.recoverIfUnauthorized(error)
                         }
+                        await PlanWeekStore.shared.refresh(session: appState.session)
                         if let current = appState.session {
                             await notificationCenter.refresh(session: current)
                         }

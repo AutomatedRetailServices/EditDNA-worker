@@ -1360,6 +1360,42 @@ final class Build24UITests: XCTestCase {
         XCTAssertTrue(failures.isEmpty, failures.joined(separator: " | "))
     }
 
+    /// PO 26 Oct: scheduled and posted videos are not offered again in Plan my week; posted ones live in Edits › Posted.
+    func testPostedAndHidden() throws {
+        launchApp(fresh: true, extra: ["-CutSellPlanMock", "-CutSellProjectsMock", "-CutSellCatalogMock"])
+        element("tab_plan").tap()
+        check(element("planMyWeek").waitForExistence(timeout: 20), "Plan")
+        element("planMyWeek").tap()
+        let tiles = app.descendants(matching: .any).matching(identifier: "pmwVideo")
+        check(wait(10) { tiles.count >= 3 }, "Ready videos", "\(tiles.count)")
+        let before = tiles.count
+        tiles.element(boundBy: 0).tap(); pause(0.3); tiles.element(boundBy: 1).tap(); pause(0.3)
+        element("pmwBuild").tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        if springboard.buttons["Allow"].waitForExistence(timeout: 5) { springboard.buttons["Allow"].tap() }
+        check(element("weekSubtitle").waitForExistence(timeout: 15), "plan built")
+        // Mark the first one posted.
+        let open = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'weekDayOpen_'")).firstMatch
+        open.tap()
+        check(element("dayPosted").waitForExistence(timeout: 10), "the day")
+        element("dayPosted").tap(); pause(1.5)
+        // Plan my week again: the 2 planned videos are gone from the choice.
+        element("tab_plan").tap(); pause(1); element("tab_plan").tap(); pause(1)
+        element("planMyWeek").tap()
+        check(element("planMyWeekSimple").waitForExistence(timeout: 10), "Plan my week again")
+        pause(1)
+        check(tiles.count == before - 2, "scheduled / posted videos are not offered", "\(before) → \(tiles.count)")
+        shot("pmw_without_planned")
+        // Edits › Posted, by month.
+        element("tab_edits").tap(); pause(1.5)
+        let posted = element("editsFilterPosted")
+        check(posted.waitForExistence(timeout: 10), "Edits: Posted tab")
+        posted.tap(); pause(1)
+        check(element("postedMonth").waitForExistence(timeout: 5), "Posted: a month with the posted video")
+        shot("edits_posted")
+        done()
+    }
+
     /// PO 25 Oct: a product gets its brand (not only a new name); Edits › Select several videos → Plan (bulk or one).
     func testBrandAndSelectToPlan() throws {
         launchApp(fresh: true, extra: ["-CutSellPlanMock", "-CutSellProjectsMock", "-CutSellCatalogMock"])

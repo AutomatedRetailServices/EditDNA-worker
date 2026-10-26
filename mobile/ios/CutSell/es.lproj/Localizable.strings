@@ -760,6 +760,7 @@
 "Nothing planned for today" = "Nada planeado para hoy";
 "Nothing planned for %@" = "Nada planeado para el %1$@";
 "Nothing planned for %lld" = "Nada planeado para el %1$lld";
+"Nothing posted yet" = "Aún no hay nada publicado";
 "Nothing was lost" = "No se perdió nada";
 "Nothing was lost." = "No se perdió nada.";
 "Notifications" = "Notificaciones";
@@ -1620,6 +1621,8 @@
 "%lld of %@ videos fit%lld. The rest would put the same product back to back." = "Caben %1$lld de %2$@ videos%3$lld. El resto pondría el mismo producto seguido.";
 "%lld of %lld videos fit%@. The rest would put the same product back to back." = "Caben %1$lld de %2$lld videos%3$@. El resto pondría el mismo producto seguido.";
 "%lld of %lld videos fit%lld. The rest would put the same product back to back." = "Caben %1$lld de %2$lld videos%3$lld. El resto pondría el mismo producto seguido.";
+"%@ posted" = "%1$@ publicados";
+"%lld posted" = "%1$lld publicados";
 "%@ processing" = "%1$@ procesando";
 "%lld processing" = "%1$lld procesando";
 "%@ queued · %@ failed" = "%1$@ en cola · %2$@ fallidos";

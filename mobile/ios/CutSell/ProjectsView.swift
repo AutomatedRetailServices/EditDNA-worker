@@ -5,14 +5,14 @@ import Combine
 /// Build 24 (Product Owner, 18 Oct): "Processing" is shown only while something is being made; a
 /// cut leaves it the moment it is ready and is in Ready at once.
 enum EditsTab: String, CaseIterable, Identifiable, Hashable {
-    case processing = "Processing", ready = "Ready", products = "Products", drafts = "Drafts", all = "All"
+    case processing = "Processing", ready = "Ready", products = "Products", drafts = "Drafts", posted = "Posted", all = "All"
     var id: String { rawValue }
 
     /// Figma chip widths (12 pt SF semibold, height 38).
     var chipWidth: CGFloat {
         switch self {
         case .processing: return 100
-        case .ready, .drafts: return 84
+        case .ready, .drafts, .posted: return 84
         case .products: return 80
         case .all: return 66
         }
@@ -54,7 +54,10 @@ struct ProjectsView: View {
         case .all, .processing, .products:
             return appState.projects
         case .ready:
-            return appState.projects.filter { $0.state == "draft_ready" }
+            // PO 26 Oct: a posted video leaves Ready (it lives in Posted).
+            return appState.projects.filter { $0.state == "draft_ready" && !PostedLedger.contains($0.projectID) }
+        case .posted:
+            return appState.projects.filter { PostedLedger.contains($0.projectID) }
         case .drafts:
             return appState.projects.filter {
                 !Project.processingStates.contains($0.state) && $0.state != "draft_ready"
@@ -101,7 +104,8 @@ struct ProjectsView: View {
     /// something is being made.
     /// White Indigo (Figma 1166:4): one full-width bar, Processing · Ready · Products · Drafts (no "All").
     private var visibleTabs: [EditsTab] {
-        processingRows.isEmpty && mixCenter.active.isEmpty ? [.ready, .products, .drafts] : [.processing, .ready, .products, .drafts]
+        let base: [EditsTab] = processingRows.isEmpty && mixCenter.active.isEmpty ? [.ready, .products, .drafts] : [.processing, .ready, .products, .drafts]
+        return base + [.posted]
     }
 
     private func chipTitle(_ tab: EditsTab) -> String {
@@ -113,7 +117,8 @@ struct ProjectsView: View {
         case .processing: return processingRows.count + mixCenter.active.count
         case .products: return catalog.overview.brands.count
         case .all: return appState.projects.count
-        case .ready: return appState.projects.filter { $0.state == "draft_ready" }.count
+        case .ready: return appState.projects.filter { $0.state == "draft_ready" && !PostedLedger.contains($0.projectID) }.count
+        case .posted: return appState.projects.filter { PostedLedger.contains($0.projectID) }.count
         case .drafts:
             return appState.projects.filter {
                 !Project.processingStates.contains($0.state) && $0.state != "draft_ready"
@@ -164,6 +169,8 @@ struct ProjectsView: View {
                             ProductsList(store: catalog, projects: appState.projects) { ids, suggestion in
                                 assigning = AssignRequest(projectIDs: ids, suggestion: suggestion)
                             }
+                        } else if selectedTab == .posted {
+                            postedList
                         } else {
                         if !pendingCuts.isEmpty {
                             VStack(spacing: 8) {
@@ -276,7 +283,12 @@ struct ProjectsView: View {
                     .environmentObject(appState)
                     .onDisappear { Task { await refreshPendingCuts() } }
             }
-            .task { await refreshPendingCuts() }
+            .task {
+                await refreshPendingCuts()
+                // PO 26 Oct: what is new (Posted, products, the plan) shows at once, without pulling down to refresh.
+                await PlanWeekStore.shared.refresh(session: appState.session)
+                await refreshCatalog()
+            }
             // Build 24: the paused-upload list follows the queue (a cut that started from its voice or
             // finished uploading leaves it right away instead of staying as a stale "Failed").
             .onReceive(queue.$items.dropFirst()) { _ in Task { await refreshPendingCuts() } }
@@ -409,6 +421,33 @@ struct ProjectsView: View {
         }
     }
 
+    /// PO 26 Oct: Edits › Posted — what she already posted, by month (newest first), apart from Ready.
+    @ViewBuilder private var postedList: some View {
+        let groups = PostedLedger.byMonth(shownProjects)
+        if groups.isEmpty {
+            emptyState.padding(.top, 24)
+        } else {
+            VStack(alignment: .leading, spacing: 18) {
+                ForEach(groups, id: \.month) { group in
+                    VStack(alignment: .leading, spacing: 10) {
+                        WISectionTitle(title: group.month, note: "\(group.projects.count) posted")
+                        LazyVGrid(columns: columns, spacing: 8) {
+                            ForEach(group.projects) { project in
+                                NavigationLink(value: project) {
+                                    EditTile(project: project, showsMenu: false) { projectPendingDelete = project }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("postedMonth")
+                }
+            }
+            .padding(.top, 16)
+        }
+    }
+
     /// Selecting: a Ready video gets a blue border and its number (the order she tapped); others can't be picked.
     private func selectableTile(_ project: Project) -> some View {
         let order = picked.firstIndex(of: project.projectID).map { $0 + 1 }
@@ -524,6 +563,7 @@ struct ProjectsView: View {
         case .all, .processing: return "No edits yet"
         case .ready: return "No ready edits"
         case .drafts: return "No drafts"
+        case .posted: return "Nothing posted yet"
         case .products: return "No products yet"
         }
     }

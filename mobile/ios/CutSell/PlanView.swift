@@ -128,10 +128,16 @@ struct PlanView: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, 20)
             }
+            .refreshable {
+                await week.refresh(session: appState.session)
+                await mixes.refresh(session: appState.session)
+            }
         }
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom) { CSTabBar(current: .plan, select: selectTab) }
         .task { await mixes.refresh(session: appState.session) }
+        // PO 26 Oct: everything loads when Plan opens and comes back; pulling down refreshes too.
+        .onAppear { Task { await week.refresh(session: appState.session) } }
         .fullScreenCover(isPresented: $showingMix) {
             MixSetupView(onClose: { showingMix = false }, onStarted: { summary in
                 showingMix = false

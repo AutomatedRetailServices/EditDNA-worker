@@ -128,7 +128,7 @@ enum PlanDay {
 final class PlanWeekStore: ObservableObject {
     static let shared = PlanWeekStore()
 
-    @Published private(set) var state: PlanState?
+    @Published private(set) var state: PlanState? { didSet { PostedLedger.record(state) } }
     @Published var lastError: String?
     /// A reminder was tapped: the Plan tab opens this day.
     @Published var requestedDay: String?
@@ -257,6 +257,7 @@ final class PlanWeekStore: ObservableObject {
 
     /// "Did you post it? → Yes, posted" for any video (Export screen too).
     func markPosted(projectID: String, session: CutSellSession?) async throws {
+        PostedLedger.add(projectID)
         if let slot = state?.week?.slots.first(where: { $0.projectID == projectID }) { try await markPosted(slot, session: session); return }
         if mock { return }
         guard let session else { throw APIError.invalidResponse }
