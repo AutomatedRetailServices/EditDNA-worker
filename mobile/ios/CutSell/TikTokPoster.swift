@@ -51,7 +51,7 @@ final class TikTokPoster: ObservableObject {
 
     /// The whole post: save the video, copy the caption, open TikTok (Share Kit when configured).
     func post(video: URL, caption: String?, projectID: String, onNotice: ((String) -> Void)? = nil,
-              onPosted: (() async -> Void)? = nil) async {
+              onPosted: (() async -> Void)? = nil, askWhenBack: Bool = true) async {
         guard !busy else { return }
         busy = true
         defer { busy = false }
@@ -70,7 +70,8 @@ final class TikTokPoster: ObservableObject {
             notice = "Video saved to Photos"
         }
         if let notice { onNotice?(notice) }
-        pending = PendingPost(id: projectID, onPosted: onPosted)
+        // Plan: she already said "Yes, I'm posting it" before TikTok opened, so no "Did you post it?" when she comes back.
+        pending = askWhenBack ? PendingPost(id: projectID, onPosted: onPosted) : nil
         leftApp = false
         CutSellDiagnostics.log("tiktok_post_started", ["share_kit": usesShareKit ? "1" : "0", "caption": caption == nil ? "0" : "1"])
         try? await Task.sleep(nanoseconds: 1_200_000_000)       // she sees the notice before TikTok opens

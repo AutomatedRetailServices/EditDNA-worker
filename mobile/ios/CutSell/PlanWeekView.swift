@@ -1292,6 +1292,7 @@ struct PlanDayView: View {
     @State private var shareItems: [Any]?
     @State private var notice: String?
     @State private var busy = false
+    @State private var confirming: PlanSlot?
 
     private var slots: [PlanSlot] { (store.state?.week?.slots ?? []).filter { $0.date == day } }
     private var focus: PlanSlot? {
@@ -1340,6 +1341,13 @@ struct PlanDayView: View {
             if ProcessInfo.processInfo.arguments.contains("-CutSellPlanTestReminder"), let slot = focus {
                 PostReminders.shared.test(slot, seconds: 4)
             }
+        }
+        .alert(L10n.tr(confirming.map { "Post on \(PostNetwork.of($0.projectID).rawValue) now?" } ?? ""),
+               isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }), presenting: confirming) { slot in
+            Button(L10n.tr("Yes, I'm posting it")) { Task { await confirmAndPost(slot) } }
+            Button(L10n.tr("Not now"), role: .cancel) {}
+        } message: { slot in
+            Text(L10n.tr("\(slot.product ?? "This video") will be marked as posted and move to Edits › Posted. We'll open \(PostNetwork.of(slot.projectID).rawValue) with the video and the caption copied."))
         }
         .alert(L10n.tr("Edit caption"), isPresented: $editing) {
             TextField(L10n.tr("Caption"), text: $draftCaption, axis: .vertical).accessibilityIdentifier("captionField")
@@ -1411,7 +1419,7 @@ struct PlanDayView: View {
         VStack(spacing: 10) {
             // Figma 1209:170: one blue "Share to TikTok" (the video to Photos, the caption copied, TikTok opens), then
             // "Save to Photos" and "✓ Mark as posted".
-            Button { Task { await postToTikTok(slot) } } label: {
+            Button { confirming = slot } label: {
                 Text(L10n.tr(exporter.progress[slot.projectID].map { "Preparing… \(Int($0 * 100)) %" } ?? "Share to \(PostNetwork.of(slot.projectID).rawValue)"))
                     .font(CS.inter(16, .semibold)).foregroundStyle(Color(fixed: 0xFFFFFF))
                     .frame(maxWidth: .infinity).frame(height: 50)
@@ -1466,6 +1474,14 @@ struct PlanDayView: View {
 
     /// Post to TikTok: the video (exported at night, or now with its %) to Photos, the caption copied, TikTok opens.
     /// Back in CutSell, "Did you post it? → Yes, posted" marks it posted.
+    /// PO 26 Oct: "Share to TikTok" first asks her to confirm she is posting it now. Yes: the video is marked posted (it moves
+    /// to Edits › Posted and its reminder stops), then the video goes to Photos, the caption is copied and the app opens.
+    private func confirmAndPost(_ slot: PlanSlot) async {
+        PostedLedger.add(slot.projectID)
+        try? await store.markPosted(slot, session: appState.session)
+        await postToTikTok(slot)
+    }
+
     private func postToTikTok(_ slot: PlanSlot) async {
         busy = true
         defer { busy = false }
@@ -1486,9 +1502,8 @@ struct PlanDayView: View {
                 }
                 return
             }
-            await TikTokPoster.shared.post(video: file, caption: slot.caption, projectID: slot.projectID, onNotice: { notice = $0 }) {
-                try? await store.markPosted(slot, session: appState.session)
-            }
+            await TikTokPoster.shared.post(video: file, caption: slot.caption, projectID: slot.projectID, onNotice: { notice = $0 },
+                                           askWhenBack: false)
         } catch {
             notice = "The video couldn’t be prepared. Check your connection and try again."
         }

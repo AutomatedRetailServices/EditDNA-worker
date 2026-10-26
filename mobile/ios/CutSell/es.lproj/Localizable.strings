@@ -876,6 +876,8 @@
 "Post at your times" = "Publica a tus horas";
 "Post it in TikTok and come back to CutSell." = "Publícalo en TikTok y vuelve a CutSell.";
 "Post on" = "Publicar en";
+"Post on %@ now?" = "¿Publicar en %1$@ ahora?";
+"Post on %lld now?" = "¿Publicar en %1$lld ahora?";
 "Post to TikTok" = "Publicar en TikTok";
 "Posted" = "Publicado";
 "Preferences" = "Preferencias";
@@ -1461,6 +1463,7 @@
 "Wrong" = "Incorrecto";
 "YOU JUST SAVED" = "ACABAS DE AHORRAR";
 "Yellow" = "Amarillo";
+"Yes, I'm posting it" = "Sí, lo voy a publicar";
 "Yes, posted" = "Sí, publicado";
 "You" = "Perfil";
 "You can change this later in Settings." = "Puedes cambiarlo luego en Ajustes.";
@@ -1685,6 +1688,10 @@
 "%lld video%@ · about %lld s each" = "%1$lld video%2$@ · unos %3$lld s cada uno";
 "%lld video%lld · about %@ s each" = "%1$lld video%2$lld · unos %3$@ s cada uno";
 "%lld video%lld · about %lld s each" = "%1$lld video%2$lld · unos %3$lld s cada uno";
+"%@ will be marked as posted and move to Edits › Posted. We'll open %@ with the video and the caption copied." = "%1$@ quedará como publicado y pasará a Edits › Posted. Abriremos %2$@ con el video y el texto copiado.";
+"%@ will be marked as posted and move to Edits › Posted. We'll open %lld with the video and the caption copied." = "%1$@ quedará como publicado y pasará a Edits › Posted. Abriremos %2$lld con el video y el texto copiado.";
+"%lld will be marked as posted and move to Edits › Posted. We'll open %@ with the video and the caption copied." = "%1$lld quedará como publicado y pasará a Edits › Posted. Abriremos %2$@ con el video y el texto copiado.";
+"%lld will be marked as posted and move to Edits › Posted. We'll open %lld with the video and the caption copied." = "%1$lld quedará como publicado y pasará a Edits › Posted. Abriremos %2$lld con el video y el texto copiado.";
 "%@ words · about %@" = "%1$@ palabras · unos %2$@";
 "%@ words · about %lld" = "%1$@ palabras · unos %2$lld";
 "%lld words · about %@" = "%1$lld palabras · unos %2$@";

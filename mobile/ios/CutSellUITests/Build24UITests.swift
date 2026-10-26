@@ -1378,6 +1378,12 @@ final class Build24UITests: XCTestCase {
         let open = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'weekDayOpen_'")).firstMatch
         open.tap()
         check(element("dayPosted").waitForExistence(timeout: 10), "the day")
+        // "Share to TikTok" asks first.
+        element("dayShare").tap()
+        let ask = app.alerts.firstMatch
+        check(ask.waitForExistence(timeout: 5), "Share asks to confirm", ask.exists ? ask.label : "")
+        shot("share_confirm")
+        ask.buttons["Not now"].tap(); pause(1)
         element("dayPosted").tap(); pause(1.5)
         // Plan my week again: the 2 planned videos are gone from the choice.
         element("tab_plan").tap(); pause(1); element("tab_plan").tap(); pause(1)
