@@ -263,7 +263,9 @@ struct DesignScreenshotRoot: View {
             state: index % 3 == 1 ? "draft" : "draft_ready",
             latestJobID: nil,
             sourceCount: 1,
-            updatedAt: nil
+            updatedAt: nil,
+            // Spread over the last weeks (Your results: this week, this month, lifetime).
+            createdAt: PlanDay.iso.string(from: Calendar.current.date(byAdding: .day, value: -index * 3, to: Date()) ?? Date()) + "T12:00:00+00:00"
         )
     }
 }

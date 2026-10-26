@@ -68,10 +68,35 @@ final class EditStats: ObservableObject {
         return String(format: "%d h %02d min", minutes / 60, minutes % 60)
     }
 
+    /// "That's 1.5 workdays (8 h)" · "That's 40 min of your day"
+    static func workdays(_ minutes: Double) -> String {
+        if minutes < 8 * 60 { return minutes < 60 ? "That's \(Int(minutes)) min of your day" : "That's \(hours(minutes)) of an 8-hour workday" }
+        let days = minutes / (8 * 60)
+        let text = days < 10 ? String(format: "%.1f", days) : "\(Int(days.rounded()))"
+        return "That's \(text) workdays of 8 hours"
+    }
+
+    /// The server's dates ("2026-10-12T22:28:05.952628+00:00").
+    static func date(_ raw: String) -> Date? { PlanDay.date(String(raw.prefix(10))) }
+
     /// "6.7 h"
     static func hours(_ minutes: Double) -> String {
         let h = minutes / 60
         return h < 10 ? String(format: "%.1f h", h) : "\(Int(h.rounded())) h"
+    }
+}
+
+/// The periods of Your results: this week (since Monday), this month, lifetime.
+enum StatsPeriod: String, CaseIterable, Identifiable {
+    case week = "This week", month = "This month", lifetime = "Lifetime"
+    var id: String { rawValue }
+
+    func contains(_ project: Project, now: Date = Date()) -> Bool {
+        guard self != .lifetime else { return true }
+        guard let raw = project.createdAt ?? project.updatedAt, let date = EditStats.date(raw) else { return false }
+        var cal = Calendar(identifier: .gregorian)
+        cal.firstWeekday = 2                                   // Monday
+        return cal.isDate(date, equalTo: now, toGranularity: self == .week ? .weekOfYear : .month)
     }
 }
 
@@ -80,31 +105,20 @@ struct EditStatsPage: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var stats = EditStats.shared
 
-    private var edited: [Project] { EditStats.edited(appState.projects) }
-    private var thisMonth: [Project] {
-        let month = String(ISO8601DateFormatter().string(from: Date()).prefix(7))
-        return edited.filter { ($0.createdAt ?? $0.updatedAt ?? "").hasPrefix(month) }
-    }
+    private func videos(_ period: StatsPeriod) -> [Project] { EditStats.edited(appState.projects).filter { period.contains($0) } }
 
     var body: some View {
         YouScreen(title: "Your results", subtitle: "Everything CutSell edited for you", back: back) {
-            VStack(spacing: 10) {
-                big(value: EditStats.hours(Double(edited.count) * EditStats.minutesSavedPerVideo), label: "Hours saved",
-                    detail: "\(Int(EditStats.minutesSavedPerVideo)) min of editing by hand per video", id: "statsSaved", blue: true)
-                HStack(spacing: 10) {
-                    big(value: "\(edited.count)", label: "Videos edited", detail: nil, id: "statsVideos")
-                    big(value: EditStats.duration(stats.totalSeconds(appState.projects)), label: "Video time",
-                        detail: stats.measuring ? "Adding up…" : nil, id: "statsTime")
-                }
+            VStack(spacing: 12) {
+                card(.lifetime, blue: true)
+                card(.month)
+                card(.week)
+                Text(L10n.tr("Hours saved = \(Int(EditStats.minutesSavedPerVideo)) min of editing by hand per video. A workday is 8 hours."))
+                    .font(CS.inter(12, .medium)).foregroundStyle(CS.wiSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("statsRule")
             }
             .padding(.top, 20)
-            YouSection(label: "THIS MONTH") {
-                YouRow(title: "Videos edited", value: "\(thisMonth.count)", chevron: false, divider: true, id: "statsMonthVideos")
-                YouRow(title: "Video time", value: EditStats.duration(stats.totalSeconds(thisMonth)), chevron: false,
-                       divider: true, id: "statsMonthTime")
-                YouRow(title: "Hours saved", value: EditStats.hours(Double(thisMonth.count) * EditStats.minutesSavedPerVideo),
-                       chevron: false, divider: false, id: "statsMonthSaved")
-            }
         }
         .task {
             try? await appState.refreshProjects()
@@ -112,24 +126,42 @@ struct EditStatsPage: View {
         }
     }
 
-    private func big(value: String, label: String, detail: String?, id: String, blue: Bool = false) -> some View {
+    /// One period: hours saved (and the 8-hour workdays they make), videos edited, video time.
+    private func card(_ period: StatsPeriod, blue: Bool = false) -> some View {
+        let list = videos(period)
+        let minutes = Double(list.count) * EditStats.minutesSavedPerVideo
         let white = Color(fixed: 0xFFFFFF)
-        return VStack(alignment: .leading, spacing: 4) {
-            Text(verbatim: value).font(CS.inter(blue ? 40 : 30, .heavy)).foregroundStyle(blue ? white : CS.wiInk)
-                .contentTransition(.numericText()).lineLimit(1).minimumScaleFactor(0.6)
-                .accessibilityIdentifier(id)
-            Text(L10n.tr(label)).font(CS.inter(14, .semibold)).foregroundStyle(blue ? white : CS.wiInk)
-            if let detail {
-                Text(L10n.tr(detail)).font(CS.inter(12, .medium)).foregroundStyle(blue ? white.opacity(0.85) : CS.wiSecondary)
+        let ink = blue ? white : CS.wiInk
+        let soft = blue ? white.opacity(0.85) : CS.wiSecondary
+        return VStack(alignment: .leading, spacing: 10) {
+            Text(L10n.tr(period.rawValue).uppercased()).font(CS.inter(11, .bold)).tracking(0.8).foregroundStyle(soft)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(verbatim: EditStats.hours(minutes)).font(CS.inter(blue ? 40 : 30, .heavy)).foregroundStyle(ink)
+                    .contentTransition(.numericText())
+                    .accessibilityIdentifier("statsSaved_\(period)")
+                Text(L10n.tr("saved")).font(CS.inter(15, .semibold)).foregroundStyle(ink)
+            }
+            Text(L10n.tr(EditStats.workdays(minutes))).font(CS.inter(13, .semibold)).foregroundStyle(soft)
+            Rectangle().fill(blue ? white.opacity(0.25) : CS.wiBorder).frame(height: 1)
+            HStack {
+                stat("\(list.count)", "Videos edited", ink: ink, soft: soft, id: "statsVideos_\(period)")
+                Spacer()
+                stat(EditStats.duration(stats.totalSeconds(list)), stats.measuring ? "Adding up…" : "Video time",
+                     ink: ink, soft: soft, id: "statsTime_\(period)")
+                Spacer()
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            if blue { RoundedRectangle(cornerRadius: 20, style: .continuous).fill(CS.accent) }
-            else { RoundedRectangle(cornerRadius: 20, style: .continuous).fill(CS.wiCard) }
-        }
+        .background(blue ? CS.accent : CS.wiCard, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(blue ? .clear : CS.wiBorder, lineWidth: 1))
-        .animation(.easeOut, value: value)
+        .animation(.easeOut, value: list.count)
+    }
+
+    private func stat(_ value: String, _ label: String, ink: Color, soft: Color, id: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(verbatim: value).font(CS.inter(20, .bold)).foregroundStyle(ink).accessibilityIdentifier(id)
+            Text(L10n.tr(label)).font(CS.inter(12, .medium)).foregroundStyle(soft)
+        }
     }
 }

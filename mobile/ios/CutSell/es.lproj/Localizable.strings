@@ -557,6 +557,8 @@
 "Hooks × bodies × CTAs → many videos" = "Hooks × cuerpos × CTAs → muchos videos";
 "Hours" = "Horas";
 "Hours saved" = "Horas ahorradas";
+"Hours saved = %@ min of editing by hand per video. A workday is 8 hours." = "Horas ahorradas = %1$@ min de edición a mano por video. Una jornada son 8 horas.";
+"Hours saved = %lld min of editing by hand per video. A workday is 8 hours." = "Horas ahorradas = %1$lld min de edición a mano por video. Una jornada son 8 horas.";
 "How many videos?" = "¿Cuántos videos?";
 "How to use CutSell" = "Cómo usar CutSell";
 "IPHONE PERMISSIONS" = "PERMISOS DEL IPHONE";
@@ -617,6 +619,7 @@
 "Left" = "Izquierda";
 "Less" = "Menos";
 "Let CutSell cut" = "Deja que CutSell corte";
+"Lifetime" = "Desde el inicio";
 "Light" = "Claro";
 "Limited (only the photos you picked)" = "Limitado (solo las fotos que elegiste)";
 "Linear" = "Lineal";
@@ -1215,6 +1218,12 @@
 "That take was too short. Please record again." = "Esa toma fue muy corta. Graba de nuevo.";
 "That video couldn't be read. Please pick another one." = "No se pudo leer ese video. Elige otro.";
 "That voice-over couldn't be moved. Please try again." = "No se pudo mover esa voz en off. Vuelve a intentarlo.";
+"That's %@ min of your day" = "Son %1$@ min de tu día";
+"That's %lld min of your day" = "Son %1$lld min de tu día";
+"That's %@ of an 8-hour workday" = "Son %1$@ de una jornada de 8 horas";
+"That's %lld of an 8-hour workday" = "Son %1$lld de una jornada de 8 horas";
+"That's %@ workdays of 8 hours" = "Son %1$@ jornadas de 8 horas";
+"That's %lld workdays of 8 hours" = "Son %1$lld jornadas de 8 horas";
 "The AI removes mistakes, pauses and retakes, and leaves a cut ready to sell." = "La IA quita errores, pausas y repeticiones, y te deja un corte listo para vender.";
 "The CutSell look you know" = "El estilo de CutSell que conoces";
 "The cut needs another try" = "El corte necesita otro intento";
@@ -1262,6 +1271,7 @@
 "This file is %@. CutSell accepts files up to 1 GB. Your original file is unchanged." = "Este archivo pesa %1$@. CutSell acepta archivos de hasta 1 GB. Tu archivo original no cambia.";
 "This file is %lld. CutSell accepts files up to 1 GB. Your original file is unchanged." = "Este archivo pesa %1$lld. CutSell acepta archivos de hasta 1 GB. Tu archivo original no cambia.";
 "This iPhone only" = "Solo este iPhone";
+"This month" = "Este mes";
 "This permanently deletes your CutSell projects and account data and signs out all indexed sessions." = "Esto borra para siempre tus proyectos y datos de CutSell y cierra todas las sesiones.";
 "This permanently removes the project, its uploaded media, exports, overlays, timeline assets and feedback." = "Esto borra para siempre el proyecto, sus videos subidos, exportaciones, superposiciones y todo lo de su línea de tiempo.";
 "This project has no saved overlay/voice-over timeline yet." = "Este proyecto todavía no tiene superposiciones ni voz en off guardadas.";
@@ -1558,6 +1568,7 @@
 "of %lld ready video%lld" = "de %1$lld video%2$lld listo%2$lld";
 "reads that text to pick your best takes. It does not receive the video or the audio." = "lee ese texto para elegir tus mejores tomas. No recibe el video ni el audio.";
 "recorded clip" = "clip grabado";
+"saved" = "ahorradas";
 "server not reachable" = "no se puede llegar al servidor";
 "the week" = "la semana";
 "timed out" = "se agotó el tiempo";
