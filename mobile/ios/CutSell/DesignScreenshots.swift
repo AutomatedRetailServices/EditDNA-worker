@@ -27,7 +27,7 @@ enum DesignScreenshots {
     static let whiteIndigo = [
         "editor_v4_base", "editor_v4_caption_edit", "editor_v4_cap_highlight", "editor_v4_cap_box", "editor_v4_cap_fonts",
         "editor_v4_overlay_gallery", "editor_v4_overlay_selected", "editor_v4_vo_record", "editor_v4_vo_review",
-        "plan_built", "plan", "plan_my_week", "plan_week", "plan_today",
+        "plan_built", "plan_built_thu",
     ]
     /// The full White Indigo review set (main screens).
     static let whiteIndigoMain = [
@@ -218,6 +218,15 @@ struct DesignScreenshotRoot: View {
             PlanView(selectTab: { _ in })
         case "plan_built":
             PlanView(selectTab: { _ in })
+                .task { try? await PlanWeekStore.shared.build(session: nil) }
+        case "plan_built_thu":
+            // Option B on a Thursday: the row starts on that day.
+            PlanView(selectTab: { _ in })
+                .onAppear {
+                    let cal = Calendar(identifier: .gregorian)
+                    let wd = (cal.component(.weekday, from: Date()) + 5) % 7
+                    PlanView.previewToday = cal.date(byAdding: .day, value: (3 - wd + 7) % 7, to: cal.startOfDay(for: Date()))
+                }
                 .task { try? await PlanWeekStore.shared.build(session: nil) }
         case "err_unsupported":
             CreateProblemView(problem: .unsupportedMedia, onBack: {}, onShowFormats: {})

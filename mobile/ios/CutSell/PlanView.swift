@@ -17,6 +17,9 @@ struct PlanView: View {
     @State private var path: [PlanRoute] = []
     /// The day she tapped in the week strip (nil = today).
     @State private var shownDay: String?
+    #if DEBUG
+    nonisolated(unsafe) static var previewToday: Date?
+    #endif
     @ObservedObject private var router = AppRouter.shared
     @Environment(\.colorScheme) private var scheme
 
@@ -212,7 +215,11 @@ struct PlanView: View {
     /// product and time (tap → that day), then the whole week as a strip of large pictures (tap → This week).
     private var thisWeek: some View {
         let calendar = Calendar(identifier: .gregorian)
-        let today = Date()
+        var today = Date()
+        #if DEBUG
+        // Design screenshots only: another "today" (to show the day row on a day other than Monday).
+        if let d = Self.previewToday { today = d }
+        #endif
         // Option B (PO 26 Oct, to review): the next 7 days from today, today first.
         let start = calendar.startOfDay(for: today)
         let days = (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
