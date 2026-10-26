@@ -1,13 +1,13 @@
-B24UI    33.9 PASS Plan
-B24UI    35.8 PASS Ready videos · 6
-B24UI    44.0 PASS plan built
-B24UI    47.7 PASS the day
-B24UI    59.8 PASS Plan my week again
-B24UI    61.3 PASS scheduled / posted videos are not offered · 6 → 4
-B24UI    66.0 PASS Edits: Posted tab
-B24UI    69.1 PASS Posted: a month with the posted video
-B24UI    69.2 FAILURES: none
-Test Case '-[CutSellUITests.Build24UITests testPostedAndHidden]' passed (69.693 seconds).
-Test Suite 'Build24UITests' passed at 2026-10-26 17:46:52.542.
-Test Suite 'CutSellUITests.xctest' passed at 2026-10-26 17:46:52.542.
-Test Suite 'Selected tests' passed at 2026-10-26 17:46:52.543.
+B24UI    28.3 PASS Plan
+B24UI    30.2 PASS Ready videos · 6
+B24UI    37.9 PASS plan built
+B24UI    40.4 PASS the day
+B24UI    49.2 PASS Plan my week again
+B24UI    50.3 PASS scheduled / posted videos are not offered · 6 → 4
+B24UI    54.9 PASS Edits: Posted tab
+B24UI    58.2 PASS Posted: a month with the posted video
+B24UI    58.4 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testPostedAndHidden]' passed (58.828 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-26 18:06:26.818.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-26 18:06:26.819.
+Test Suite 'Selected tests' passed at 2026-10-26 18:06:26.819.
