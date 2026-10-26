@@ -77,7 +77,11 @@ final class EditStats: ObservableObject {
     }
 
     /// The server's dates ("2026-10-12T22:28:05.952628+00:00").
-    static func date(_ raw: String) -> Date? { PlanDay.date(String(raw.prefix(10))) }
+    nonisolated static func date(_ raw: String) -> Date? {
+        let f = DateFormatter(); f.calendar = Calendar(identifier: .gregorian); f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f.date(from: String(raw.prefix(10)))
+    }
 
     /// "6.7 h"
     static func hours(_ minutes: Double) -> String {
