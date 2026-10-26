@@ -27,7 +27,7 @@ enum DesignScreenshots {
     static let whiteIndigo = [
         "editor_v4_base", "editor_v4_caption_edit", "editor_v4_cap_highlight", "editor_v4_cap_box", "editor_v4_cap_fonts",
         "editor_v4_overlay_gallery", "editor_v4_overlay_selected", "editor_v4_vo_record", "editor_v4_vo_review",
-        "plan_built", "plan_built_thu",
+        "you", "you_stats", "plan_built",
     ]
     /// The full White Indigo review set (main screens).
     static let whiteIndigoMain = [
@@ -55,7 +55,7 @@ struct DesignScreenshotRoot: View {
             .appColorScheme()
             .onAppear {
                 appState.isBootstrapping = false
-                if ["edits", "hub", "edits_products", "plan", "you", "edits_ready", "assign", "promoting_sheet", "promoting_bulk",
+                if ["edits", "hub", "edits_products", "plan", "you", "edits_ready", "assign", "promoting_sheet", "promoting_bulk", "you_stats",
                     "product_detail"].contains(screen) { appState.projects = Self.sampleProjects }
             }
     }
@@ -140,6 +140,9 @@ struct DesignScreenshotRoot: View {
             .preferredColorScheme(.dark)
         case "mix_setup":
             MixSetupView(onClose: {}, onStarted: { _ in })
+        case "you_stats":
+            YouPagesView(start: .stats)
+                .task { try? await Task.sleep(nanoseconds: 600_000_000); EditStats.shared.previewSeed(appState.projects) }
         case "you_account", "you_prefs", "you_plan", "you_help":
             YouPagesView(start: ["you_account": YouPage.account, "you_prefs": .preferences, "you_plan": .plan,
                                  "you_help": .help][screen] ?? .account)

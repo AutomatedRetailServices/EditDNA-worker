@@ -79,6 +79,7 @@
 "Add “%lld” as a new product" = "Agregar “%1$lld” como producto nuevo";
 "Added to the voice-over track." = "Añadido a la pista de voz.";
 "Adding overlay…" = "Añadiendo superposición…";
+"Adding up…" = "Sumando…";
 "Adding video… %@%%" = "Añadiendo video… %1$@%%";
 "Adding video… %lld%%" = "Añadiendo video… %1$lld%%";
 "Agree" = "Acepto";
@@ -433,6 +434,7 @@
 "Evening" = "Tarde";
 "Every Ready video is already in your plan." = "Todos los videos listos ya están en tu plan.";
 "Every day" = "Todos los días";
+"Everything CutSell edited for you" = "Todo lo que CutSell editó por ti";
 "Everything is posted 🎉" = "Todo está publicado 🎉";
 "Expand" = "Expandir";
 "Expand timeline" = "Expandir la línea de tiempo";
@@ -554,6 +556,7 @@
 "Hold on…" = "Un momento…";
 "Hooks × bodies × CTAs → many videos" = "Hooks × cuerpos × CTAs → muchos videos";
 "Hours" = "Horas";
+"Hours saved" = "Horas ahorradas";
 "How many videos?" = "¿Cuántos videos?";
 "How to use CutSell" = "Cómo usar CutSell";
 "IPHONE PERMISSIONS" = "PERMISOS DEL IPHONE";
@@ -1379,6 +1382,7 @@
 "Video sound on" = "Sonido del video activado";
 "Video split at %@" = "Video dividido en %1$@";
 "Video split at %lld" = "Video dividido en %1$lld";
+"Video time" = "Tiempo de video";
 "Video upload paused (%@). It continues when you open CutSell." = "Subida del video en pausa (%1$@). Sigue cuando abras CutSell.";
 "Video upload paused (%lld). It continues when you open CutSell." = "Subida del video en pausa (%1$lld). Sigue cuando abras CutSell.";
 "Video %@" = "Video %1$@";
@@ -1386,6 +1390,8 @@
 "Video, %@" = "Video, %1$@";
 "Video, %lld" = "Video, %1$lld";
 "Videos are easier to judge on a dark background, like in CapCut. Everything else follows your choice." = "Los videos se ven mejor sobre fondo oscuro, como en CapCut. Todo lo demás sigue tu elección.";
+"Videos edited" = "Videos editados";
+"Videos edited, video time and hours saved" = "Videos editados, tiempo de video y horas ahorradas";
 "Videos for %@ of %@ days" = "Videos para %1$@ de %2$@ días";
 "Videos for %@ of %lld days" = "Videos para %1$@ de %2$lld días";
 "Videos for %lld of %@ days" = "Videos para %1$lld de %2$@ días";
@@ -1506,6 +1512,7 @@
 "Your plan ends early" = "Tu plan termina antes";
 "Your products will appear here as your cuts are organized." = "Tus productos aparecerán aquí a medida que se ordenen tus cortes.";
 "Your projects stay in your account. Sign in with Apple again to see them." = "Tus proyectos se quedan en tu cuenta. Inicia sesión con Apple otra vez para verlos.";
+"Your results" = "Tus resultados";
 "Your saved cuts, ready to review or share." = "Tus cortes guardados, listos para revisar o compartir.";
 "Your script" = "Tu guion";
 "Your total editing time saved" = "Tu tiempo total de edición ahorrado";
@@ -1606,6 +1613,8 @@
 "%lld is ready" = "%1$lld está listo";
 "%@ is ready to save or share." = "%1$@ está listo para guardar o compartir.";
 "%lld is ready to save or share." = "%1$lld está listo para guardar o compartir.";
+"%@ min of editing by hand per video" = "%1$@ min de edición a mano por video";
+"%lld min of editing by hand per video" = "%1$lld min de edición a mano por video";
 "%@ of %@ clips selected" = "%1$@ de %2$@ clips seleccionados";
 "%@ of %lld clips selected" = "%1$@ de %2$lld clips seleccionados";
 "%lld of %@ clips selected" = "%1$lld de %2$@ clips seleccionados";

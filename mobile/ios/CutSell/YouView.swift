@@ -11,7 +11,7 @@ import UserNotifications
 // (586:67), Plan & Usage (586:64) -- each page shows only what CutSell really has (no invented plans or devices).
 
 enum YouPage: String, Identifiable, Hashable {
-    case account, plan, privacy, preferences, language, appearance, connections, help, guide, storage
+    case account, plan, privacy, preferences, language, appearance, connections, help, guide, storage, stats
     var id: String { rawValue }
 }
 
@@ -135,6 +135,7 @@ struct YouView: View {
                     accountCard.padding(.top, 14)
                     usageCard.padding(.top, 12)
                     VStack(spacing: 0) {
+                        row("WIClock", "Your results", "Videos edited, video time and hours saved", .stats)
                         row("WIAccount", "Account & Security", "Profile, sign-in and devices", .account)
                         row("WIPlanUsage", "Plan & Usage", "Subscription, usage and history", .plan)
                         row("WIPrivacy", "Privacy & Data", "Permissions, consent and deletion", .privacy)
@@ -292,6 +293,7 @@ struct YouPagesView: View {
                 case .help: HelpPage(back: back, open: { stack.append($0) })
                 case .guide: GuidePage(back: back)
                 case .storage: StoragePage(back: back)
+                case .stats: EditStatsPage(back: back)
                 }
             }
             .id(current)
