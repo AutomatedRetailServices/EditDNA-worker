@@ -654,6 +654,7 @@ enum L10nES {
         "Not asked yet": "Todavía no se pidió",
         "Not enough space on your iPhone. Free up {} GB": "No hay espacio suficiente en tu iPhone. Libera {} GB",
         "Not now": "Ahora no",
+        "Not posted · back to Ready": "No publicado · volver a Ready",
         "Not yet": "Todavía no",
         "Nothing in progress. Start a Sales Mix or a Bulk.": "Nada en proceso. Empieza un Sales Mix o varios videos.",
         "Nothing left to post today": "No queda nada por publicar hoy",

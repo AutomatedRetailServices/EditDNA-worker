@@ -45,6 +45,8 @@ struct ProjectsView: View {
     @State private var selecting = false
     @State private var picked: [String] = []
     @State private var schedulingOne: String?
+    /// Redraws Ready / Posted after an undo (the posted list lives on this iPhone).
+    @State private var postedVersion = 0
     @State private var mixRoute: ProductRoute?
 
     private var columns: [GridItem] { Array(repeating: GridItem(.flexible(), spacing: 10), count: 3) }
@@ -423,6 +425,7 @@ struct ProjectsView: View {
 
     /// PO 26 Oct: Edits › Posted — what she already posted, by month (newest first), apart from Ready.
     @ViewBuilder private var postedList: some View {
+        let _ = postedVersion
         let groups = PostedLedger.byMonth(shownProjects)
         if groups.isEmpty {
             emptyState.padding(.top, 24)
@@ -433,10 +436,25 @@ struct ProjectsView: View {
                         WISectionTitle(title: group.month, note: "\(group.projects.count) posted")
                         LazyVGrid(columns: columns, spacing: 8) {
                             ForEach(group.projects) { project in
-                                NavigationLink(value: project) {
-                                    EditTile(project: project, showsMenu: false) { projectPendingDelete = project }
+                                ZStack(alignment: .topTrailing) {
+                                    NavigationLink(value: project) {
+                                        EditTile(project: project, showsMenu: false) { projectPendingDelete = project }
+                                    }
+                                    .buttonStyle(.plain)
+                                    // PO 26 Oct: undo by hand ("I didn't post it after all").
+                                    Menu {
+                                        Button(L10n.tr("Not posted · back to Ready"), systemImage: "arrow.uturn.backward") {
+                                            Task { try? await PlanWeekStore.shared.unmarkPosted(projectID: project.projectID,
+                                                                                               session: appState.session)
+                                                   postedVersion += 1 }
+                                        }
+                                    } label: {
+                                        Image(systemName: "ellipsis").font(.system(size: 13, weight: .bold)).foregroundStyle(CS.wiInk)
+                                            .frame(width: 28, height: 28).background(Color(fixed: 0xFFFFFF), in: Circle())
+                                            .padding(6)
+                                    }
+                                    .accessibilityIdentifier("postedMenu")
                                 }
-                                .buttonStyle(.plain)
                             }
                         }
                     }

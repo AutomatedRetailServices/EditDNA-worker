@@ -717,6 +717,12 @@ enum PostedLedger {
     }()
     static var all: [String: String] { UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:] }
     static func contains(_ projectID: String) -> Bool { all[projectID] != nil }
+    static func remove(_ projectID: String) {
+        var values = all
+        values[projectID] = nil
+        UserDefaults.standard.set(values, forKey: key)
+    }
+
     static func add(_ projectID: String, day: String = PlanDay.iso.string(from: Date())) {
         var values = all
         guard values[projectID] == nil else { return }

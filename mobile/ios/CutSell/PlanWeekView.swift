@@ -267,6 +267,22 @@ final class PlanWeekStore: ObservableObject {
         PostReminders.shared.schedule(state)
     }
 
+    /// Edits › Posted › "Not posted": back to Ready (and to Plan my week); the server forgets the posted date.
+    func unmarkPosted(projectID: String, session: CutSellSession?) async throws {
+        if mock {
+            if let i = mockSlots.firstIndex(where: { $0.projectID == projectID }) { mockSlots[i].postedAt = nil }
+            state = mockState()
+        } else {
+            guard let session else { throw APIError.invalidResponse }
+            struct Body: Encodable { let user_id: String; let project_id: String; let posted: Bool }
+            state = try await APIClient.shared.request("/v1/plan/posted", method: "POST",
+                                                       body: Body(user_id: session.userID, project_id: projectID, posted: false))
+        }
+        PostedLedger.remove(projectID)
+        PostReminders.shared.schedule(state)
+        CutSellDiagnostics.log("plan_unmarked_posted", [:])
+    }
+
     func markPosted(_ slot: PlanSlot, session: CutSellSession?) async throws {
         if mock {
             if let i = mockSlots.firstIndex(where: { $0.projectID == slot.projectID }) { mockSlots[i].postedAt = "now" }

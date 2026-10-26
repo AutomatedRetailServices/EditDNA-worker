@@ -1399,6 +1399,14 @@ final class Build24UITests: XCTestCase {
         posted.tap(); pause(1)
         check(element("postedMonth").waitForExistence(timeout: 5), "Posted: a month with the posted video")
         shot("edits_posted")
+        // Undo by hand: back to Ready.
+        element("postedMenu").tap()
+        let undo = app.buttons["Not posted · back to Ready"]
+        check(undo.waitForExistence(timeout: 5), "Posted: Not posted · back to Ready")
+        shot("posted_undo_menu")
+        undo.tap(); pause(1.5)
+        check(!element("postedMonth").exists, "after the undo it leaves Posted")
+        shot("posted_after_undo")
         done()
     }
 
