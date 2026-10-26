@@ -695,6 +695,7 @@ enum L10nES {
         "Open the cut and tap Export.": "Abre el corte y toca Exportar.",
         "Open the cut in Edits to save or share it": "Abre el corte en Mis videos para guardarlo o compartirlo",
         "Open the editor": "Abrir el editor",
+        "Opening Plan my week…": "Abriendo Plan my week…",
         "Opening TikTok…": "Abriendo TikTok…",
         "Opening your cut…": "Abriendo tu corte…",
         "Options for {}": "Opciones de {}",

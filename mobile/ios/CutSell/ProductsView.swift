@@ -688,10 +688,8 @@ struct ProductDetailView: View {
 
     private func addSelectedToPlan() {
         let ids = (detail?.videos ?? []).map(\.projectID).filter { selected.contains($0) }
-        if ids.count == 1 { scheduling = ids[0] } else {
-            PlanWeekStore.shared.preselect = ids
-            AppRouter.shared.pending = .planWeek
-        }
+        PlanWeekStore.shared.preselect = ids          // the same door as Edits › Select: Plan my week
+        AppRouter.shared.pending = .planWeek
         selecting = false
         selected = []
     }

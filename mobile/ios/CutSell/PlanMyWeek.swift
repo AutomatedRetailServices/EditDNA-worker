@@ -30,6 +30,8 @@ struct PlanMyWeekSettings: Codable, Equatable {
     var startsTomorrow = true
     var start: String? = nil                       // yyyy-MM-dd when not "Tomorrow"
     var mix = false
+    /// Where these videos will be posted (the reminder and "Share to …" use it).
+    var network: String = PostNetwork.tiktok.rawValue
 
     static let key = "cutsell.plan.simple"
     static func load() -> PlanMyWeekSettings {
@@ -298,6 +300,21 @@ struct PlanMyWeekView: View {
                 setting("Days", PlanScheduler.daysText(settings.days), .days)
                 setting("Starts", startsText, .starts)
             }
+            HStack(spacing: 6) {
+                Text(L10n.tr("Post on")).font(CS.inter(12, .medium)).foregroundStyle(CS.wiSecondary).frame(width: 52, alignment: .leading)
+                ForEach(PostNetwork.allCases) { n in
+                    let on = settings.network == n.rawValue
+                    Button { settings.network = n.rawValue } label: {
+                        Text(n.rawValue).font(CS.inter(13, .semibold)).lineLimit(1).minimumScaleFactor(0.8)
+                            .foregroundStyle(on ? Color(fixed: 0xFFFFFF) : CS.wiInk)
+                            .frame(maxWidth: .infinity).frame(height: 34)
+                            .background(on ? CS.accent : CS.wiSurface2, in: Capsule())
+                            .overlay(Capsule().stroke(on ? .clear : CS.wiBorder, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("pmwNetwork_\(n.rawValue)")
+                }
+            }
             HStack {
                 Text(L10n.tr("Mix products automatically")).font(CS.inter(14, .medium)).foregroundStyle(CS.wiInk)
                 Spacer()
@@ -364,6 +381,8 @@ struct PlanMyWeekView: View {
         building = true
         defer { building = false }
         do {
+            let network = PostNetwork(rawValue: settings.network) ?? .tiktok
+            for item in placed { PostNetwork.set(network, for: item.pick.projectID) }
             try await store.schedule(placed.map { ($0.pick.projectID, $0.date, $0.time) },
                                      times: PlanScheduler.times(perDay: settings.perDay, from: settings.fromMinutes, to: settings.toMinutes),
                                      days: settings.days, start: settings.startDay, session: appState.session)

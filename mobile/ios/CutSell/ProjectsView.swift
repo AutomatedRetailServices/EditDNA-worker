@@ -496,15 +496,12 @@ struct ProjectsView: View {
         .accessibilityValue(order.map { "\($0)" } ?? "")
     }
 
-    /// "Add to Plan · N": one video → choose its day, time and network; several → Plan my week with them, in order.
+    /// "Add to Plan · N": Plan my week with them chosen, in her order (where the network, days and times are set).
     private var addToPlanBar: some View {
         Button {
-            if picked.count == 1 {
-                schedulingOne = picked[0]
-            } else {
-                PlanWeekStore.shared.preselect = picked
-                AppRouter.shared.pending = .planWeek
-            }
+            // PO 26 Oct: one door for every video (1 or many, Single, Bulk or Mix): Plan my week, already chosen.
+            PlanWeekStore.shared.preselect = picked
+            AppRouter.shared.pending = .planWeek
             selecting = false
             picked = []
         } label: {

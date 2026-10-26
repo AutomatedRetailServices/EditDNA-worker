@@ -1435,9 +1435,19 @@ final class Build24UITests: XCTestCase {
         element("editsSelect").tap()
         picks.element(boundBy: 0).tap(); pause(0.4)
         element("editsAddToPlan").tap()
-        check(element("scheduleSheet").waitForExistence(timeout: 10), "one → the scheduling sheet")
-        shot("edits_one_schedule")
-        element("scheduleSave").tap(); pause(2)
+        check(element("planMyWeekSimple").waitForExistence(timeout: 10), "one → Plan my week too (one door)")
+        check(element("pmwBuild").label.contains("1 video"), "the one video comes chosen", element("pmwBuild").label)
+        element("pmwNetwork_Instagram").tap(); pause(0.3)
+        shot("edits_one_to_plan_my_week")
+        element("pmwBuild").tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        if springboard.buttons["Allow"].waitForExistence(timeout: 5) { springboard.buttons["Allow"].tap() }
+        check(element("weekSubtitle").waitForExistence(timeout: 15), "built → This week")
+        let open = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'weekDayOpen_'")).firstMatch
+        if open.exists { open.tap()
+            check(element("dayShare").waitForExistence(timeout: 10) && element("dayShare").label.contains("Instagram"),
+                  "its day says Share to Instagram", element("dayShare").label) }
+        shot("day_share_instagram")
         // 3) Products › a product › Rename: Brand + Product.
         element("tab_edits").tap(); pause(1)
         element("editsFilterProducts").tap()
@@ -1548,20 +1558,6 @@ final class Build24UITests: XCTestCase {
         check(element("exportSaved").waitForExistence(timeout: 15) && element("exportShare").exists && element("exportDone").exists,
               "Saved to Photos · Share · Done")
         shot("export_saved")
-        screen("export_schedule")
-        check(element("scheduleSheet").waitForExistence(timeout: 15), "the scheduling sheet")
-        shot("export_schedule")
-        element("scheduleNetwork_Instagram").tap()
-        let days = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'scheduleDay_'"))
-        if days.count > 2 { days.element(boundBy: 2).tap() }
-        element("scheduleTime_19:00").tap()
-        log("button: \(element("scheduleSave").label)")
-        shot("export_schedule_chosen")
-        element("scheduleSave").tap()
-        let subtitle = element("weekSubtitle")
-        check(subtitle.waitForExistence(timeout: 15), "Schedule → This week", subtitle.label)
-        check(app.staticTexts["7:00 PM"].exists, "the video at 7:00 PM in This week")
-        pause(1); shot("export_scheduled_in_week")
         done()
     }
 

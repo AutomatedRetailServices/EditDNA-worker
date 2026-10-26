@@ -120,7 +120,15 @@ struct ExportSettingsView: View {
                 progress(L10n.tr("Saving to Photos…"), 1)
             case .done(let url):
                 if destination == .plan {
-                    ExportScheduleContent(projectID: projectID, seconds: cutSeconds, onDone: { exporter.reset(); dismiss() })
+                    // PO 26 Oct: the same door as Edits › Select: Plan my week, with this video chosen.
+                    Text(L10n.tr("Opening Plan my week…")).font(CS.inter(14, .medium)).foregroundStyle(CS.wiSecondary)
+                        .frame(maxWidth: .infinity, minHeight: 80)
+                        .onAppear {
+                            PlanWeekStore.shared.preselect = [projectID]
+                            AppRouter.shared.pending = .planWeek
+                            exporter.reset()
+                            dismiss()
+                        }
                 } else {
                     done(url)
                 }
