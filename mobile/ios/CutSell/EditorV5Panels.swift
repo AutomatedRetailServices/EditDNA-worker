@@ -99,7 +99,7 @@ struct PillButtonV5: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: systemImage).font(.system(size: 14, weight: .semibold))
-                Text(L10n.tr(title)).font(.system(size: 15, weight: .medium)).lineLimit(1).minimumScaleFactor(0.85)
+                Text(L10n.tr(title)).font(.system(size: 15, weight: .medium)).lineLimit(1).fixedSize(horizontal: true, vertical: false)
             }
             .foregroundStyle(destructive ? Color(hex: 0xFF4D6D) : (isOn ? Color(fixed: 0xFFFFFF) : CS.wiInk))
             .padding(.horizontal, 14)
