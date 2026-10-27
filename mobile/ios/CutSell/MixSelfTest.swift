@@ -31,21 +31,9 @@ enum MixSelfTest {
         writer.startWriting()
         writer.startSession(atSourceTime: .zero)
 
+        // Video and sound go in together, 0.1 s at a time (a writer fed all the video first waits
+        // forever for the sound to interleave with it).
         let fps = 10
-        for frame in 0..<Int(seconds * Double(fps)) {
-            while !video.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
-            var buffer: CVPixelBuffer?
-            CVPixelBufferCreate(nil, 160, 160, kCVPixelFormatType_32BGRA, nil, &buffer)
-            guard let buffer else { continue }
-            CVPixelBufferLockBaseAddress(buffer, [])
-            if let base = CVPixelBufferGetBaseAddress(buffer) {
-                memset(base, Int32((frame * 7) % 255), CVPixelBufferGetDataSize(buffer))
-            }
-            CVPixelBufferUnlockBaseAddress(buffer, [])
-            adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: CMTimeScale(fps)))
-        }
-        video.markAsFinished()
-
         let rate = 44_100.0
         let chunk = 4_410
         var format = AudioStreamBasicDescription(mSampleRate: rate, mFormatID: kAudioFormatLinearPCM,
@@ -55,30 +43,49 @@ enum MixSelfTest {
         var description: CMAudioFormatDescription?
         CMAudioFormatDescriptionCreate(allocator: nil, asbd: &format, layoutSize: 0, layout: nil, magicCookieSize: 0,
                                        magicCookie: nil, extensions: nil, formatDescriptionOut: &description)
-        let total = Int(seconds * rate)
-        var written = 0
-        while written < total, let description {
-            while !audio.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
-            let count = min(chunk, total - written)
-            var samples = [Int16](repeating: 0, count: count)
-            for i in 0..<count { samples[i] = Int16(12_000 * sin(2 * .pi * 440 * Double(written + i) / rate)) }
+        guard let description else { throw CocoaError(.fileWriteUnknown) }
+        func ready(_ input: AVAssetWriterInput) async throws {
+            var waited = 0
+            while !input.isReadyForMoreMediaData {
+                if writer.status == .failed { throw writer.error ?? CocoaError(.fileWriteUnknown) }
+                waited += 1
+                if waited > 1_000 { throw CocoaError(.fileWriteUnknown, userInfo: [NSDebugDescriptionErrorKey: "writer stalled"]) }
+                try await Task.sleep(for: .milliseconds(5))
+            }
+        }
+        for frame in 0..<Int(seconds * Double(fps)) {
+            try await ready(video)
+            var buffer: CVPixelBuffer?
+            CVPixelBufferCreate(nil, 160, 160, kCVPixelFormatType_32BGRA, nil, &buffer)
+            if let buffer {
+                CVPixelBufferLockBaseAddress(buffer, [])
+                if let base = CVPixelBufferGetBaseAddress(buffer) {
+                    memset(base, Int32((frame * 7) % 255), CVPixelBufferGetDataSize(buffer))
+                }
+                CVPixelBufferUnlockBaseAddress(buffer, [])
+                adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: CMTimeScale(fps)))
+            }
+            try await ready(audio)
+            let written = frame * chunk
+            var samples = [Int16](repeating: 0, count: chunk)
+            for i in 0..<chunk { samples[i] = Int16(12_000 * sin(2 * .pi * 440 * Double(written + i) / rate)) }
             var block: CMBlockBuffer?
-            CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: count * 2, blockAllocator: nil,
-                                               customBlockSource: nil, offsetToData: 0, dataLength: count * 2, flags: 0,
+            CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: chunk * 2, blockAllocator: nil,
+                                               customBlockSource: nil, offsetToData: 0, dataLength: chunk * 2, flags: 0,
                                                blockBufferOut: &block)
-            guard let block else { break }
+            guard let block else { continue }
             samples.withUnsafeBytes { raw in
                 _ = CMBlockBufferReplaceDataBytes(with: raw.baseAddress!, blockBuffer: block, offsetIntoDestination: 0,
-                                                  dataLength: count * 2)
+                                                  dataLength: chunk * 2)
             }
             var sample: CMSampleBuffer?
             CMAudioSampleBufferCreateReadyWithPacketDescriptions(
-                allocator: nil, dataBuffer: block, formatDescription: description, sampleCount: count,
+                allocator: nil, dataBuffer: block, formatDescription: description, sampleCount: chunk,
                 presentationTimeStamp: CMTime(value: CMTimeValue(written), timescale: 44_100),
                 packetDescriptions: nil, sampleBufferOut: &sample)
             if let sample { audio.append(sample) }
-            written += count
         }
+        video.markAsFinished()
         audio.markAsFinished()
         await writer.finishWriting()
         if writer.status != .completed { throw writer.error ?? CocoaError(.fileWriteUnknown) }
