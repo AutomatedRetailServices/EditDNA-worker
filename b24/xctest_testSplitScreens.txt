@@ -1,0 +1,19 @@
+B24UI     4.6 PASS camera_split shows cameraSplit
+B24UI     4.8 camera_split: Flip | Flash | Grid | Mirror | Split | ≡ | Script | Upload
+B24UI     9.9 PASS split_setup shows splitStart
+B24UI    10.2 split_setup: Split screen | Record yourself twice. We put both takes together, side by side. | Left / Right, Best for question & answer, “me vs me” or two opinions. | Record | Left / Right | Best for question & answer, “me vs me” or two opinions. | Tips | Put your phone on a stand — don't move it | Part 1: stay on the LEFT · Part 2: stay on the RIGHT | Don't cross the middle | When you finish talking, stay and react | Use headphones for part 2
+B24UI    15.3 PASS split_part1 shows splitRecBadge
+B24UI    15.4 split_part1: Part 1 of 2 | REC 0:06 · Part 1 | Stay on the LEFT | Flip | Script
+B24UI    20.5 PASS split_part1_ready shows splitRecordPart2
+B24UI    20.5 split_part1_ready: Part 1 of 2 | Part 1 · 0:08 | Now record part 2 | Part 1 plays as a ghost while you record. Stay on the RIGHT.
+B24UI    25.7 PASS split_part2 shows splitMoved
+B24UI    25.8 split_part2: Part 2 of 2 | Now stay on the RIGHT | Your phone moved — line it up with the ghost | Use headphones to hear part 1 | Script
+B24UI    31.0 PASS split_joining shows splitJoining
+B24UI    31.1 split_joining: Joining your video… | 42%
+B24UI    36.1 PASS split_result shows splitUse
+B24UI    36.2 split_result: Your split video | Back
+B24UI    37.3 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testSplitScreens]' passed (37.389 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-27 22:34:16.053.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-27 22:34:16.053.
+Test Suite 'Selected tests' passed at 2026-10-27 22:34:16.053.

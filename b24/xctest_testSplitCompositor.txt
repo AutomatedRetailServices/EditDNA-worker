@@ -1,9 +1,22 @@
-B24UI    11.9 FAIL self-test crashed · exportFailed("Operation Stopped")
-B24UI    12.0 PASS self-test finished
-B24UI    12.0 FAIL all compositor checks pass · FAIL self-test crashed · exportFailed("Operation Stopped")
-B24UI    12.0 FAILURES: all compositor checks pass
+B24UI    48.5 PASS length = part 2 · 7.00 s
+B24UI    48.5 PASS left is part 1 at 1 s · R 132 B 0
+B24UI    48.5 PASS right is part 2 · B 255 R 1
+B24UI    48.5 PASS no line at the seam (smooth change)
+B24UI    48.5 PASS no dark or bright stripe at the seam
+B24UI    48.5 PASS soft edge ≈ 60 px at 1080 · 12 px of 360
+B24UI    48.5 PASS part 1 holds its last frame · R 233 ≈ 227
+B24UI    48.5 PASS both voices heard · 440 Hz 0.122 · 660 Hz 0.146
+B24UI    48.5 PASS voices at an even level · ratio 0.83 (before: 0.25)
+B24UI    48.5 PASS only part 2's sound after part 1 ends · 440 0.0000 · 660 0.1465
+B24UI    48.5 FAIL aligner measured the shift · x 0.737 (expected 0.050) y 0.000
+B24UI    48.5 PASS a 5% move is flagged (> 2%)
+B24UI    48.5 FAIL shift applied: part 1 lines up with part 2 · square centre - (part 2: 97.5; without the fix: 79.5)
+B24UI    48.5 PASS Pro blend runs · 7.0 s video in 39.8 s
+B24UI    48.6 PASS self-test finished
+B24UI    48.6 FAIL all compositor checks pass · FAIL aligner measured the shift · x 0.737 (expected 0.050) y 0.000 ; FAIL shift applied: part 1 lines up with part 2 · square centre - (part 2: 97.5; without the fix: 79.5)
+B24UI    48.6 FAILURES: all compositor checks pass
 /Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:1360: error: -[CutSellUITests.Build24UITests testSplitCompositor] : XCTAssertTrue failed - all compositor checks pass
-Test Case '-[CutSellUITests.Build24UITests testSplitCompositor]' failed (12.654 seconds).
-Test Suite 'Build24UITests' failed at 2026-10-27 22:24:29.429.
-Test Suite 'CutSellUITests.xctest' failed at 2026-10-27 22:24:29.430.
-Test Suite 'Selected tests' failed at 2026-10-27 22:24:29.431.
+Test Case '-[CutSellUITests.Build24UITests testSplitCompositor]' failed (49.619 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-27 22:33:15.814.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-27 22:33:15.815.
+Test Suite 'Selected tests' failed at 2026-10-27 22:33:15.815.
