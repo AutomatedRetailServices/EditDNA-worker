@@ -1427,6 +1427,23 @@ final class Build24UITests: XCTestCase {
         done()
     }
 
+    /// PO 27 Oct · Split clone: the compositor on synthetic videos made in the app (seam, length, held
+    /// frame, sound level, shift). Nothing is read from the repo.
+    func testSplitCompositor() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["-CutSellScreen", "split_selftest"]
+        app.launch()
+        let result = element("splitSelfTest")
+        let finished = wait(240) { result.exists && result.label.hasPrefix("DONE") }
+        let lines = result.exists ? result.label.replacingOccurrences(of: "DONE ", with: "").components(separatedBy: " | ") : []
+        for line in lines { log(line) }
+        shot("split_selftest")
+        check(finished, "self-test finished")
+        check(!lines.isEmpty && lines.allSatisfy { !$0.hasPrefix("FAIL") }, "all compositor checks pass",
+              lines.filter { $0.hasPrefix("FAIL") }.joined(separator: " ; "))
+        done()
+    }
+
     /// PO 26 Oct: scheduled and posted videos are not offered again in Plan my week; posted ones live in Edits › Posted.
     func testPostedAndHidden() throws {
         launchApp(fresh: true, extra: ["-CutSellPlanMock", "-CutSellProjectsMock", "-CutSellCatalogMock"])

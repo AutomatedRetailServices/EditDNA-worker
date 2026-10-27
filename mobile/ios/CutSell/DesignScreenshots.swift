@@ -161,6 +161,8 @@ struct DesignScreenshotRoot: View {
                 project: Self.sampleProjects[0], onBack: {}, onReview: {}
             )
             .background(CS.wiPage.ignoresSafeArea())
+        case "split_selftest":
+            SplitSelfTestView()
         case "create_probe":
             CreateProbe()
         case "app_probe":
