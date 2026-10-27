@@ -1,20 +1,24 @@
-B24UI    63.0 PASS length = part 2 · 7.00 s
-B24UI    63.0 PASS left is part 1 at 1 s · R 132 B 0
-B24UI    63.0 PASS right is part 2 · B 255 R 1
-B24UI    63.0 PASS no line at the seam (smooth change)
-B24UI    63.0 PASS no dark or bright stripe at the seam
-B24UI    63.0 PASS soft edge ≈ 60 px at 1080 · 12 px of 360
-B24UI    63.0 PASS part 1 holds its last frame · R 233 ≈ 227
-B24UI    63.0 PASS both voices heard · 440 Hz 0.122 · 660 Hz 0.146
-B24UI    63.0 PASS voices at an even level · ratio 0.83 (before: 0.25)
-B24UI    63.0 PASS only part 2's sound after part 1 ends · 440 0.0000 · 660 0.1465
-B24UI    63.0 FAIL aligner measured the shift
-B24UI    63.0 PASS Pro blend runs · 7.0 s video in 52.9 s
-B24UI    63.2 PASS self-test finished
-B24UI    63.2 FAIL all compositor checks pass · FAIL aligner measured the shift
-B24UI    63.2 FAILURES: all compositor checks pass
+B24UI   193.8 PASS length = part 2 · 7.00 s
+B24UI   193.9 PASS left is part 1 at 1 s · R 132 B 0
+B24UI   193.9 PASS right is part 2 · B 255 R 1
+B24UI   193.9 PASS no line at the seam (smooth change)
+B24UI   193.9 PASS no dark or bright stripe at the seam
+B24UI   194.0 PASS soft edge ≈ 60 px at 1080 · 12 px of 360
+B24UI   194.0 PASS part 1 holds its last frame · R 233 ≈ 227
+B24UI   194.0 PASS both voices heard · 440 Hz 0.122 · 660 Hz 0.146
+B24UI   194.0 PASS voices at an even level · ratio 0.83 (before: 0.25)
+B24UI   194.0 PASS only part 2's sound after part 1 ends · 440 0.0000 · 660 0.1465
+B24UI   194.0 INFO vision 270 · w 270x480 a 1.0 b 0.0 c 0.0 d 1.0 tx 14.0 ty -277.0 conf 1.0
+B24UI   194.0 INFO vision full · w 360x640 a 1.0 b 0.0 c 0.0 d 1.0 tx 18.0 ty -369.0 conf 1.0
+B24UI   194.0 INFO vision same · w 270x480 a 1.0 b 0.0 c 0.0 d 1.0 tx -0.0 ty 0.0 conf 1.0
+B24UI   194.0 INFO extents (0.0, 0.0, 360.0, 640.0) (0.0, 0.0, 360.0, 640.0)
+B24UI   194.0 FAIL aligner measured the shift
+B24UI   194.0 PASS Pro blend runs · 7.0 s video in 155.6 s
+B24UI   194.3 PASS self-test finished
+B24UI   194.3 FAIL all compositor checks pass · FAIL aligner measured the shift
+B24UI   194.3 FAILURES: all compositor checks pass
 /Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:1360: error: -[CutSellUITests.Build24UITests testSplitCompositor] : XCTAssertTrue failed - all compositor checks pass
-Test Case '-[CutSellUITests.Build24UITests testSplitCompositor]' failed (63.828 seconds).
-Test Suite 'Build24UITests' failed at 2026-10-27 22:43:19.328.
-Test Suite 'CutSellUITests.xctest' failed at 2026-10-27 22:43:19.328.
-Test Suite 'Selected tests' failed at 2026-10-27 22:43:19.329.
+Test Case '-[CutSellUITests.Build24UITests testSplitCompositor]' failed (197.132 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-27 22:59:10.547.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-27 22:59:10.547.
+Test Suite 'Selected tests' failed at 2026-10-27 22:59:10.548.
