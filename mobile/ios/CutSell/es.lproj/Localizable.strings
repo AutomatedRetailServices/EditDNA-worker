@@ -610,6 +610,7 @@
 "Language" = "Idioma";
 "Language, camera and notifications" = "Idioma, cámara y notificaciones";
 "Larger" = "Más grande";
+"Last 8 weeks" = "Últimas 8 semanas";
 "Last %@ events" = "Últimos %1$@ eventos";
 "Last %lld events" = "Últimos %1$lld eventos";
 "Later" = "Más adelante";
@@ -1167,6 +1168,7 @@
 "Swipe the sheet down or tap outside it. Tap the voice track to change it later." = "Desliza la hoja hacia abajo o toca fuera de ella. Toca la pista de voz para cambiarla después.";
 "System Default" = "Predeterminado del sistema";
 "THIS MONTH" = "ESTE MES";
+"TIME SAVED" = "TIEMPO AHORRADO";
 "TIMELINE" = "LÍNEA DE TIEMPO";
 "TODAY" = "HOY";
 "Take %@" = "Toma %1$@";
@@ -1512,6 +1514,7 @@
 "Your edits this month" = "Tus ediciones de este mes";
 "Your finished CutSell video is ready." = "Tu video de CutSell está listo.";
 "Your finished and draft edits will appear here." = "Aquí aparecerán tus ediciones terminadas y tus borradores.";
+"Your first goal" = "Tu primera meta";
 "Your name" = "Tu nombre";
 "Your original isn't on this iPhone: exporting from the 1080p copy." = "Tu original no está en este iPhone: se exporta desde la copia 1080p.";
 "Your original recording is safe" = "Tu grabación original está a salvo";
@@ -1553,6 +1556,7 @@
 "clips kept" = "clips conservados";
 "connection lost" = "se perdió la conexión";
 "could not be moved to it." = "no se pudieron pasar a ella.";
+"days" = "días";
 "e.g. CeraVe" = "ej. CeraVe";
 "e.g. Hydrating Cleanser" = "ej. Limpiador hidratante";
 "length unknown" = "duración desconocida";
@@ -1561,6 +1565,7 @@
 "no internet connection" = "sin conexión a internet";
 "no sound in the file" = "el archivo no tiene sonido";
 "not played yet" = "todavía no se reprodujo";
+"of 24 h" = "de 24 h";
 "of editing time back in your day" = "de edición que recuperas en tu día";
 "of %@ ready video%@" = "de %1$@ video%2$@ listo%2$@";
 "of %@ ready video%lld" = "de %1$@ video%2$lld listo%2$lld";
@@ -1626,6 +1631,10 @@
 "%lld is ready to save or share." = "%1$lld está listo para guardar o compartir.";
 "%@ min of editing by hand per video" = "%1$@ min de edición a mano por video";
 "%lld min of editing by hand per video" = "%1$lld min de edición a mano por video";
+"%@ more to %@ videos" = "Faltan %1$@ para %2$@ videos";
+"%@ more to %lld videos" = "Faltan %1$@ para %2$lld videos";
+"%lld more to %@ videos" = "Faltan %1$lld para %2$@ videos";
+"%lld more to %lld videos" = "Faltan %1$lld para %2$lld videos";
 "%@ of %@ clips selected" = "%1$@ de %2$@ clips seleccionados";
 "%@ of %lld clips selected" = "%1$@ de %2$lld clips seleccionados";
 "%lld of %@ clips selected" = "%1$lld de %2$@ clips seleccionados";
@@ -1680,8 +1689,14 @@
 "%lld videos need action" = "%1$lld videos necesitan acción";
 "%@ videos need attention" = "%1$@ videos necesitan atención";
 "%lld videos need attention" = "%1$lld videos necesitan atención";
+"%@ videos reached!" = "¡%1$@ videos logrados!";
+"%lld videos reached!" = "¡%1$lld videos logrados!";
 "%@ videos saved to Photos" = "%1$@ videos guardados en Fotos";
 "%lld videos saved to Photos" = "%1$lld videos guardados en Fotos";
+"%@ videos · %@ saved" = "%1$@ videos · %2$@ ahorradas";
+"%@ videos · %lld saved" = "%1$@ videos · %2$lld ahorradas";
+"%lld videos · %@ saved" = "%1$lld videos · %2$@ ahorradas";
+"%lld videos · %lld saved" = "%1$lld videos · %2$lld ahorradas";
 "%@ video%@" = "%1$@ video%2$@";
 "%@ video%lld" = "%1$@ video%2$lld";
 "%lld video%@" = "%1$lld video%2$@";
