@@ -1,5 +1,8 @@
-/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:1403: error: -[CutSellUITests.Build24UITests testVolumeMixAudio] : Failed to get matching snapshot: No matches found for first query match sequence: `Descendants matching type Any` -> `Elements matching predicate '"mixTestLoudness" IN identifiers'`, given input App element pid: 10661
-Test Case '-[CutSellUITests.Build24UITests testVolumeMixAudio]' failed (8.767 seconds).
-Test Suite 'Build24UITests' failed at 2026-10-27 20:52:15.080.
-Test Suite 'CutSellUITests.xctest' failed at 2026-10-27 20:52:15.080.
-Test Suite 'Selected tests' failed at 2026-10-27 20:52:15.081.
+B24UI    72.6 meter: exists=false label=- texts=
+B24UI    73.0 FAIL preview mix measured
+B24UI    73.0 FAILURES: preview mix measured
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:1360: error: -[CutSellUITests.Build24UITests testVolumeMixAudio] : XCTAssertTrue failed - preview mix measured
+Test Case '-[CutSellUITests.Build24UITests testVolumeMixAudio]' failed (73.550 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-27 21:06:02.948.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-27 21:06:02.949.
+Test Suite 'Selected tests' failed at 2026-10-27 21:06:02.949.

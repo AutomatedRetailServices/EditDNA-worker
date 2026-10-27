@@ -1,0 +1,3 @@
+B24UI    72.6 meter: exists=false label=- texts=
+B24UI    73.0 FAIL preview mix measured
+B24UI    73.0 FAILURES: preview mix measured
