@@ -266,7 +266,7 @@ struct EditStatsPage: View {
                             .foregroundStyle(current ? CS.accent : CS.wiSecondary)
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
                             .fill(current ? AnyShapeStyle(LinearGradient(colors: [Color(fixed: 0x5B3BFF), CS.accent], startPoint: .top, endPoint: .bottom))
-                                          : AnyShapeStyle(CS.accentSoft))
+                                          : AnyShapeStyle(LinearGradient(colors: [Color(fixed: 0x9DB8FF), Color(fixed: 0xC9D8FF)], startPoint: .top, endPoint: .bottom)))
                             .frame(height: max(6, 96 * CGFloat(week.count) / CGFloat(top) * progress))
                     }
                     .frame(maxWidth: .infinity)
