@@ -98,16 +98,22 @@ final class SplitSelfTest: ObservableObject {
             { _, x0, y in
                 let x = x0 - shift
                 if x >= 60 && x < 100 && y >= 300 && y < 340 { return (255, 255, 255) }
-                let wave = 35 * sin(Double(x) / 9) * cos(Double(y) / 13) + 20 * sin(Double(x + 2 * y) / 23)
-                var hash = UInt32(truncatingIfNeeded: (x &* 73_856_093) ^ (y &* 19_349_663))
-                hash = (hash ^ (hash >> 13)) &* 1_274_126_177
-                let grain = Double(hash % 31) - 15
-                let v = UInt8(max(30, min(180, 105 + wave + grain)))
+                // Non-repeating blotches (like furniture and walls), not a wave pattern: a repeating
+                // texture matches itself at several places and no aligner can tell which is right.
+                func noise(_ cx: Int, _ cy: Int) -> Double {
+                    var hash = UInt32(truncatingIfNeeded: (cx &* 73_856_093) ^ (cy &* 19_349_663) ^ 0x5bd1e995)
+                    hash = (hash ^ (hash >> 13)) &* 1_274_126_177
+                    hash ^= hash >> 16
+                    return Double(hash % 1_000) / 1_000
+                }
+                let coarse = noise(Int((Double(x) / 37).rounded(.down)), Int((Double(y) / 29).rounded(.down)))
+                let fine = noise(Int((Double(x) / 7).rounded(.down)) + 9_000, Int((Double(y) / 7).rounded(.down)))
+                let v = UInt8(max(30, min(180, 40 + 100 * coarse + 35 * fine)))
                 return (v, UInt8(max(0, Int(v) - 12)), UInt8(min(255, Int(v) + 8)))
             }
         }
-        let part1 = try await Self.movie(name: "split-st-room1", size: size, seconds: 2, tone: 440, amplitude: 8_000, paint: room(shift: 0))
-        let part2 = try await Self.movie(name: "split-st-room2", size: size, seconds: 2, tone: 660, amplitude: 8_000, paint: room(shift: 18))
+        let part1 = try await Self.movie(name: "split-st-blot1", size: size, seconds: 2, tone: 440, amplitude: 8_000, paint: room(shift: 0))
+        let part2 = try await Self.movie(name: "split-st-blot2", size: size, seconds: 2, tone: 660, amplitude: 8_000, paint: room(shift: 18))
         if let a = await SplitAligner.firstFrame(of: part1), let b = await SplitAligner.firstFrame(of: part2) {
             lines.append("INFO vision 270 · \(SplitAligner.raw(part1: a, live: b, width: 270))")
             lines.append("INFO vision full · \(SplitAligner.raw(part1: a, live: b, width: nil))")
