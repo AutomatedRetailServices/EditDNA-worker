@@ -1,41 +1,30 @@
-B24UI    48.5 PASS length = part 2 · 7.00 s
-B24UI    48.5 PASS left is part 1 at 1 s · R 132 B 0
-B24UI    48.5 PASS right is part 2 · B 255 R 1
-B24UI    48.5 PASS no line at the seam (smooth change)
-B24UI    48.5 PASS no dark or bright stripe at the seam
-B24UI    48.5 PASS soft edge ≈ 60 px at 1080 · 12 px of 360
-B24UI    48.5 PASS part 1 holds its last frame · R 233 ≈ 227
-B24UI    48.5 PASS both voices heard · 440 Hz 0.122 · 660 Hz 0.146
-B24UI    48.5 PASS voices at an even level · ratio 0.83 (before: 0.25)
-B24UI    48.5 PASS only part 2's sound after part 1 ends · 440 0.0000 · 660 0.1465
-B24UI    48.5 FAIL aligner measured the shift · x 0.737 (expected 0.050) y 0.000
-B24UI    48.5 PASS a 5% move is flagged (> 2%)
-B24UI    48.5 FAIL shift applied: part 1 lines up with part 2 · square centre - (part 2: 97.5; without the fix: 79.5)
-B24UI    48.5 PASS Pro blend runs · 7.0 s video in 39.8 s
-B24UI    48.6 PASS self-test finished
-B24UI    48.6 FAIL all compositor checks pass · FAIL aligner measured the shift · x 0.737 (expected 0.050) y 0.000 ; FAIL shift applied: part 1 lines up with part 2 · square centre - (part 2: 97.5; without the fix: 79.5)
-B24UI    48.6 FAILURES: all compositor checks pass
-B24UI     4.6 PASS camera_split shows cameraSplit
-B24UI     4.8 camera_split: Flip | Flash | Grid | Mirror | Split | ≡ | Script | Upload
-B24UI     9.9 PASS split_setup shows splitStart
-B24UI    10.2 split_setup: Split screen | Record yourself twice. We put both takes together, side by side. | Left / Right, Best for question & answer, “me vs me” or two opinions. | Record | Left / Right | Best for question & answer, “me vs me” or two opinions. | Tips | Put your phone on a stand — don't move it | Part 1: stay on the LEFT · Part 2: stay on the RIGHT | Don't cross the middle | When you finish talking, stay and react | Use headphones for part 2
-B24UI    15.3 PASS split_part1 shows splitRecBadge
-B24UI    15.4 split_part1: Part 1 of 2 | REC 0:06 · Part 1 | Stay on the LEFT | Flip | Script
-B24UI    20.5 PASS split_part1_ready shows splitRecordPart2
-B24UI    20.5 split_part1_ready: Part 1 of 2 | Part 1 · 0:08 | Now record part 2 | Part 1 plays as a ghost while you record. Stay on the RIGHT.
-B24UI    25.7 PASS split_part2 shows splitMoved
-B24UI    25.8 split_part2: Part 2 of 2 | Now stay on the RIGHT | Your phone moved — line it up with the ghost | Use headphones to hear part 1 | Script
-B24UI    31.0 PASS split_joining shows splitJoining
-B24UI    31.1 split_joining: Joining your video… | 42%
-B24UI    36.1 PASS split_result shows splitUse
-B24UI    36.2 split_result: Your split video | Back
-B24UI    37.3 FAILURES: none
-B24UI     5.0 PASS Split on the Record camera
-B24UI     6.9 PASS Split screen opens
-B24UI     6.9 PASS title Split screen
-B24UI     7.0 PASS Left / Right option
-B24UI     8.8 PASS part 1 camera opens
-B24UI     8.8 PASS Part 1 of 2
-B24UI     8.9 PASS Stay on the LEFT label
-B24UI    11.1 PASS ✕ goes back to Record
-B24UI    11.1 FAILURES: none
+B24UI    63.0 PASS length = part 2 · 7.00 s
+B24UI    63.0 PASS left is part 1 at 1 s · R 132 B 0
+B24UI    63.0 PASS right is part 2 · B 255 R 1
+B24UI    63.0 PASS no line at the seam (smooth change)
+B24UI    63.0 PASS no dark or bright stripe at the seam
+B24UI    63.0 PASS soft edge ≈ 60 px at 1080 · 12 px of 360
+B24UI    63.0 PASS part 1 holds its last frame · R 233 ≈ 227
+B24UI    63.0 PASS both voices heard · 440 Hz 0.122 · 660 Hz 0.146
+B24UI    63.0 PASS voices at an even level · ratio 0.83 (before: 0.25)
+B24UI    63.0 PASS only part 2's sound after part 1 ends · 440 0.0000 · 660 0.1465
+B24UI    63.0 FAIL aligner measured the shift
+B24UI    63.0 PASS Pro blend runs · 7.0 s video in 52.9 s
+B24UI    63.2 PASS self-test finished
+B24UI    63.2 FAIL all compositor checks pass · FAIL aligner measured the shift
+B24UI    63.2 FAILURES: all compositor checks pass
+B24UI     5.3 PASS camera_split shows cameraSplit
+B24UI     5.5 camera_split: Flip | Flash | Grid | Mirror | Split | ≡ | Script | Upload
+B24UI    10.6 PASS split_setup shows splitStart
+B24UI    10.8 split_setup: Split screen | Record yourself twice. We put both takes together, side by side. | Left / Right, Best for question & answer, “me vs me” or two opinions. | Record | Left / Right | Best for question & answer, “me vs me” or two opinions. | Tips | Put your phone on a stand — don't move it | Part 1: stay on the LEFT · Part 2: stay on the RIGHT | Don't cross the middle | When you finish talking, stay and react | Use headphones for part 2
+B24UI    16.1 PASS split_part1 shows splitRecBadge
+B24UI    16.2 split_part1: Part 1 of 2 | REC 0:06 · Part 1 | Stay on the LEFT | Flip | Script
+B24UI    21.5 PASS split_part1_ready shows splitRecordPart2
+B24UI    21.5 split_part1_ready: Part 1 of 2 | Part 1 · 0:08 | Now record part 2 | Part 1 plays as a ghost while you record. Stay on the RIGHT.
+B24UI    26.7 PASS split_part2 shows splitMoved
+B24UI    26.8 split_part2: Part 2 of 2 | Now stay on the RIGHT | Your phone moved — line it up with the ghost | Use headphones to hear part 1 | Script
+B24UI    31.9 PASS split_joining shows splitJoining
+B24UI    32.0 split_joining: Joining your video… | 42%
+B24UI    37.1 PASS split_result shows splitUse
+B24UI    37.1 split_result: Your split video | Back
+B24UI    38.3 FAILURES: none
