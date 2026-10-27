@@ -1,4 +1,0 @@
-audio_session_ready category=Playback mode=MoviePlayback output=Speaker
-video_volume=1.00
-video_clip
-video_volume=1.00
