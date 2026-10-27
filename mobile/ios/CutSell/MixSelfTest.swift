@@ -7,6 +7,8 @@ import Foundation
 /// that Mute on one part silences only that part (PO 27 Oct: on the iPhone the voice kept playing).
 enum MixSelfTest {
     static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("-CutSellMixTest") }
+    /// What went wrong making the movie (shown to the probe instead of the loudness).
+    @MainActor static var problem = ""
 
     /// A small movie with a steady tone: video 160x160 at 10 fps, AAC mono 44.1 kHz.
     static func makeMovie(seconds: Double) async throws -> URL {

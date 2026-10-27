@@ -1400,10 +1400,15 @@ final class Build24UITests: XCTestCase {
         app.launch()
         let meter = element("mixTestLoudness")
         func levels() -> [Int] {
+            guard meter.exists else { return [] }
             let text = (meter.label.isEmpty ? (meter.value as? String ?? "") : meter.label)
             return text.split(separator: " ").compactMap { Int($0.split(separator: ":").last ?? "") }
         }
-        check(wait(60) { levels().count >= 30 }, "preview mix measured", meter.label)
+        let measured = wait(60) { levels().count >= 30 }
+        log("meter: exists=\(meter.exists) label=\(meter.exists ? meter.label : "-") texts=\(screenTexts())")
+        if !measured { shot("mix_not_measured") }
+        check(measured, "preview mix measured")
+        guard measured else { done(); return }
         let before = levels()
         log("before mute: \(before)")
         check(before.prefix(6).allSatisfy { $0 > -30 }, "part 1 plays before mute")

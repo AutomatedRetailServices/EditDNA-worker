@@ -78,7 +78,8 @@ struct EditorV4View: View {
             Color(hex: 0x050814).ignoresSafeArea()
             #if DEBUG
             if MixSelfTest.enabled {
-                Text(verbatim: playback.mixTestLoudness.isEmpty ? "pending" : playback.mixTestLoudness)
+                Text(verbatim: !playback.mixTestLoudness.isEmpty ? playback.mixTestLoudness
+                     : (MixSelfTest.problem.isEmpty ? "pending · \(playback.message ?? "")" : MixSelfTest.problem))
                     .font(.system(size: 2)).opacity(0.05)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .accessibilityIdentifier("mixTestLoudness")

@@ -534,7 +534,13 @@ private final class SampleEditorHolder: ObservableObject {
             // A generated 38 s tone movie as the cut's source (no user media), so the preview has real sound.
             let draft = JSONValue.object(object)
             Task { @MainActor in
-                guard let url = try? await MixSelfTest.makeMovie(seconds: 38) else { return }
+                let url: URL
+                do { url = try await MixSelfTest.makeMovie(seconds: 38) } catch {
+                    MixSelfTest.problem = "movie: \(error)"
+                    model.snapshot = DraftSnapshot(projectID: "sample", userID: "sample", revision: 1, draft: draft, sources: [])
+                    self.model = model
+                    return
+                }
                 model.snapshot = DraftSnapshot(projectID: "sample", userID: "sample", revision: 1, draft: draft,
                                                sources: [.object(["source_asset_id": .string("s1"),
                                                                   "playback_url": .string(url.absoluteString)])])
