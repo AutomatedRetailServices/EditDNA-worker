@@ -1376,7 +1376,7 @@ final class Build24UITests: XCTestCase {
         let panel = element("volumePanel")
         check(panel.waitForExistence(timeout: 5), "Volume panel")
         log("panel texts: \(screenTexts())")
-        check(app.staticTexts["Selected clip"].exists, "Volume says Selected clip (not Whole video)")
+        check(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Selected part'")).firstMatch.exists, "Volume says Selected part (not Whole video)")
         shot("vol_panel_selected")
         element("volumeMute").tap(); pause(1)
         let states = (0..<min(clips.count, 5)).map { "\(clips.element(boundBy: $0).value ?? "")" }

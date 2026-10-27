@@ -1116,7 +1116,7 @@ private struct ClipBlockV4: View {
         }
         .frame(width: width, height: 50)
         .clipShape(RoundedRectangle(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7).stroke(isSelected ? CS.accent : Color(fixed: 0xFFFFFF), lineWidth: isSelected ? 2 : 1))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(isSelected ? CS.accent : Color(fixed: 0xFFFFFF), lineWidth: isSelected ? 3 : 1))
         .overlay {
             if isSelected {
                 HStack {

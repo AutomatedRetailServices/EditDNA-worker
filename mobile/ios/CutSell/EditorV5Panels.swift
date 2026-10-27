@@ -32,7 +32,7 @@ enum EditorPanelKind: Equatable {
         switch self {
         case .overlayAdd: return 112
         case .overlay: return isVideoOverlay ? 226 : 214
-        case .volume: return 176
+        case .volume: return 200
         case .speed: return 112
         case .voice: return 176   // Figma 1128:272
         case .sound: return 124
@@ -374,9 +374,17 @@ struct VolumePanelV5: View {
     let onClose: () -> Void
     @State private var value: Double = 1
 
+    /// "Selected part · 0:04–0:09"
+    private var partLabel: String {
+        guard case .video(let id) = target,
+              let w = EditorTracks.clipWindows(model).first(where: { $0.clipID == id }) else { return "Selected clip" }
+        func t(_ s: Double) -> String { let v = Int(s.rounded()); return "\(v / 60):" + String(format: "%02d", v % 60) }
+        return "Selected part · \(t(w.start))–\(t(w.end))"
+    }
+
     var body: some View {
         let muted = model.isMuted(target)
-        PanelCardV5(title: "Volume", subtitle: target == .whole ? "Whole video" : "Selected clip", onClose: onClose, accessory: {
+        PanelCardV5(title: "Volume", subtitle: target == .whole ? "Whole video" : partLabel, onClose: onClose, accessory: {
             PillButtonV5(title: muted ? "Unmute" : "Mute", systemImage: muted ? "speaker.slash.fill" : "speaker.wave.2",
                          isOn: muted) {
                 model.setMuted(target, !muted)
@@ -392,6 +400,12 @@ struct VolumePanelV5: View {
                     .accessibilityIdentifier("volumePercent")
             }
             .padding(.top, 8)
+            // PO 27 Oct (like CapCut): nothing selected = the whole video; a part tapped on the timeline = only that part.
+            Text(L10n.tr(target == .whole ? "Tap a part of the video on the timeline to change only that part."
+                                          : "Only this part changes. Tap it again to change the whole video."))
+                .font(.system(size: 12)).foregroundStyle(CS.wiSecondary)
+                .padding(.top, 6)
+                .accessibilityIdentifier("volumeHint")
             if !model.cleanKeys(for: target).isEmpty {
                 CleanUpRowV5(model: model, target: target).padding(.top, 8)
             }

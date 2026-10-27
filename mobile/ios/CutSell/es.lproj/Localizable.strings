@@ -788,6 +788,7 @@
 "One video" = "Un video";
 "One video per day, with reminders" = "Un video por día, con recordatorios";
 "One video → one edit." = "Un video → una edición.";
+"Only this part changes. Tap it again to change the whole video." = "Solo cambia esta parte. Tócala otra vez para cambiar todo el video.";
 "Only videos can go on this track." = "En esta pista solo van videos.";
 "Opacity" = "Opacidad";
 "Open CutSell to review and export it." = "Abre CutSell para revisarlo y exportarlo.";
@@ -1078,6 +1079,10 @@
 "Select your videos, then pick the caption style, Auto Zoom AI and Overlap audio." = "Selecciona tus videos y elige el estilo de subtítulos, Auto Zoom IA y Superponer audio.";
 "Selected Photos" = "Fotos elegidas";
 "Selected clip" = "Clip seleccionado";
+"Selected part · %@–%@" = "Parte seleccionada · %1$@–%2$@";
+"Selected part · %@–%lld" = "Parte seleccionada · %1$@–%2$lld";
+"Selected part · %lld–%@" = "Parte seleccionada · %1$lld–%2$@";
+"Selected part · %lld–%lld" = "Parte seleccionada · %1$lld–%2$lld";
 "Selected video" = "Video seleccionado";
 "Send feedback tied to the edit" = "Envía comentarios sobre la edición";
 "Send report" = "Enviar reporte";
@@ -1183,6 +1188,7 @@
 "Tap Sales Mix in Create or New Sales Mix in Plan, then choose the product." = "Toca Sales Mix en Crear o Nuevo Sales Mix en Plan y elige el producto.";
 "Tap a caption to change its text, style or position." = "Toca un subtítulo para cambiar su texto, estilo o posición.";
 "Tap a clip to swap takes, trim, split, edit captions or adjust audio." = "Toca un clip para cambiar la toma, recortar, dividir, editar subtítulos o ajustar el audio.";
+"Tap a part of the video on the timeline to change only that part." = "Toca una parte del video en la línea de tiempo para cambiar solo esa parte.";
 "Tap a track to select it, then Split or Delete at the white line. Undo and Redo sit above the timeline." = "Toca una pista para seleccionarla y luego Dividir o Eliminar en la línea blanca. Deshacer y Rehacer están encima de la línea de tiempo.";
 "Tap a track to select it; Split and Delete act on the selected track at the white line." = "Toca una pista para seleccionarla; Dividir y Eliminar actúan sobre esa pista en la línea blanca.";
 "Tap one to hear it" = "Toca uno para escucharlo";
