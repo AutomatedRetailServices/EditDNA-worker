@@ -1922,6 +1922,14 @@ final class DraftEditorViewModel: ObservableObject {
             // Overlays never run past the end of the cut (the server refuses such a draft).
             let edited = Self.fitOverlaysToCut(built)
             if edited == base.draft { return true }   // nothing changed: nothing to save
+            #if DEBUG
+            // Design screenshots / probes on the sample cut (no server): keep the edit on this iPhone.
+            if session.userID == "sample" {
+                snapshot = DraftSnapshot(projectID: base.projectID, userID: base.userID, revision: base.revision + 1,
+                                         draft: edited, sources: base.sources)
+                return true
+            }
+            #endif
             isSaving = true
             let outcome = await put(edited, over: base)
             isSaving = false

@@ -1384,6 +1384,11 @@ final class Build24UITests: XCTestCase {
         check(states.first?.contains("muted") == true, "the selected part is muted")
         check(states.dropFirst().allSatisfy { !$0.contains("muted") }, "the other parts are not muted")
         shot("vol_after_mute")
+        // Nothing selected: the panel is for the whole video.
+        clips.element(boundBy: 0).tap(); pause(1)
+        log("after deselect: \(screenTexts())")
+        check(app.staticTexts["Whole video"].exists, "nothing selected → Whole video")
+        shot("vol_whole_video")
         done()
     }
 
