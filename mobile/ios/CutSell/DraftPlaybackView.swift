@@ -594,25 +594,46 @@ final class DraftPlaybackController: ObservableObject {
 
     /// Base sound volume over time: each clip's level, with a -12 dB dip (0.12 s ramps) under every
     /// ducking voice.
+    ///
+    /// Every stretch is written as an explicit ramp over its own time range (a constant level is a ramp
+    /// from v to v). Bare `setVolume(_:at:)` points are NOT steps on iOS: the mix glides from one point
+    /// to the next, so a muted part faded up from silence to full volume across its whole length and
+    /// the creator still heard it (PO 27 Oct, iPhone recording; measured by testVolumeMixAudio).
     static func applyBaseVolumes(_ parameters: AVMutableAudioMixInputParameters,
                                  clips: [(start: Double, end: Double, volume: Float)],
                                  ducks: [(Double, Double)]) {
-        func level(at time: Double) -> Float { clips.first { time >= $0.start && time < $0.end }?.volume ?? clips.last?.volume ?? 1 }
         let dip: Float = 0.25   // -12 dB
         let ramp = 0.12
-        func cm(_ seconds: Double) -> CMTime { CMTime(seconds: max(0, seconds), preferredTimescale: 600) }
-        func ducked(_ time: Double) -> Bool { ducks.contains { time >= $0.0 && time < $0.1 } }
-        for clip in clips {
-            parameters.setVolume(clip.volume * (ducked(clip.start) ? dip : 1), at: cm(clip.start))
+        func cm(_ seconds: Double) -> CMTime { CMTime(seconds: max(0, seconds), preferredTimescale: 44_100) }
+        // The ducking factor over time (1 = not ducked), linear inside each ramp.
+        let shapes: [(start: Double, down: Double, up: Double, end: Double)] = ducks.compactMap { start, end in
+            guard end - start > 0.05 else { return nil }
+            let r = min(ramp, (end - start) / 2)
+            return (start, start + r, max(start + r, end - ramp), end)
         }
-        for (start, end) in ducks where end - start > 0.05 {
-            let v = level(at: start)
-            parameters.setVolumeRamp(fromStartVolume: v, toEndVolume: v * dip,
-                                     timeRange: CMTimeRange(start: cm(start), duration: cm(min(ramp, (end - start) / 2))))
-            let back = max(start + min(ramp, (end - start) / 2), end - ramp)
-            let w = level(at: back)
-            parameters.setVolumeRamp(fromStartVolume: w * dip, toEndVolume: w,
-                                     timeRange: CMTimeRange(start: cm(back), duration: cm(end - back)))
+        func duck(_ t: Double) -> Float {
+            var factor: Float = 1
+            for shape in shapes where t >= shape.start && t <= shape.end {
+                let f: Float
+                if t < shape.down { f = 1 - (1 - dip) * Float((t - shape.start) / max(0.0001, shape.down - shape.start)) }
+                else if t <= shape.up { f = dip }
+                else { f = dip + (1 - dip) * Float((t - shape.up) / max(0.0001, shape.end - shape.up)) }
+                factor = min(factor, f)
+            }
+            return factor
+        }
+        let sorted = clips.sorted { $0.start < $1.start }
+        guard let first = sorted.first, let last = sorted.last else { return }
+        func level(_ t: Double) -> Float { sorted.last { t >= $0.start }?.volume ?? first.volume }
+        // Every point where the level or the ducking can change; between two of them the volume is a line.
+        var points = Set<Double>()
+        for clip in sorted { points.insert(clip.start); points.insert(clip.end) }
+        for shape in shapes { [shape.start, shape.down, shape.up, shape.end].forEach { points.insert($0) } }
+        let times = points.filter { $0 >= first.start && $0 <= last.end }.sorted()
+        for (a, b) in zip(times, times.dropFirst()) where b - a > 0.0005 {
+            let base = level((a + b) / 2)
+            parameters.setVolumeRamp(fromStartVolume: base * duck(a), toEndVolume: base * duck(b),
+                                     timeRange: CMTimeRange(start: cm(a), end: cm(b)))
         }
     }
 
