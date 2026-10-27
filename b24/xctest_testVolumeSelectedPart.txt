@@ -1,0 +1,15 @@
+B24UI    25.2 PASS timeline clips · 2
+B24UI    25.5 before: timelineClip_0= · timelineClip_1=
+B24UI    27.3 after tap clip 0: selected
+B24UI    31.5 PASS Volume panel
+B24UI    35.0 panel texts: Preview video is temporarily unavailable. | 00:00, / 00:38 | 00:00 | • | 00:02 | • | 00:04 | • | Volume | Selected clip | 100% | 1080p HD | 00:00 | / 00:38 | Mute | Clean up voice | Removes background noise from the voice | Split | Delete | Mirror | Rotate | Overlay | Voice Over | Audio | Volume | Speed | Captions | Style | This deal saves you money every week | Every time I walk into the store
+B24UI    35.1 PASS Volume says Selected clip (not Whole video)
+B24UI    41.7 after mute: selected · 
+B24UI    41.7 FAIL the selected part is muted
+B24UI    41.7 PASS the other parts are not muted
+B24UI    41.9 FAILURES: the selected part is muted
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:1360: error: -[CutSellUITests.Build24UITests testVolumeSelectedPart] : XCTAssertTrue failed - the selected part is muted
+Test Case '-[CutSellUITests.Build24UITests testVolumeSelectedPart]' failed (49.458 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-27 18:05:48.461.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-27 18:05:48.462.
+Test Suite 'Selected tests' failed at 2026-10-27 18:05:48.462.

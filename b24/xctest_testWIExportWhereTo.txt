@@ -1,7 +1,0 @@
-B24UI    23.4 PASS WHERE TO? Save to Photos · Add to Plan
-B24UI    38.4 PASS Saved to Photos · Share · Done
-B24UI    38.6 FAILURES: none
-Test Case '-[CutSellUITests.Build24UITests testWIExportWhereTo]' passed (38.681 seconds).
-Test Suite 'Build24UITests' passed at 2026-10-26 21:39:14.103.
-Test Suite 'CutSellUITests.xctest' passed at 2026-10-26 21:39:14.105.
-Test Suite 'Selected tests' passed at 2026-10-26 21:39:14.105.
