@@ -1,10 +1,12 @@
-B24UI    25.2 PASS timeline clips · 2
-B24UI    25.5 before: timelineClip_0= · timelineClip_1=
-B24UI    27.3 after tap clip 0: selected
-B24UI    31.5 PASS Volume panel
-B24UI    35.0 panel texts: Preview video is temporarily unavailable. | 00:00, / 00:38 | 00:00 | • | 00:02 | • | 00:04 | • | Volume | Selected clip | 100% | 1080p HD | 00:00 | / 00:38 | Mute | Clean up voice | Removes background noise from the voice | Split | Delete | Mirror | Rotate | Overlay | Voice Over | Audio | Volume | Speed | Captions | Style | This deal saves you money every week | Every time I walk into the store
-B24UI    35.1 PASS Volume says Selected clip (not Whole video)
-B24UI    41.7 after mute: selected · 
-B24UI    41.7 FAIL the selected part is muted
-B24UI    41.7 PASS the other parts are not muted
-B24UI    41.9 FAILURES: the selected part is muted
+B24UI    20.8 PASS timeline clips · 2
+B24UI    21.1 before: timelineClip_0= · timelineClip_1=
+B24UI    22.6 after tap clip 0: selected
+B24UI    26.2 PASS Volume panel
+B24UI    28.2 panel texts: Preview video is temporarily unavailable. | 00:00, / 00:38 | 00:00 | • | 00:02 | • | 00:04 | • | Volume | Selected clip | 100% | 1080p HD | 00:00 | / 00:38 | Mute | Clean up voice | Removes background noise from the voice | Split | Delete | Mirror | Rotate | Overlay | Voice Over | Audio | Volume | Speed | Captions | Style | This deal saves you money every week | Every time I walk into the store
+B24UI    28.3 PASS Volume says Selected clip (not Whole video)
+B24UI    31.4 after mute: selected muted · 
+B24UI    31.4 PASS the selected part is muted
+B24UI    31.4 PASS the other parts are not muted
+B24UI    35.6 after deselect: Preview video is temporarily unavailable. | 00:00, / 00:38 | 00:00 | • | 00:02 | • | 00:04 | • | Volume | Whole video | 100% | 1080p HD | 00:00 | / 00:38 | Mute | Clean up voice | Removes background noise from the voice | Split | Delete | Mirror | Rotate | Overlay | Voice Over | Audio | Volume | Speed | Captions | Style | This deal saves you money every week | Every time I walk into the store
+B24UI    35.6 PASS nothing selected → Whole video
+B24UI    35.8 FAILURES: none
