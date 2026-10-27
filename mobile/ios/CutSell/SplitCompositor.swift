@@ -50,7 +50,9 @@ enum SplitAligner {
         do { try handler.perform([request]) } catch { return nil }
         guard let observation = request.results?.first as? VNImageTranslationAlignmentObservation else { return nil }
         let t = observation.alignmentTransform
-        return SplitOffset(x: Double(t.tx) / Double(floating.width), y: Double(t.ty) / Double(floating.height))
+        let offset = SplitOffset(x: Double(t.tx) / Double(floating.width), y: Double(t.ty) / Double(floating.height))
+        // A quarter of the frame or more is not a nudged phone: Vision found no real match.
+        return offset.magnitude < 0.25 ? offset : nil
     }
 
     private static func small(_ image: CIImage, width: CGFloat) -> CGImage? {

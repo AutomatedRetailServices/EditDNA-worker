@@ -188,7 +188,7 @@ struct SplitCloneView: View {
                 .allowsHitTesting(false)
                 .accessibilityIdentifier("splitGhost")
             }
-            MiddleGuide().ignoresSafeArea().allowsHitTesting(false)
+            MiddleGuide().padding(.top, 64).ignoresSafeArea(edges: .bottom).allowsHitTesting(false)
 
             VStack(spacing: 0) {
                 topBar(title: isPart2 ? "Part 2 of 2" : "Part 1 of 2", dark: true, enabled: !camera.isRecording) {
@@ -197,11 +197,12 @@ struct SplitCloneView: View {
                 if camera.isRecording || (isPreview && step == .part1) {
                     recBadge(part: isPart2 ? 2 : 1).padding(.top, 8)
                 }
-                HStack(alignment: .top) {
-                    if isPart2 { Spacer() }
+                // The label sits in the middle of its own half.
+                HStack(spacing: 0) {
+                    if isPart2 { Color.clear.frame(maxWidth: .infinity, maxHeight: 1) }
                     sideLabel(isPart2 ? "Now stay on the RIGHT" : "Stay on the LEFT")
                         .frame(maxWidth: .infinity)
-                    if !isPart2 { Spacer() }
+                    if !isPart2 { Color.clear.frame(maxWidth: .infinity, maxHeight: 1) }
                 }
                 .padding(.top, 14)
                 if isPart2 && !camera.isRecording {
@@ -368,7 +369,7 @@ struct SplitCloneView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             if isPreview { PreviewRoom(side: .left).ignoresSafeArea() } else { PlayerLayerView(player: review, fill: true).ignoresSafeArea() }
-            MiddleGuide().ignoresSafeArea().allowsHitTesting(false)
+            MiddleGuide().padding(.top, 64).ignoresSafeArea(edges: .bottom).allowsHitTesting(false)
             VStack(spacing: 0) {
                 topBar(title: "Part 1 of 2", dark: true, enabled: true) { onClose() }
                 HStack {

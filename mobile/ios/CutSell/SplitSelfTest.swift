@@ -92,11 +92,22 @@ final class SplitSelfTest: ObservableObject {
 
     private func shift() async throws {
         let size = CGSize(width: 360, height: 640)
-        func square(at x0: Int) -> (Int, Int, Int) -> (UInt8, UInt8, UInt8) {
-            { _, x, y in (x >= x0 && x < x0 + 40 && y >= 300 && y < 340) ? (255, 255, 255) : (110, 110, 110) }
+        // A textured "room" (like a real one) with a white square; in part 2 the whole picture is 18 px to
+        // the right, as if the phone had been nudged.
+        func room(shift: Int) -> (Int, Int, Int) -> (UInt8, UInt8, UInt8) {
+            { _, x0, y in
+                let x = x0 - shift
+                if x >= 60 && x < 100 && y >= 300 && y < 340 { return (255, 255, 255) }
+                let wave = 35 * sin(Double(x) / 9) * cos(Double(y) / 13) + 20 * sin(Double(x + 2 * y) / 23)
+                var hash = UInt32(truncatingIfNeeded: (x &* 73_856_093) ^ (y &* 19_349_663))
+                hash = (hash ^ (hash >> 13)) &* 1_274_126_177
+                let grain = Double(hash % 31) - 15
+                let v = UInt8(max(30, min(180, 105 + wave + grain)))
+                return (v, UInt8(max(0, Int(v) - 12)), UInt8(min(255, Int(v) + 8)))
+            }
         }
-        let part1 = try await Self.movie(name: "split-st-sq1", size: size, seconds: 2, tone: 440, amplitude: 8_000, paint: square(at: 60))
-        let part2 = try await Self.movie(name: "split-st-sq2", size: size, seconds: 2, tone: 660, amplitude: 8_000, paint: square(at: 78))
+        let part1 = try await Self.movie(name: "split-st-room1", size: size, seconds: 2, tone: 440, amplitude: 8_000, paint: room(shift: 0))
+        let part2 = try await Self.movie(name: "split-st-room2", size: size, seconds: 2, tone: 660, amplitude: 8_000, paint: room(shift: 18))
         guard let first1 = await SplitAligner.firstFrame(of: part1), let first2 = await SplitAligner.firstFrame(of: part2),
               let offset = SplitAligner.offset(part1: first1, live: first2) else {
             pass(false, "aligner measured the shift"); return
@@ -109,7 +120,7 @@ final class SplitSelfTest: ObservableObject {
         let still = try await SplitCompositor.join(part1: part1, part2: part2, offset: .zero, blend: .basic)
         func centre(_ url: URL) async -> Double? {
             guard let row = await Self.row(of: url, at: 0.5, y: 320) else { return nil }
-            let bright = (0..<row.count / 2).filter { row[$0].r > 200 }
+            let bright = (0..<row.count / 2).filter { row[$0].r > 215 && row[$0].g > 215 && row[$0].b > 215 }
             return bright.isEmpty ? nil : Double(bright.reduce(0, +)) / Double(bright.count)
         }
         let moved = await centre(joined), unmoved = await centre(still)
