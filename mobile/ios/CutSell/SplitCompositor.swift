@@ -55,6 +55,20 @@ enum SplitAligner {
         return offset.magnitude < 0.25 ? offset : nil
     }
 
+    #if DEBUG
+    /// Probe only: Vision's raw answer for two images at `width` (nil = full size).
+    static func raw(part1: CIImage, live: CIImage, width: CGFloat?) -> String {
+        let w1 = width ?? part1.extent.width
+        guard let floating = small(part1, width: w1), let reference = small(live, width: w1) else { return "no images" }
+        let request = VNTranslationalImageRegistrationRequest(targetedCGImage: floating, options: [:])
+        let handler = VNImageRequestHandler(cgImage: reference, options: [:])
+        do { try handler.perform([request]) } catch { return "error \(error)" }
+        guard let o = request.results?.first else { return "no result" }
+        let t = o.alignmentTransform
+        return "w \(floating.width)x\(floating.height) a \(t.a) b \(t.b) c \(t.c) d \(t.d) tx \(t.tx) ty \(t.ty) conf \(o.confidence)"
+    }
+    #endif
+
     private static func small(_ image: CIImage, width: CGFloat) -> CGImage? {
         let extent = image.extent
         guard extent.width > 1, extent.height > 1 else { return nil }

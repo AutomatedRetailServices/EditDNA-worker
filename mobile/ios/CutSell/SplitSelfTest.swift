@@ -108,6 +108,12 @@ final class SplitSelfTest: ObservableObject {
         }
         let part1 = try await Self.movie(name: "split-st-room1", size: size, seconds: 2, tone: 440, amplitude: 8_000, paint: room(shift: 0))
         let part2 = try await Self.movie(name: "split-st-room2", size: size, seconds: 2, tone: 660, amplitude: 8_000, paint: room(shift: 18))
+        if let a = await SplitAligner.firstFrame(of: part1), let b = await SplitAligner.firstFrame(of: part2) {
+            lines.append("INFO vision 270 · \(SplitAligner.raw(part1: a, live: b, width: 270))")
+            lines.append("INFO vision full · \(SplitAligner.raw(part1: a, live: b, width: nil))")
+            lines.append("INFO vision same · \(SplitAligner.raw(part1: a, live: a, width: 270))")
+            lines.append("INFO extents \(a.extent) \(b.extent)")
+        }
         guard let first1 = await SplitAligner.firstFrame(of: part1), let first2 = await SplitAligner.firstFrame(of: part2),
               let offset = SplitAligner.offset(part1: first1, live: first2) else {
             pass(false, "aligner measured the shift"); return
