@@ -46,7 +46,7 @@ final class SplitCaptureController: NSObject, ObservableObject {
     private func configureAudioSession() {
         session.automaticallyConfiguresApplicationAudioSession = false
         let audio = AVAudioSession.sharedInstance()
-        try? audio.setCategory(.playAndRecord, mode: .videoRecording, options: [.allowBluetoothA2DP])
+        try? audio.setCategory(.playAndRecord, mode: .videoRecording, options: [.allowBluetoothA2DP, .defaultToSpeaker])
         try? audio.setActive(true)
     }
 

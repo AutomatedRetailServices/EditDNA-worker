@@ -36,6 +36,8 @@ struct CreateCameraView: View {
     var previewMode = false
     /// Teleprompter: the product (and Mix section) this recording is for.
     var scriptContext: TeleprompterContext? = nil
+    /// Split clone (PO 27 Oct): the "Split" control, only on the Create tab's Record camera.
+    var allowsSplit = false
 
     @StateObject private var camera = CameraController()
     @State private var gate: Gate = .checking
@@ -49,6 +51,8 @@ struct CreateCameraView: View {
     @State private var editingScript = false
     @State private var countingDown = false
     @State private var railTop: CGFloat = 0
+    @State private var showingSplit = false
+    @State private var splitVideo: LocalVideo?
 
     var body: some View {
         ZStack {
@@ -101,6 +105,16 @@ struct CreateCameraView: View {
         .onAppear {
             prompter.context = scriptContext ?? TeleprompterContext()
             if prompter.openSheetNext { prompter.openSheetNext = false; editingScript = true }
+        }
+        .fullScreenCover(isPresented: $showingSplit, onDismiss: {
+            if !previewMode { camera.startSession() }
+            // The joined video goes on exactly like a recording made here.
+            if let video = splitVideo { splitVideo = nil; onRecorded(video) }
+        }) {
+            SplitCloneView(onClose: { showingSplit = false }, onUse: { video in
+                splitVideo = video
+                showingSplit = false
+            })
         }
         .fullScreenCover(isPresented: $recordingFailed) {
             CreateProblemView(
@@ -251,6 +265,28 @@ struct CreateCameraView: View {
             .buttonStyle(.plain)
             .accessibilityValue(camera.mirrorOn ? "On" : "Off")
             .accessibilityIdentifier("cameraMirror")
+            if allowsSplit {
+                Button {
+                    if torchOn { camera.setTorch(false); torchOn = false }
+                    if !previewMode { camera.stopSession() }
+                    showingSplit = true
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "rectangle.split.2x1")
+                            .font(.system(size: 27, weight: .regular))
+                            .foregroundStyle(.white)
+                            .frame(width: 36, height: 36)
+                        Text(L10n.tr("Split"))
+                            .font(CS.inter(13, .semibold))
+                            .lineLimit(1).minimumScaleFactor(0.75)
+                            .foregroundStyle(.white)
+                    }
+                    .frame(width: 62)
+                }
+                .buttonStyle(.plain)
+                .disabled(camera.isRecording)
+                .accessibilityIdentifier("cameraSplit")
+            }
             scriptRailButtons
         }
         .frame(width: 62)

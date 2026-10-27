@@ -102,7 +102,8 @@ enum SplitCompositor {
             let frame = CMTime(seconds: 1 / max(1, fps > 0 ? fps : 30), preferredTimescale: 600)
             let lastStart = CMTimeSubtract(CMTimeAdd(range1.start, d1), frame)
             try track1.insertTimeRange(CMTimeRange(start: lastStart, duration: frame), of: video1, at: d1)
-            composition.scaleTimeRange(CMTimeRange(start: d1, duration: frame), toDuration: CMTimeSubtract(d2, d1))
+            // Only part 1's track (the composition's scale would stretch part 2 and the sounds too).
+            track1.scaleTimeRange(CMTimeRange(start: d1, duration: frame), toDuration: CMTimeSubtract(d2, d1))
         }
 
         // Sound: part 2 whole, part 1 while it lasts, at an even level.
@@ -125,6 +126,10 @@ enum SplitCompositor {
         }
         let mix = AVMutableAudioMix()
         mix.inputParameters = mixInputs
+        // Exactly part 2's length (the one instruction must cover the whole composition).
+        if CMTimeCompare(composition.duration, d2) > 0 {
+            composition.removeTimeRange(CMTimeRange(start: d2, end: composition.duration))
+        }
 
         // Picture: part 2's upright size.
         let size2 = try await video2.load(.naturalSize), transform2 = try await video2.load(.preferredTransform)

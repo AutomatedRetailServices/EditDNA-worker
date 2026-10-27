@@ -1427,6 +1427,46 @@ final class Build24UITests: XCTestCase {
         done()
     }
 
+    /// PO 27 Oct · Split clone screens (sample content, no camera): one screenshot each.
+    func testSplitScreens() throws {
+        let screens: [(String, String)] = [
+            ("camera_split", "cameraSplit"), ("split_setup", "splitStart"), ("split_part1", "splitRecBadge"),
+            ("split_part1_ready", "splitRecordPart2"), ("split_part2", "splitMoved"), ("split_joining", "splitJoining"),
+            ("split_result", "splitUse"),
+        ]
+        for (screen, marker) in screens {
+            app = XCUIApplication()
+            app.launchArguments = ["-CutSellScreen", screen]
+            app.launch()
+            check(element(marker).waitForExistence(timeout: 15), "\(screen) shows \(marker)")
+            log("\(screen): \(screenTexts())")
+            shot(screen)
+            app.terminate()
+        }
+        done()
+    }
+
+    /// Record › Split opens the Split screen; Start part 1 opens the camera; ✕ goes back to Record.
+    func testSplitEntry() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["-CutSellScreen", "camera_split"]
+        app.launch()
+        check(element("cameraSplit").waitForExistence(timeout: 15), "Split on the Record camera")
+        element("cameraSplit").tap()
+        check(element("splitStart").waitForExistence(timeout: 10), "Split screen opens")
+        check(app.staticTexts["Split screen"].exists, "title Split screen")
+        check(element("splitOptionLeftRight").exists, "Left / Right option")
+        shot("entry_setup")
+        element("splitStart").tap()
+        check(element("splitStepTitle").waitForExistence(timeout: 10), "part 1 camera opens")
+        check(app.staticTexts["Part 1 of 2"].exists, "Part 1 of 2")
+        check(app.staticTexts["Stay on the LEFT"].exists, "Stay on the LEFT label")
+        shot("entry_part1")
+        element("splitClose").tap()
+        check(element("cameraSplit").waitForExistence(timeout: 10), "✕ goes back to Record")
+        done()
+    }
+
     /// PO 27 Oct · Split clone: the compositor on synthetic videos made in the app (seam, length, held
     /// frame, sound level, shift). Nothing is read from the repo.
     func testSplitCompositor() throws {
