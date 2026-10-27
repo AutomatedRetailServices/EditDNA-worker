@@ -114,6 +114,10 @@ struct DraftPlaybackView: View {
 @MainActor
 final class DraftPlaybackController: ObservableObject {
     @Published private(set) var player = AVPlayer()
+    #if DEBUG
+    /// `-CutSellMixTest`: the loudness (dBFS) of each second of the preview's mix, for the probe.
+    @Published var mixTestLoudness = ""
+    #endif
     @Published private(set) var isPlaying = false
     @Published private(set) var isBuilding = false
     @Published private(set) var isReady = false
@@ -524,6 +528,14 @@ final class DraftPlaybackController: ObservableObject {
             let mix = AVMutableAudioMix()
             mix.inputParameters = mixInputs
             item.audioMix = mix
+            #if DEBUG
+            if MixSelfTest.enabled {
+                let measured = composition.copy() as! AVComposition
+                let levels = await MixSelfTest.loudness(of: measured, mix: mix)
+                mixTestLoudness = levels.enumerated().map { "\($0.offset):\($0.element)" }.joined(separator: " ")
+                CutSellDiagnostics.log("mix_test", ["loudness": mixTestLoudness])
+            }
+            #endif
             player.replaceCurrentItem(with: item)
             retainedCleanAssets = cleanAssets
             audioAssetCache = audioAssetCache.filter { usedAudio.contains($0.key) }   // files the new mix no longer uses

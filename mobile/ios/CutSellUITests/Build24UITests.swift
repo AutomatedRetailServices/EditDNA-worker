@@ -1392,6 +1392,36 @@ final class Build24UITests: XCTestCase {
         done()
     }
 
+    /// PO 27 Oct (iPhone recording): a part said "Muted" but its voice still played. Real sound this
+    /// time: the sample cut plays a generated tone and the probe reads the preview mix's loudness per second.
+    func testVolumeMixAudio() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["-CutSellScreen", "editor_v4_base", "-CutSellMixTest"]
+        app.launch()
+        let meter = element("mixTestLoudness")
+        func levels() -> [Int] {
+            let text = (meter.label.isEmpty ? (meter.value as? String ?? "") : meter.label)
+            return text.split(separator: " ").compactMap { Int($0.split(separator: ":").last ?? "") }
+        }
+        check(wait(60) { levels().count >= 30 }, "preview mix measured", meter.label)
+        let before = levels()
+        log("before mute: \(before)")
+        check(before.prefix(6).allSatisfy { $0 > -30 }, "part 1 plays before mute")
+        let clips = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'timelineClip_'"))
+        clips.element(boundBy: 0).tap(); pause(0.8)
+        element("tool_volume").tap(); pause(1)
+        element("volumeMute").tap()
+        let old = meter.label
+        check(wait(30) { meter.label != old && levels().count >= 30 }, "preview rebuilt after mute")
+        pause(2)
+        let after = levels()
+        log("after mute (part 0:00–0:06): \(after)")
+        shot("mix_after_mute")
+        check(after.prefix(6).allSatisfy { $0 < -60 }, "seconds 0–5 silent (the muted part)", "\(Array(after.prefix(6)))")
+        check(after.dropFirst(7).prefix(6).allSatisfy { $0 > -30 }, "seconds 7–12 still play (other part)", "\(Array(after.dropFirst(7).prefix(6)))")
+        done()
+    }
+
     /// PO 26 Oct: scheduled and posted videos are not offered again in Plan my week; posted ones live in Edits › Posted.
     func testPostedAndHidden() throws {
         launchApp(fresh: true, extra: ["-CutSellPlanMock", "-CutSellProjectsMock", "-CutSellCatalogMock"])

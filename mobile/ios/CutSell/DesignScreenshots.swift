@@ -530,6 +530,19 @@ private final class SampleEditorHolder: ObservableObject {
             object["audio_clips"] = .array([.object(["audio_id": .string("vo1"), "kind": .string("voice"), "asset_id": .string("a1"),
                                                      "start": .number(0.4), "source_in": .number(0), "source_out": .number(8)])])
         }
+        if MixSelfTest.enabled {
+            // A generated 38 s tone movie as the cut's source (no user media), so the preview has real sound.
+            let draft = JSONValue.object(object)
+            Task { @MainActor in
+                guard let url = try? await MixSelfTest.makeMovie(seconds: 38) else { return }
+                model.snapshot = DraftSnapshot(projectID: "sample", userID: "sample", revision: 1, draft: draft,
+                                               sources: [.object(["source_asset_id": .string("s1"),
+                                                                  "playback_url": .string(url.absoluteString)])])
+                model.playheadTime = 0
+                self.model = model
+            }
+            return
+        }
         model.snapshot = DraftSnapshot(projectID: "sample", userID: "sample", revision: 1, draft: .object(object), sources: [])
         model.setPreviewComposition(TimelineComposition(
             contractVersion: 1, baseEditIdentity: "sample", timelineDurationSec: 38, timelineRevisionIdentity: "r1",

@@ -76,6 +76,14 @@ struct EditorV4View: View {
     private var content: some View {
         ZStack {
             Color(hex: 0x050814).ignoresSafeArea()
+            #if DEBUG
+            if MixSelfTest.enabled {
+                Text(verbatim: playback.mixTestLoudness.isEmpty ? "pending" : playback.mixTestLoudness)
+                    .font(.system(size: 2)).opacity(0.05)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .accessibilityIdentifier("mixTestLoudness")
+            }
+            #endif
             GeometryReader { geo in
                 // The video keeps its size whatever is open below it (Figma: 266 x 472 on a 390 x 844
                 // iPhone); the timeline, a menu or the voice-over panel use the space under the controls.
