@@ -1360,6 +1360,33 @@ final class Build24UITests: XCTestCase {
         XCTAssertTrue(failures.isEmpty, failures.joined(separator: " | "))
     }
 
+    /// PO 27 Oct: Volume / Mute act on the selected part only (CapCut); nothing selected = the whole video.
+    func testVolumeSelectedPart() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["-CutSellScreen", "editor_v4_base"]
+        app.launch()
+        pause(4)
+        let clips = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'timelineClip_'"))
+        check(clips.count >= 2, "timeline clips", "\(clips.count)")
+        log("before: " + (0..<min(clips.count, 5)).map { "\(clips.element(boundBy: $0).identifier)=\(clips.element(boundBy: $0).value ?? "")" }.joined(separator: " · "))
+        clips.element(boundBy: 0).tap(); pause(0.8)
+        log("after tap clip 0: \(clips.element(boundBy: 0).value ?? "")")
+        shot("vol_clip_selected")
+        element("tool_volume").tap(); pause(1)
+        let panel = element("volumePanel")
+        check(panel.waitForExistence(timeout: 5), "Volume panel")
+        log("panel texts: \(screenTexts())")
+        check(app.staticTexts["Selected clip"].exists, "Volume says Selected clip (not Whole video)")
+        shot("vol_panel_selected")
+        element("volumeMute").tap(); pause(1)
+        let states = (0..<min(clips.count, 5)).map { "\(clips.element(boundBy: $0).value ?? "")" }
+        log("after mute: " + states.joined(separator: " · "))
+        check(states.first?.contains("muted") == true, "the selected part is muted")
+        check(states.dropFirst().allSatisfy { !$0.contains("muted") }, "the other parts are not muted")
+        shot("vol_after_mute")
+        done()
+    }
+
     /// PO 26 Oct: scheduled and posted videos are not offered again in Plan my week; posted ones live in Edits › Posted.
     func testPostedAndHidden() throws {
         launchApp(fresh: true, extra: ["-CutSellPlanMock", "-CutSellProjectsMock", "-CutSellCatalogMock"])

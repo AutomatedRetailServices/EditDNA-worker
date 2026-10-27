@@ -403,6 +403,10 @@ struct TimelineV4: View {
                     .onTapGesture {
                         selection = selection == .video(window.clipID) ? nil : .video(window.clipID)
                     }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityIdentifier("timelineClip_\(index)")
+                    .accessibilityValue("\(isSelected ? "selected" : "")\(model.clipIsSilent(window.clipID) ? " muted" : "")")
                     .overlay(alignment: .bottomTrailing) {
                         if window.speed != 1 {
                             Text(ClipSpeed.label(window.speed))
