@@ -842,6 +842,10 @@
 "Pan" = "Mover";
 "Part %@" = "Parte %1$@";
 "Part %lld" = "Parte %1$lld";
+"Part %@–%@" = "Parte %1$@–%2$@";
+"Part %@–%lld" = "Parte %1$@–%2$lld";
+"Part %lld–%@" = "Parte %1$lld–%2$@";
+"Part %lld–%lld" = "Parte %1$lld–%2$lld";
 "Paste" = "Pegar";
 "Paste and post" = "Pega y publica";
 "Paste or write what you'll say…" = "Pega o escribe lo que vas a decir…";
@@ -1079,10 +1083,6 @@
 "Select your videos, then pick the caption style, Auto Zoom AI and Overlap audio." = "Selecciona tus videos y elige el estilo de subtítulos, Auto Zoom IA y Superponer audio.";
 "Selected Photos" = "Fotos elegidas";
 "Selected clip" = "Clip seleccionado";
-"Selected part · %@–%@" = "Parte seleccionada · %1$@–%2$@";
-"Selected part · %@–%lld" = "Parte seleccionada · %1$@–%2$lld";
-"Selected part · %lld–%@" = "Parte seleccionada · %1$lld–%2$@";
-"Selected part · %lld–%lld" = "Parte seleccionada · %1$lld–%2$lld";
 "Selected video" = "Video seleccionado";
 "Send feedback tied to the edit" = "Envía comentarios sobre la edición";
 "Send report" = "Enviar reporte";

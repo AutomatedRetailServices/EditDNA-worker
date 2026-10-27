@@ -55,7 +55,7 @@ struct PanelCardV5<Accessory: View, Content: View>: View {
             HStack(alignment: .center, spacing: 8) {
                 Text(L10n.tr(title)).font(.system(size: 17, weight: .semibold)).foregroundStyle(CS.textPrimaryF).lineLimit(1)
                 if !subtitle.isEmpty {
-                    Text(L10n.tr(subtitle)).font(.system(size: 14)).foregroundStyle(CS.textSecondaryF).lineLimit(1)
+                    Text(L10n.tr(subtitle)).font(.system(size: 14)).foregroundStyle(CS.textSecondaryF).lineLimit(1).minimumScaleFactor(0.8)
                 }
                 Spacer(minLength: 4)
                 accessory()
@@ -374,12 +374,12 @@ struct VolumePanelV5: View {
     let onClose: () -> Void
     @State private var value: Double = 1
 
-    /// "Selected part · 0:04–0:09"
+    /// "Part 0:04–0:09" (short so the time range fits next to Mute)
     private var partLabel: String {
         guard case .video(let id) = target,
               let w = EditorTracks.clipWindows(model).first(where: { $0.clipID == id }) else { return "Selected clip" }
         func t(_ s: Double) -> String { let v = Int(s.rounded()); return "\(v / 60):" + String(format: "%02d", v % 60) }
-        return "Selected part · \(t(w.start))–\(t(w.end))"
+        return "Part \(t(w.start))–\(t(w.end))"
     }
 
     var body: some View {
