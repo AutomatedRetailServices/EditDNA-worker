@@ -25,7 +25,7 @@ jobs:
         run: |
           pip install -q modal
           for since in 7d 3d 2d 24h; do
-            modal app logs cutsell-worker --since "$since" --tail 200000 --timestamps > "$RUNNER_TEMP/raw.txt" 2>&1 || true
+            modal app logs cutsell-worker --since "$since" --tail 20000 --timestamps > "$RUNNER_TEMP/raw.txt" 2>&1 || true
             n=$(wc -l < "$RUNNER_TEMP/raw.txt")
             echo "since=$since lines=$n"
             if [ "$n" -gt 50 ]; then echo "$since" > "$RUNNER_TEMP/since.txt"; break; fi
