@@ -8,6 +8,9 @@ struct PendingCutVideo: Codable, Hashable {
     /// Build 23 ("iCloud light"): the original is still being downloaded from iCloud to filePath.
     var cloudAssetID: String? = nil
     var expectedBytes: Int64? = nil
+    /// PO 28 Oct (speed): a 4K / heavy video whose cut started from its voice; its lighter copy is made in
+    /// the background and uploaded to the place reserved for it (nil on older records = upload as it is).
+    var prepareBeforeUpload: Bool? = nil
 
     /// Build 22: found again after an app update moves CutSell's folder.
     var fileURL: URL { ContainerPath.resolve(filePath) }

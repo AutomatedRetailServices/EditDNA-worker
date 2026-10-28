@@ -87,6 +87,31 @@ actor VideoPreparation {
         return PreparedVideo(url: destination, contentType: "video/mp4", wasTranscoded: true)
     }
 
+    /// PO 28 Oct (speed): whether `prepare` would make a lighter copy (4K, an unusual codec, or over ~14 Mb/s),
+    /// without making it. Such a video now starts its cut from the voice first; the copy is made afterwards,
+    /// in the background, before the video uploads (BackgroundVideoUploads).
+    func needsLighterCopy(fileURL: URL) async -> Bool {
+        guard let size = (try? FileManager.default.attributesOfItem(atPath: fileURL.path))?[.size] as? NSNumber,
+              size.int64Value > 0 else { return false }
+        let asset = AVURLAsset(url: fileURL)
+        guard let track = try? await asset.loadTracks(withMediaType: .video).first,
+              let natural = try? await track.load(.naturalSize),
+              let transform = try? await track.load(.preferredTransform),
+              let codec = try? await Self.codec(of: track),
+              let duration = try? await asset.load(.duration) else { return false }
+        let shown = natural.applying(transform)
+        let width = abs(shown.width), height = abs(shown.height)
+        let under4K = max(width, height) < 3839.5 && min(width, height) < 2159.5
+        let fineCodec = codec == kCMVideoCodecType_H264 || codec == kCMVideoCodecType_HEVC
+        let heavy = Self.isHeavy(bytes: size.int64Value, seconds: max(1, CMTimeGetSeconds(duration)))
+        return !(fineCodec && under4K && !heavy)
+    }
+
+    /// The size the storage place of such a video is reserved with before its lighter copy exists (the
+    /// server takes up to 1 GiB; the copy is always lighter than the original and under ~950 MB). The same
+    /// number every time for the same file, so the reservation is found again after a relaunch.
+    static func reservationBytes(_ originalBytes: Int64) -> Int64 { min(originalBytes, 900_000_000) }
+
     /// ~10 Mb/s for 1080p.
     static let targetBitsPerSecond: Double = 10_000_000
     /// The light copy stays under this (the server accepts up to 1 GiB).

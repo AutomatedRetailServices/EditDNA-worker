@@ -146,12 +146,38 @@ final class BackgroundVideoUploads: ObservableObject {
                         await SourceVideoCache.shared.replace(fileURL: video.fileURL, uri: start.sourceURI)
                         self?.statuses[projectID]?.phase = nil
                     }
+                    // PO 28 Oct (speed): a 4K / heavy video's cut already started from its voice; its lighter copy
+                    // is made now and uploaded to the place reserved for the video (same storage URI).
+                    var uploadURL = video.fileURL
+                    var uploadType = video.contentType
+                    var lighterCopy: URL?
+                    if video.prepareBeforeUpload == true, FileManager.default.fileExists(atPath: video.fileURL.path) {
+                        let originalBytes = ((try? FileManager.default.attributesOfItem(atPath: video.fileURL.path))?[.size] as? NSNumber)?.int64Value ?? 0
+                        let reservedPlace = try await MultipartUploadManager.shared.begin(
+                            fileURL: video.fileURL, projectID: projectID, session: session, contentType: video.contentType,
+                            knownSize: VideoPreparation.reservationBytes(originalBytes))
+                        self?.statuses[projectID]?.phase = "Making your video lighter"
+                        let prepared = try await VideoPreparation.shared.prepare(fileURL: video.fileURL, contentType: video.contentType) { fraction in
+                            Task { @MainActor in self?.statuses[projectID]?.phaseFraction = fraction }
+                        }
+                        self?.statuses[projectID]?.phase = nil
+                        let uploadBytes = prepared.wasTranscoded
+                            ? (((try? FileManager.default.attributesOfItem(atPath: prepared.url.path))?[.size] as? NSNumber)?.int64Value ?? 0)
+                            : originalBytes
+                        if prepared.wasTranscoded { lighterCopy = prepared.url; uploadURL = prepared.url; uploadType = prepared.contentType }
+                        // Not the reserved size: a new upload session to the SAME place (the server's restore).
+                        if uploadBytes != VideoPreparation.reservationBytes(originalBytes) {
+                            await MultipartUploadManager.shared.setRestore(uri: reservedPlace.sourceURI, for: uploadURL)
+                        }
+                        CutSellDiagnostics.log("prepare_after_voice", ["mb_before": String(originalBytes / 1_048_576),
+                                                                       "mb_after": String(uploadBytes / 1_048_576)])
+                    }
                     var attempt = 1
                     var result: MultipartCompleteResponse?
                     while result == nil {
                         do {
                             result = try await MultipartUploadManager.shared.upload(
-                                fileURL: video.fileURL, projectID: projectID, session: session, contentType: video.contentType,
+                                fileURL: uploadURL, projectID: projectID, session: session, contentType: uploadType,
                                 clipOrder: index
                             ) { fraction in
                                 Task { @MainActor in
@@ -172,6 +198,10 @@ final class BackgroundVideoUploads: ObservableObject {
                     }
                     guard let result else { continue }
                     try await Self.videoReady(projectID: projectID, session: session, uri: result.sourceURI, order: index)
+                    if let lighterCopy {
+                        await MultipartUploadManager.shared.finished(fileURL: lighterCopy, projectID: projectID)
+                        try? FileManager.default.removeItem(at: lighterCopy)
+                    }
                 }
                 for video in record.videos {
                     await MultipartUploadManager.shared.finished(fileURL: video.fileURL, projectID: projectID)
