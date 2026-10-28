@@ -829,8 +829,15 @@ def process(words, duration, audio_path, video_path=None, run: int = 0, scene_cu
         shown, fixes, moments, u = fix_words_and_moments(words, cut, call)
         return cut, tomas, shown, fixes, moments, u
 
+    def finish_decided(cut):
+        # The speculative finish starts from the decided cut exactly as `process` will see it: with the
+        # loose pieces already hidden (orphans), on its own copy (QA 28 Oct: it skipped this step).
+        cut = [dict(x) for x in cut]
+        orphans(cut, words)
+        return finish(cut, False, [])
+
     if mode == "review":
-        splits, info = decide_reviewed(words, float(duration), call, run, after=lambda cut: finish(cut, False, []))
+        splits, info = decide_reviewed(words, float(duration), call, run, after=finish_decided)
     else:
         splits, info = decide(words, float(duration), call, run)
     log = {"sueltos": orphans(splits, words)}

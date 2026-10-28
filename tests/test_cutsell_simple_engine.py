@@ -1044,3 +1044,34 @@ def test_a_review_that_changes_the_cut_is_followed_exactly_like_before(video, mo
     assert len(together["usage"]) == len(together_llm.steps)          # every call made is in the cost report
     kept = " ".join(c["w"] for c in together["captions"])
     assert "días" not in kept and "todos" not in kept
+
+
+def test_the_speculative_finish_hides_loose_pieces_like_the_normal_path(monkeypatch):
+    """QA 28 Oct: with a loose piece (one kept word under 2 s), the finish started early must give the same cut
+    and captions as the finish run after the reviews (the 1.2.1 path before the speed change)."""
+    monkeypatch.setenv("CUTSELL_SIMPLE_ENGINE_MODE", "review")
+    monkeypatch.setattr(se, "refine", lambda splits, audio_path, duration, words: [dict(x) for x in splits])
+    text = [("Hola chicas hoy.", 0.0), ("Mira.", 2.8), ("Esto no.", 3.6), ("Cuesta diez dolares.", 5.0)]
+    words = []
+    for line, start in text:
+        for i, w in enumerate(line.split()):
+            words.append({"w": w, "s": round(start + i * 0.4, 3), "e": round(start + i * 0.4 + 0.3, 3)})
+
+    def call(prompt):
+        text = str(prompt)
+        if "A PASS is one continuous run" in text:
+            return '{"passes":[[1,4,true]],"backbone":[1,4]}', {}
+        if "FIRST decide the TYPE" in text:
+            return '{"type":"other","hide":[],"unhide":[]}', {}
+        if "checking a FIRST CUT" in text:
+            return '{"type":"other","fixes":[]}', {}
+        if "index:word" in text:
+            return '{"fix":[],"zoom":[]}', {}
+        return json.dumps({"hide": [[3, 3, "a"]], "trim": []}), {}
+
+    early = se.process(words, 7.0, None, scene_cut_list=[], llm=call)
+    original = se.decide_reviewed
+    monkeypatch.setattr(se, "decide_reviewed", lambda *a, **kw: original(*a, **{**kw, "after": None}))
+    late = se.process(words, 7.0, None, scene_cut_list=[], llm=call)
+    assert _strip(early) == _strip(late)
+    assert "Mira." not in [c["w"] for c in early["captions"]]          # the loose piece stays hidden
