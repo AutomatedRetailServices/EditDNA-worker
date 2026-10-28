@@ -1,0 +1,88 @@
+name: CutSell perf · lighter copy uploaded to the reserved place (check)
+
+# Speed change 1 (PO 28 Oct): a heavy video starts its cut from the voice; its lighter copy is made
+# afterwards and uploaded to the SAME storage place with the existing `restore_uri`. This checks that
+# contract on the live server with one synthetic 60 s video (no real media): reserve the place with the
+# heavy file's size (never uploaded), start the cut from the voice, upload the lighter file with
+# restore_uri, "video-ready", follow-up job finishes, the draft's source points at a stored video.
+# Cost: one 60 s cut (< US$0.15). No deploy.
+
+on:
+  push:
+    branches: [perf/diagnostico]
+    paths: [.github/workflows/cutsell-perf-restore-check.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - name: Heavy and light versions of one synthetic 60 s video
+        run: |
+          brew install ffmpeg >/dev/null
+          say -v Samantha -r 165 -o "$RUNNER_TEMP/s.aiff" "Hi everyone. Today I want to show you my favorite water bottle. It keeps drinks cold for a full day. It fits in any car cup holder and the lid does not leak. It comes in six colors and the black one is my favorite. Right now it is on sale in my shop. The link is in my bio, grab yours today."
+          ffmpeg -loglevel error -y -f lavfi -i "testsrc2=s=1080x1920:r=30:d=60" -i "$RUNNER_TEMP/s.aiff" -t 60 \
+            -c:v libx265 -tag:v hvc1 -b:v 20M -preset ultrafast -pix_fmt yuv420p -c:a aac -ar 44100 -af apad "$RUNNER_TEMP/heavy.mov"
+          ffmpeg -loglevel error -y -i "$RUNNER_TEMP/heavy.mov" -c:v libx265 -tag:v hvc1 -b:v 6M -preset ultrafast -c:a copy "$RUNNER_TEMP/light.mp4"
+          ffmpeg -loglevel error -y -i "$RUNNER_TEMP/heavy.mov" -vn -c:a aac -b:a 64k -ac 1 "$RUNNER_TEMP/voice.m4a"
+          ls -la "$RUNNER_TEMP"/heavy.mov "$RUNNER_TEMP"/light.mp4 "$RUNNER_TEMP"/voice.m4a
+
+      - name: Reserve, cut from the voice, upload the lighter copy to the same place
+        run: |
+          python3 - <<'PY'
+          import json, os, time, urllib.request, concurrent.futures
+          API = "https://cutsell-api.onrender.com"; T = None; tmp = os.environ["RUNNER_TEMP"]
+          def call(m, p, b=None):
+              r = urllib.request.Request(API + p, method=m, data=None if b is None else json.dumps(b).encode(),
+                  headers={"content-type": "application/json", **({"authorization": "Bearer " + T} if T else {})})
+              try:
+                  with urllib.request.urlopen(r, timeout=300) as x: return json.load(x)
+              except urllib.error.HTTPError as e:
+                  raise SystemExit(f"{m} {p.split('?')[0]} -> {e.code} {e.read()[:300]}")
+          def put(url, data, ctype=""):
+              q = urllib.request.Request(url, data=data, method="PUT"); q.add_header("Content-Type", ctype)
+              with urllib.request.urlopen(q, timeout=600) as r: return r.headers.get("ETag")
+          s = call("POST", "/v1/auth/session"); T = s["access_token"]; u = s["user_id"]; print("::add-mask::" + T)
+          heavy = os.path.getsize(f"{tmp}/heavy.mov"); light = open(f"{tmp}/light.mp4", "rb").read(); voice = open(f"{tmp}/voice.m4a", "rb").read()
+          print("heavy MB", heavy // 1048576, "light MB", len(light) // 1048576)
+          pid = call("POST", "/v1/projects", {"user_id": u, "title": "Restore check"})["project_id"]
+          reserved = call("POST", "/v1/uploads/multipart/start", {"project_id": pid, "user_id": u, "original_name": "heavy.mov",
+                          "content_type": "video/quicktime", "size_bytes": min(heavy, 900_000_000), "part_size": 8 * 1024 * 1024})
+          pre = call("POST", "/v1/uploads/presign", {"project_id": pid, "user_id": u, "original_name": "voice-1.mp4",
+                                                    "content_type": "video/mp4", "size_bytes": len(voice)})
+          put(pre["upload_url"], voice, pre.get("content_type", "video/mp4"))
+          job = call("POST", "/v1/flow-b/jobs", {"project_id": pid, "user_id": u, "audio_overlap": True, "dialogue_overlap_enabled": True,
+                     "auto_zoom_enabled": True, "language_hint": None,
+                     "sources": [{"original_name": "heavy.mov", "uri": reserved["source_uri"], "source_order": 0, "duration_sec": 60.0,
+                                  "metadata": {"audio_uri": pre["source_uri"]}}]})
+          # the lighter copy: a NEW multipart session to the reserved place
+          st = call("POST", "/v1/uploads/multipart/start", {"project_id": pid, "user_id": u, "original_name": "light.mp4",
+                    "content_type": "video/mp4", "size_bytes": len(light), "part_size": 8 * 1024 * 1024, "restore_uri": reserved["source_uri"]})
+          assert st["source_uri"] == reserved["source_uri"], "the copy must go to the reserved place"
+          def part(k):
+              sg = call("POST", f"/v1/uploads/multipart/{st['upload_id']}/parts/{k}/presign", {"project_id": pid, "user_id": u})
+              return {"part_number": k, "etag": put(sg["upload_url"], light[(k-1)*st["part_size"]: k*st["part_size"]])}
+          with concurrent.futures.ThreadPoolExecutor(3) as pool: parts = list(pool.map(part, range(1, st["part_count"] + 1)))
+          done = call("POST", f"/v1/uploads/multipart/{st['upload_id']}/complete", {"project_id": pid, "user_id": u, "parts": parts})
+          assert done["source_uri"] == reserved["source_uri"]
+          vr = call("POST", f"/v1/projects/{pid}/video-ready", {"user_id": u, "uri": done["source_uri"], "source_order": 0})
+          for jid, name in ((job["job_id"], "cut"), (vr["job_id"], "video follow-up")):
+              t0 = time.time()
+              while True:
+                  j = call("GET", f"/v1/jobs/{jid}")
+                  if j["state"] in ("finished", "failed", "canceled") or time.time() - t0 > 600: break
+                  time.sleep(2)
+              print(f"::notice title={name}::{j['state']} {(j.get('error') or '')[:200]}")
+              assert j["state"] == "finished", f"{name}: {j['state']} {j.get('error')}"
+          snap = call("GET", f"/v1/projects/{pid}/draft?user_id={u}")
+          src = (snap.get("sources") or [{}])[0]
+          print("draft source uri is the reserved place:", src.get("uri") == reserved["source_uri"])
+          link = src.get("playback_url")
+          if link:
+              with urllib.request.urlopen(urllib.request.Request(link, headers={"Range": "bytes=0-1023"}), timeout=60) as r:
+                  print("stored video answers", r.status)
+          print("::notice title=restore check::PASS (reserved place reused; cut and follow-up finished)")
+          PY
