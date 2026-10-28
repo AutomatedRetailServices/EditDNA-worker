@@ -69,9 +69,7 @@ def enqueue_flow_b(payload: dict, *, queue=None, timeout: int = 3600) -> QueueSu
             failure_ttl=86400,
             meta=meta,
         )
-        # PO 28 Oct (speed): waking the worker runs alongside, like every other job here; the cut's submit
-        # used to wait for it (measured 2.0 s warm, 5.4 s when the wake endpoint itself was cold).
-        threading.Thread(target=wake_worker, name="wake-worker", daemon=True).start()
+        wake_worker()
         return QueueSubmission(job_id=str(job.id), queue_name=str(getattr(target, "name", "cutsell")))
     except Exception:
         if reserved:

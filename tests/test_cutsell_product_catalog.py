@@ -167,10 +167,8 @@ def test_the_cut_engine_is_untouched():
     f7f5772 plus the 21 Oct Auto Zoom AI change she asked for -- zoom moments only, never the keep / hide decisions).
     The decisions and the prompts are what decide the cut. The transport around them may change without touching the
     cut: Deepgram retries (asr.py, 22 Oct), the prompt cache and its cost report (llm.py / cache_policy.py, 22 Oct: the
-    text the model reads is the same, only the cache_control mark and the billing change). 28 Oct (speed, asked for):
-    6fe12cd only sends the two reviews and the word fix together; the prompts and every keep / hide rule are unchanged
-    and test_parallel_reviews_give_exactly_the_sequential_cut proves the same cut."""
-    diff = subprocess.run(["git", "diff", "--stat", "6fe12cd", "--", "cutsell_worker/simple_engine/engine.py",  # baseline: the 28 Oct speed change 6fe12cd (asked for; before it: ab37eac)
+    text the model reads is the same, only the cache_control mark and the billing change)."""
+    diff = subprocess.run(["git", "diff", "--stat", "ab37eac", "--", "cutsell_worker/simple_engine/engine.py",  # baseline: the 21 Oct Auto Zoom change (asked for)
                            "cutsell_worker/simple_engine/prompts", "cutsell_worker/simple_engine/__init__.py"], capture_output=True, text=True)
     if diff.returncode != 0:
         pytest.skip("git history not available")
