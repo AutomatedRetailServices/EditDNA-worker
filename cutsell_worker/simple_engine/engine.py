@@ -12,10 +12,13 @@ only with a full re-run of the evaluation (scripts/simple_engine_eval.py).
 """
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import re
 import subprocess
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -219,6 +222,14 @@ def splits_from_labels(words, final, duration):
 
 def decide(words, duration, call: LLMCall, run: int = 0):
     """Pass step + decision step -> raw splits (before refine)."""
+    units, lab, passes, usage = _decide_labels(words, call, run)
+    lab, u, rv = review(words, units, lab, call, run); usage += u
+    splits = splits_from_labels(words, [(st, why, False) for st, why in lab], duration)
+    return splits, {"passes": passes, "usage": usage, "review": rv, "labels": lab}
+
+
+def _decide_labels(words, call: LLMCall, run: int = 0):
+    """The pass step + the decision step: (units, labels, passes, usage) before any review."""
     units = lines_of(words)
     text = transcript(words, units)
     usage = []
@@ -244,9 +255,7 @@ def decide(words, duration, call: LLMCall, run: int = 0):
         lab2 = labels(d2, words, units)
         if sum(1 for st, _ in lab2 if st == "keep") > kept:
             lab = lab2
-    lab, u, rv = review(words, units, lab, call, run); usage += u
-    splits = splits_from_labels(words, [(st, why, False) for st, why in lab], duration)
-    return splits, {"passes": len(passes) if multi else 1, "usage": usage, "review": rv, "labels": lab}
+    return units, lab, (len(passes) if multi else 1), usage
 
 
 # ---------------------------------------------------------------- sale review (1.2.1): understanding as a reviewer
@@ -358,16 +367,43 @@ def sale_review(words, units, lab, call: LLMCall, run: int = 0, kinds=None):
     return new, usage, info
 
 
-def decide_reviewed(words, duration, call: LLMCall, run: int = 0, kinds=None):
-    """1.2 decision, then the sale review on top of it."""
-    splits, info = decide(words, duration, call, run)
-    units = lines_of(words)
-    lab, u, srv = sale_review(words, units, info["labels"], call, run, kinds)
-    info["usage"] = info["usage"] + u
-    info["sale_review"] = srv
-    if srv.get("applied"):
-        splits = splits_from_labels(words, [(st, why, False) for st, why in lab], duration)
-    info["labels"] = lab
+def _in_thread(pool, fn, *args):
+    # Each task runs in its own copy of the context: the step tag, the prompt cache and the Bulk batch
+    # deadline (context variables) reach the call exactly as they would in sequence.
+    return pool.submit(contextvars.copy_context().run, fn, *args)
+
+
+def decide_reviewed(words, duration, call: LLMCall, run: int = 0, kinds=None, after: Optional[Callable] = None):
+    """1.2 decision, then the editor review and the sale review on top of it.
+
+    PO 28 Oct (speed): the two reviews and `after` (the caller's next step on the cut) start TOGETHER,
+    all reading the decided cut, because a review almost never changes it. When the editor review does
+    change it, the sale review is asked again on the changed cut (exactly the sequential answer); when
+    either review changes it, `after`'s result is not used (info["speculative"] is None) and its cost is
+    counted in info["speculative_usage"]. Same cut as in sequence; the wait is ~2 calls shorter."""
+    units, lab0, passes, usage = _decide_labels(words, call, run)
+    base = splits_from_labels(words, [(st, why, False) for st, why in lab0], duration)
+    speculative = speculative_usage = None
+    with ThreadPoolExecutor(max_workers=3, thread_name_prefix="simple-engine") as pool:
+        editor = _in_thread(pool, review, words, units, lab0, call, run)
+        sale = _in_thread(pool, sale_review, words, units, lab0, call, run, kinds)
+        ahead = _in_thread(pool, after, base) if after else None
+        lab1, u, rv = editor.result(); usage += u
+        if lab1 == lab0:
+            lab2, u, srv = sale.result(); usage += u
+        else:
+            _, u, _ = sale.result(); usage += u          # read the cut before the editor's change: not used
+            lab2, u, srv = sale_review(words, units, lab1, call, run, kinds); usage += u
+        if ahead is not None:
+            try:
+                speculative = ahead.result()
+            except Exception:
+                speculative = None
+    unchanged = lab1 == lab0 and not srv.get("applied")
+    splits = base if unchanged else splits_from_labels(words, [(st, why, False) for st, why in lab2], duration)
+    info = {"passes": passes, "usage": usage, "review": rv, "labels": lab2, "sale_review": srv,
+            "speculative": speculative if unchanged else None,
+            "speculative_usage": None if unchanged else speculative}
     return splits, info
 
 
@@ -772,23 +808,42 @@ def process(words, duration, audio_path, video_path=None, run: int = 0, scene_cu
         raise ValueError("simple engine: no words to edit")
     call = llm or _llm.call_anthropic
     mode = (mode or os.environ.get("CUTSELL_SIMPLE_ENGINE_MODE", "") or "review").strip().lower()
+    cuts_lock, cuts_box = threading.Lock(), {}
+
+    def shot_changes():
+        with cuts_lock:                                  # the video is decoded once, whichever path asks first
+            if "cuts" not in cuts_box:
+                cuts_box["cuts"] = scene_cut_list if scene_cut_list is not None else (scene_cuts(video_path) if video_path else [])
+            return cuts_box["cuts"]
+
+    def finish(cut, reviewed, hidden_idx):
+        """refine -> spoken words -> shot changes -> breathe -> word fix (+ zoom moments), on one cut."""
+        cut = keep_spoken_words(refine(cut, audio_path, float(duration), words), words)
+        if reviewed:    # a word the review hid never stays inside a kept part (refine stretched over "No", "Mi")
+            cut = keep_hidden_words_out(hidden_idx, cut, words)
+        cuts = shot_changes()
+        tomas = snap(cut, words, cuts) if cuts else []
+        cut = breathe(cut, words, float(duration))
+        if reviewed:
+            cut = keep_hidden_words_out(hidden_idx, cut, words)
+        shown, fixes, moments, u = fix_words_and_moments(words, cut, call)
+        return cut, tomas, shown, fixes, moments, u
+
     if mode == "review":
-        splits, info = decide_reviewed(words, float(duration), call, run)
+        splits, info = decide_reviewed(words, float(duration), call, run, after=lambda cut: finish(cut, False, []))
     else:
         splits, info = decide(words, float(duration), call, run)
     log = {"sueltos": orphans(splits, words)}
     reviewed = bool((info.get("sale_review") or {}).get("applied"))
     hidden_idx = [k for k, l in enumerate(info.get("labels") or []) if l[0] == "hide"] if reviewed else []
-    splits = keep_spoken_words(refine(splits, audio_path, float(duration), words), words)
-    if reviewed:        # a word the review hid never stays inside a kept part (refine stretched over "No", "Mi")
-        splits = keep_hidden_words_out(hidden_idx, splits, words)
-    if scene_cut_list is None and video_path:
-        scene_cut_list = scene_cuts(video_path)
-    log["tomas"] = snap(splits, words, scene_cut_list) if scene_cut_list else []
-    splits = breathe(splits, words, float(duration))
-    if reviewed:
-        splits = keep_hidden_words_out(hidden_idx, splits, words)
-    shown, fixes, moments, u = fix_words_and_moments(words, splits, call); info["usage"] += u
+    if info.get("speculative_usage"):                    # a speculative finish that a review made obsolete: its cost
+        info["usage"] += info["speculative_usage"][5]
+    if info.get("speculative"):
+        splits, log["tomas"], shown, fixes, moments, u = info["speculative"]
+    else:
+        splits, log["tomas"], shown, fixes, moments, u = finish(splits, reviewed, hidden_idx)
+    info["usage"] += u
+    info.pop("speculative", None); info.pop("speculative_usage", None)
     caps, cut_duration = captions(shown, splits)
     log["revision"] = info.get("review"); log["palabras"] = fixes
     if info.get("sale_review"):
