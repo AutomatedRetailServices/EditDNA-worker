@@ -2,11 +2,11 @@ name: CutSell perf · cut timing (audio first, like the iPhone)
 
 # Speed diagnosis (PO 28 Oct). Times every step of a Record cut on the LIVE server with synthetic
 # spoken test videos (macOS "say" over a test pattern, 1080x1920 HEVC like an iPhone recording; no
-# real video or personal data): ~30 s and ~60 s, each twice in a row (first, then right after).
+# real video or personal data). Run 2 (PO: raws are 4-5 min): 4 min once, 5 min twice in a row.
 # Same path as the app (build 23+ "audio first"): voice extracted -> voice uploaded -> cut starts ->
 # the video uploads meanwhile -> "video-ready" follow-up. Times the job's progress steps
 # (1 picked up · 10 downloaded · 12 transcribing · 42 Claude · 82 composing · 94/100 ready).
-# Cost: 4 cuts on the existing services (Deepgram + Claude + Modal CPU), well under US$1. No deploy.
+# Cost: 3 cuts on the existing services (Deepgram + Claude + Modal CPU), under US$1.50. No deploy.
 # The videos stay on this test machine; only the numbers go to perf-results/cut/.
 
 on:
@@ -26,17 +26,40 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
-      - name: Make ~30 s and ~60 s synthetic test videos (HEVC, like the iPhone)
+      - name: Make 4 min and 5 min synthetic raw videos (HEVC, like the iPhone; with retakes and fillers)
         run: |
           brew install ffmpeg >/dev/null
-          say -v Samantha -r 165 -o "$RUNNER_TEMP/s30.aiff" "Hi everyone. Today I want to show you my favorite water bottle. It keeps drinks cold for twenty four hours. Wait, let me say that again. It keeps drinks cold for a full day. It fits in any car cup holder and the lid does not leak. It comes in six colors and the black one is my favorite. The link is in my bio, grab yours today."
-          say -v Samantha -r 165 -o "$RUNNER_TEMP/s60.aiff" "Hi everyone. Today I want to show you my favorite water bottle. It keeps drinks cold for twenty four hours. Wait, let me say that again. It keeps drinks cold for a full day. It fits in any car cup holder. The lid does not leak, even in my bag. I use it at the gym, at work and on long drives. Um, what else. It is made of steel, so it does not hold any smell. It comes in six colors and the black one is my favorite. The handle folds down so it fits in the side pocket of a backpack. Right now it is on sale in my shop. The price is lower than ever this week. If you want one, the link is in my bio. Grab yours today before they sell out. Thank you for watching and see you in the next video."
-          for n in 30 60; do
+          python3 - <<'PY'
+          import os
+          tmp = os.environ["RUNNER_TEMP"]
+          lines = [
+              "Hi everyone, today I want to show you my favorite water bottle.",
+              "It keeps drinks cold for twenty four hours.", "Wait, let me say that again.",
+              "It keeps drinks cold for a full day, even in a hot car.",
+              "Um, what else. It fits in any car cup holder.", "The lid does not leak, even in my bag.",
+              "I use it at the gym, at work and on long drives.", "It is made of steel, so it does not hold any smell.",
+              "Okay, hold on, I messed that up.", "It comes in six colors and the black one is my favorite.",
+              "The handle folds down so it fits in the side pocket of a backpack.",
+              "Right now it is on sale in my shop and the price is lower than ever this week.",
+              "Let me show you the inside. See how clean it is?", "I wash it every night and it takes ten seconds.",
+              "My sister bought one too and she loves the pink one.", "If you want one, the link is in my bio.",
+              "Grab yours today before they sell out.", "Okay, one more time from the top.",
+          ]
+          for minutes in (4, 5):
+              words, out, i = 0, [], 0
+              while words < 150 * minutes:
+                  line = lines[i % len(lines)]; out.append(line); words += len(line.split()); i += 1
+              open(f"{tmp}/t{minutes}.txt", "w").write(" ".join(out))
+          PY
+          for m in 4 5; do
+            n=$((m * 60))
+            say -v Samantha -r 165 -f "$RUNNER_TEMP/t$m.txt" -o "$RUNNER_TEMP/s$n.aiff"
             ffmpeg -loglevel error -y -f lavfi -i "testsrc2=s=1080x1920:r=30:d=$n" -i "$RUNNER_TEMP/s$n.aiff" \
               -t $n -c:v libx265 -tag:v hvc1 -b:v 8M -preset ultrafast -pix_fmt yuv420p -c:a aac -ar 44100 -af apad \
               "$RUNNER_TEMP/v$n.mov"
           done
           ls -la "$RUNNER_TEMP"/v*.mov
+          for f in "$RUNNER_TEMP"/s*.aiff; do ffprobe -v error -show_entries format=duration -of csv=p=0 "$f"; done
 
       - name: Cut on the live server, timing every step
         run: |
@@ -56,6 +79,7 @@ jobs:
           s, _ = call("POST", "/v1/auth/session"); T = s["access_token"]; u = s["user_id"]
           print("::add-mask::" + T)
           rows = []
+          followers = []
           def run(n, label):
               row = {"video": f"{n}s", "run": label, "steps": {}, "marks": []}
               video = open(f"{tmp}/v{n}.mov", "rb").read(); row["video_mb"] = round(len(video) / 1e6, 1)
@@ -114,23 +138,29 @@ jobs:
                       row[k] = json.dumps(res[k])[:1500]
               th.join()
               row["video_upload"] = up
-              # 3) the follow-up job that handles the video once it is on storage
+              # 3) the follow-up job that handles the video: followed in the background (capped)
               if up.get("followup_job"):
-                  f0 = time.time(); fl = None; fm = []
-                  while True:
-                      fj, _ = call("GET", f"/v1/jobs/{up['followup_job']}")
-                      key = f"{fj['state']}@{fj.get('progress')}"
-                      if key != fl: fm.append((key, round(time.time() - T0, 2))); fl = key
-                      if fj["state"] in ("finished", "failed", "canceled") or time.time() - f0 > 900: break
-                      time.sleep(1)
-                  row["followup_marks"] = fm
-                  fr = fj.get("result") or {}
-                  row["followup_result"] = json.dumps({k: fr.get(k) for k in ("seconds", "normalized", "source_normalization_diagnostics")} if isinstance(fr, dict) else {})[:800]
+                  def follow(row=row, job_id=up["followup_job"]):
+                      f0 = time.time(); fl = None; fm = []; fj = {}
+                      while True:
+                          try:
+                              fj, _ = call("GET", f"/v1/jobs/{job_id}")
+                          except Exception as exc:
+                              fm.append((f"poll_error {exc.__class__.__name__}", round(time.time() - T0, 2))); break
+                          key = f"{fj['state']}@{fj.get('progress')}"
+                          if key != fl: fm.append((key, round(time.time() - T0, 2))); fl = key
+                          if fj["state"] in ("finished", "failed", "canceled") or time.time() - f0 > 600: break
+                          time.sleep(2)
+                      row["followup_marks"] = fm
+                      fr = fj.get("result") or {}
+                      row["followup_result"] = json.dumps({k: fr.get(k) for k in ("seconds",)} if isinstance(fr, dict) else {})[:300]
+                  ft = threading.Thread(target=follow); ft.start(); followers.append(ft)
               rows.append(row)
               print(f"::notice title=cut_{n}s_{label}::{row['state']} cut_done_at={row['cut_done_at']}s marks={row['marks']}")
-          for n in (30, 60):
-              run(n, "first")
-              run(n, "again")
+          run(240, "first")
+          run(300, "first")
+          run(300, "again")
+          for ft in followers: ft.join(timeout=600)
           json.dump(rows, open(f"{tmp}/cut_timing.json", "w"), indent=1)
           PY
 
