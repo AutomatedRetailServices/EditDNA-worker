@@ -77,4 +77,41 @@ def test_every_enqueue_wakes_the_worker_after_the_job_is_on_the_queue(monkeypatc
     queueing.enqueue_flow_b({"user_id": "u", "project_id": "p"}, queue=queue)
     queueing.enqueue_export({"user_id": "u", "project_id": "p"}, queue=queue)
     queueing.enqueue_batch_item(batch_id="b", user_id="u", index=0, queue=queue)
-    assert order == ["enqueue", "wake"] * 3
+    _join_wake_threads()
+    # Every wake runs alongside (PO 28 Oct): it comes after its own enqueue, never before any.
+    assert order.count("enqueue") == 3 and order.count("wake") == 3
+    assert order[0] == "enqueue"
+    assert all(order[:i + 1].count("wake") <= order[:i + 1].count("enqueue") for i in range(len(order)))
+
+
+def _join_wake_threads():
+    import threading
+    for thread in threading.enumerate():
+        if thread.name == "wake-worker":
+            thread.join(timeout=5)
+
+
+def test_a_cut_submit_does_not_wait_for_the_wake_call(monkeypatch):
+    """PO 28 Oct (speed): the cut's POST answered only after the wake call (measured 2-5 s)."""
+    import threading
+    import time
+
+    class FakeQueue:
+        name = "cutsell"
+
+        def enqueue(self, *args, **kwargs):
+            return SimpleNamespace(id="job-1")
+
+    woke = threading.Event()
+
+    def slow_wake():
+        time.sleep(1.5)
+        woke.set()
+
+    monkeypatch.setattr(queueing, "wake_worker", slow_wake)
+    monkeypatch.setattr(queueing, "reserve_processing_slot", lambda **kw: {"allowed": True})
+    started = time.time()
+    submission = queueing.enqueue_flow_b({"user_id": "u", "project_id": "p"}, queue=FakeQueue())
+    assert submission.job_id == "job-1"
+    assert time.time() - started < 0.5
+    assert woke.wait(5), "the worker is still woken"

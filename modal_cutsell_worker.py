@@ -54,6 +54,30 @@ image = (
 
 secret = modal.Secret.from_name(SECRET_NAME)
 
+# PO 28 Oct (speed): `wake` and `sweep` only start workers, so they get a small image of their own; the
+# worker's code is loaded ONCE into a memory snapshot of the worker image (Modal restores it instead of
+# starting Python and importing the engine on every cold start). Measured 28 Oct: a cold cut waited
+# ~14 s before its first step (two containers starting one after the other + loading). Nothing stays on:
+# containers still scale to zero (no min_containers / keep_warm).
+light_image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .pip_install("redis>=5.0", "rq>=2.6", "fastapi[standard]>=0.115")
+)
+
+with image.imports():
+    # Only in containers of the worker image: imported at snapshot time, so a restored container
+    # starts with them loaded. None of these open a connection when imported.
+    import boto3  # noqa: F401
+    import numpy  # noqa: F401
+    import redis  # noqa: F401
+    import requests  # noqa: F401
+    import rq  # noqa: F401
+    import cutsell_worker.export_job  # noqa: F401
+    import cutsell_worker.post_captions  # noqa: F401
+    import cutsell_worker.product_tagging  # noqa: F401
+    import cutsell_worker.simple_engine_adapter  # noqa: F401
+    import cutsell_worker.worker_job  # noqa: F401
+
 
 def _queue():
     from redis import Redis
@@ -66,6 +90,7 @@ def _queue():
 @app.function(
     image=image, secrets=[secret], cpu=2.0, memory=4096,
     timeout=JOB_TIMEOUT_SEC + 600, max_containers=MAX_PARALLEL_JOBS, retries=0,
+    enable_memory_snapshot=True,
 )
 def drain_queue() -> dict:
     """Run at most one queued job, exactly as `rq worker --burst` would, then exit."""
@@ -86,7 +111,7 @@ def drain_queue() -> dict:
     return {"ran": True, "waiting_before": waiting, "waiting_after": remaining}
 
 
-@app.function(image=image, secrets=[secret], cpu=0.25, memory=256, timeout=60)
+@app.function(image=light_image, secrets=[secret], cpu=0.25, memory=256, timeout=60, enable_memory_snapshot=True)
 @modal.fastapi_endpoint(method="POST")
 def wake(payload: dict) -> dict:
     """Called by the API after it enqueues a job. Body: {"token": "<CUTSELL_WORKER_WAKE_TOKEN>"}."""
@@ -103,7 +128,7 @@ def wake(payload: dict) -> dict:
 
 
 @app.function(
-    image=image, secrets=[secret], cpu=0.25, memory=256, timeout=120,
+    image=light_image, secrets=[secret], cpu=0.25, memory=256, timeout=120,
     schedule=modal.Period(minutes=SWEEP_EVERY_MINUTES),
 )
 def sweep() -> dict:
