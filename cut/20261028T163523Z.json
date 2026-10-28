@@ -1,0 +1,258 @@
+[
+ {
+  "video": "240s",
+  "run": "first",
+  "steps": {
+   "voice_extract_runner_s": 2.95,
+   "create_project_s": 1.26,
+   "multipart_begin_s": 1.26,
+   "voice_upload_s": 1.24,
+   "submit_s": 1.83,
+   "draft_fetch_s": 2.69
+  },
+  "marks": [
+   [
+    "submitted",
+    8.54
+   ],
+   [
+    "uploaded@None",
+    12.58
+   ],
+   [
+    "analyzing@10",
+    27.23
+   ],
+   [
+    "analyzing@42",
+    30.31
+   ],
+   [
+    "analyzing@82",
+    39.38
+   ],
+   [
+    "analyzing@94",
+    41.54
+   ],
+   [
+    "finished@100",
+    46.29
+   ]
+  ],
+  "video_mb": 242.8,
+  "voice_kb": 1430,
+  "state": "finished",
+  "error": "",
+  "cut_done_at": 46.29,
+  "draft_kb": 76,
+  "draft_clips": 5,
+  "result_keys": [
+   "audio_first_sources",
+   "brain_backend",
+   "draft",
+   "engine",
+   "external_brain_calls_enabled",
+   "hybrid_primary_model",
+   "hybrid_provider",
+   "lost_atom_exact_identity_context",
+   "notification",
+   "post_caption",
+   "primary_video",
+   "product_tagging",
+   "project_id",
+   "project_tracking",
+   "project_tracking_start",
+   "schema_version",
+   "source_format_diagnostics",
+   "source_normalization_diagnostics",
+   "stage_status",
+   "state",
+   "timeline_assets"
+  ],
+  "source_normalization_diagnostics": "[]",
+  "video_upload": {
+   "upload_s": 22.43,
+   "parts": 15,
+   "part_mb": 16,
+   "done_at": 30.97,
+   "followup_job": "a8516a8d-519e-4897-8938-6d5276d18b5c",
+   "followup_submitted_at": 34.39
+  },
+  "followup_marks": [
+   [
+    "analyzing@None",
+    50.67
+   ],
+   [
+    "finished@None",
+    74.33
+   ]
+  ],
+  "followup_result": "{\"seconds\": 21.2}"
+ },
+ {
+  "video": "300s",
+  "run": "first",
+  "steps": {
+   "voice_extract_runner_s": 3.42,
+   "create_project_s": 1.83,
+   "multipart_begin_s": 1.12,
+   "voice_upload_s": 1.0,
+   "submit_s": 2.49,
+   "draft_fetch_s": 2.46
+  },
+  "marks": [
+   [
+    "submitted",
+    9.87
+   ],
+   [
+    "analyzing@42",
+    15.11
+   ],
+   [
+    "analyzing@94",
+    28.14
+   ],
+   [
+    "finished@100",
+    32.26
+   ]
+  ],
+  "video_mb": 303.5,
+  "voice_kb": 1776,
+  "state": "finished",
+  "error": "",
+  "cut_done_at": 32.26,
+  "draft_kb": 86,
+  "draft_clips": 4,
+  "result_keys": [
+   "audio_first_sources",
+   "brain_backend",
+   "draft",
+   "engine",
+   "external_brain_calls_enabled",
+   "hybrid_primary_model",
+   "hybrid_provider",
+   "lost_atom_exact_identity_context",
+   "notification",
+   "post_caption",
+   "primary_video",
+   "product_tagging",
+   "project_id",
+   "project_tracking",
+   "project_tracking_start",
+   "schema_version",
+   "source_format_diagnostics",
+   "source_normalization_diagnostics",
+   "stage_status",
+   "state",
+   "timeline_assets"
+  ],
+  "source_normalization_diagnostics": "[]",
+  "video_upload": {
+   "upload_s": 25.35,
+   "parts": 19,
+   "part_mb": 16,
+   "done_at": 35.21,
+   "followup_job": "7a0ee447-a5fc-4748-9c31-a793a27aa981",
+   "followup_submitted_at": 36.86
+  },
+  "followup_marks": [
+   [
+    "analyzing@None",
+    38.5
+   ],
+   [
+    "finished@None",
+    49.4
+   ]
+  ],
+  "followup_result": "{\"seconds\": 8.74}"
+ },
+ {
+  "video": "300s",
+  "run": "again",
+  "steps": {
+   "voice_extract_runner_s": 3.0,
+   "create_project_s": 1.88,
+   "multipart_begin_s": 1.02,
+   "voice_upload_s": 1.33,
+   "submit_s": 1.91,
+   "draft_fetch_s": 3.13
+  },
+  "marks": [
+   [
+    "submitted",
+    9.15
+   ],
+   [
+    "analyzing@10",
+    12.19
+   ],
+   [
+    "analyzing@42",
+    15.88
+   ],
+   [
+    "analyzing@94",
+    30.48
+   ],
+   [
+    "finished@100",
+    33.38
+   ]
+  ],
+  "video_mb": 303.5,
+  "voice_kb": 1776,
+  "state": "finished",
+  "error": "",
+  "cut_done_at": 33.38,
+  "draft_kb": 86,
+  "draft_clips": 4,
+  "result_keys": [
+   "audio_first_sources",
+   "brain_backend",
+   "draft",
+   "engine",
+   "external_brain_calls_enabled",
+   "hybrid_primary_model",
+   "hybrid_provider",
+   "lost_atom_exact_identity_context",
+   "notification",
+   "post_caption",
+   "primary_video",
+   "product_tagging",
+   "project_id",
+   "project_tracking",
+   "project_tracking_start",
+   "schema_version",
+   "source_format_diagnostics",
+   "source_normalization_diagnostics",
+   "stage_status",
+   "state",
+   "timeline_assets"
+  ],
+  "source_normalization_diagnostics": "[]",
+  "video_upload": {
+   "upload_s": 26.64,
+   "parts": 19,
+   "part_mb": 16,
+   "done_at": 35.79,
+   "followup_job": "434dbec9-e56f-4506-89ef-96b9590c12c1",
+   "followup_submitted_at": 37.5
+  },
+  "followup_marks": [
+   [
+    "analyzing@None",
+    39.37
+   ],
+   [
+    "finished@None",
+    47.14
+   ]
+  ],
+  "followup_result": "{\"seconds\": 8.72}"
+ }
+]
