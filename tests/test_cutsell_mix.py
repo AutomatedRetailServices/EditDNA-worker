@@ -289,7 +289,7 @@ def test_the_cut_engine_is_untouched_by_mix():
     if not shutil.which("git"):
         pytest.skip("no git")
     root = Path(__file__).resolve().parents[1]
-    diff = subprocess.run(["git", "diff", "--stat", "ab37eac", "--", "cutsell_worker/simple_engine/engine.py",  # baseline: the 21 Oct Auto Zoom change (asked for)
+    diff = subprocess.run(["git", "diff", "--stat", "d877ea7", "--", "cutsell_worker/simple_engine/engine.py",  # baseline: the 28 Oct speed change (asked for; before it: ab37eac, 21 Oct Auto Zoom)
                            "cutsell_worker/simple_engine/prompts", "cutsell_worker/simple_engine/__init__.py"], cwd=root, capture_output=True, text=True)
     if diff.returncode != 0:
         pytest.skip("no history")
