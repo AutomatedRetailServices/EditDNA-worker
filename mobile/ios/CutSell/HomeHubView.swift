@@ -31,17 +31,10 @@ struct HomeHubView: View {
             HomeBackdrop()
             ScrollView {
                 VStack(spacing: 0) {
-                    // 1) Header: only the logo, on the left (PO: no avatar on Create).
-                    HStack {
-                        BrandLogo(width: 150).padding(.leading, -10)
-                        Spacer()
-                    }
-                    .frame(height: 58)
-                    .padding(.top, 2)
-
-                    // 2) Hero (28 Oct, PO: "más app, bubbly"): her latest cuts as a fan of tilted cards.
-                    HomeFan(projects: recent, onOpen: onOpenProject)
-                        .padding(.top, 10)
+                    // 1-2) Hero (28 Oct, PO): no logo in the corner; the CutSell logo itself (matte black, puffy)
+                    // in the middle, bouncing like jelly, its letters hopping one by one, a few coins.
+                    HomeLogoHero()
+                        .padding(.top, 6)
 
                     // 3) Greeting + the two-tone question, centred.
                     Text(firstName.isEmpty ? L10n.tr("Hi there 👋") : L10n.tr("Hi \(firstName) 👋"))
@@ -278,72 +271,117 @@ struct HomeBackdrop: View {
     }
 }
 
-/// The hero: up to three of her cuts as tilted cards, the newest in front. Without cuts, three soft cards
-/// with the CutSell icon, so the screen never looks empty.
-struct HomeFan: View {
-    let projects: [Project]
-    let onOpen: (Project) -> Void
-    @EnvironmentObject private var appState: AppState
-    @ObservedObject private var thumbnails = ThumbnailStore.shared
+/// The Create hero (PO 28 Oct): the CutSell logo -- the same bag and name, matte black with a soft puffy volume --
+/// bouncing like jelly, the letters of the name hopping one after another, and a few gold coins popping out of
+/// the bag. Livelier for the first seconds after opening, then calmer. Reduce Motion: still.
+struct HomeLogoHero: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var start = Date()
 
-    private let slots: [(angle: Double, x: CGFloat, y: CGFloat)] = [(-9, -82, 14), (0, 0, 0), (9, 82, 14)]
+    /// Each letter of "CutSell.ai" (HomeWord0...9): left edge and width as a share of the name's width.
+    static let letters: [(x: CGFloat, w: CGFloat)] = [
+        (0.0, 0.1472), (0.1529, 0.123), (0.2834, 0.0923), (0.3765, 0.1298), (0.51, 0.1264),
+        (0.6485, 0.0409), (0.7094, 0.0409), (0.7628, 0.0492), (0.8199, 0.1158), (0.9501, 0.0499)]
+    static let wordWidth: CGFloat = 200
+    static let wordHeight: CGFloat = 200 * 464 / 2643
+    /// Coins: where each one flies to (from the top of the bag) and when it starts within its 6 s loop.
+    static let coins: [(dx: CGFloat, dy: CGFloat, at: Double)] = [(-96, -46, 0.4), (100, -58, 2.4), (-70, -70, 4.4)]
 
     var body: some View {
-        // Order on screen: 2nd newest left, newest centre (on top), 3rd right.
-        let order = [1, 0, 2]
-        ZStack {
-            ForEach(Array(order.enumerated()), id: \.offset) { position, index in
-                let slot = slots[position]
-                card(index)
-                    .rotationEffect(.degrees(slot.angle))
-                    .offset(x: slot.x, y: slot.y)
-                    .zIndex(index == 0 ? 2 : 1)
-            }
+        TimelineView(.animation(minimumInterval: 1.0 / 60, paused: reduceMotion)) { context in
+            let t = reduceMotion ? 0 : context.date.timeIntervalSince(start)
+            scene(t: t)
         }
-        .frame(height: 196)
+        .frame(height: 270)
         .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("hubFan")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(L10n.tr("CutSell.ai"))
+        .accessibilityIdentifier("hubLogoHero")
+    }
+
+    /// Seconds into the current bounce: a bounce every 3 s for the first ~10 s, then every 6 s.
+    static func bounceTime(_ t: Double) -> Double {
+        t < 9 ? t.truncatingRemainder(dividingBy: 3) : (t - 9).truncatingRemainder(dividingBy: 6)
     }
 
     @ViewBuilder
-    private func card(_ index: Int) -> some View {
-        let width: CGFloat = index == 0 ? 116 : 104
-        let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
-        if index < projects.count {
-            let project = projects[index]
-            Button { onOpen(project) } label: {
-                shape.fill(CS.wiSurface2)
-                    .overlay {
-                        if let image = thumbnails.image(for: project.projectID) {
-                            Image(uiImage: image).resizable().scaledToFill()
-                        } else {
-                            BrandIcon(size: 34).opacity(0.5)
-                        }
-                    }
-                    .clipShape(shape)
-                    .frame(width: width, height: width * 16 / 10)
-                    .overlay(shape.stroke(Color(fixed: 0xFFFFFF), lineWidth: 4))
-                    .shadow(color: Color(fixed: 0x1769FF, opacity: 0.20), radius: 14, x: 0, y: 10)
+    private func scene(t: Double) -> some View {
+        let local = Self.bounceTime(t)
+        let bag = reduceMotion ? Squash.rest : Self.jelly(local, height: 14)
+        let float = reduceMotion ? 0 : CGFloat(sin(t * 2 * .pi / 3) * 5)
+        ZStack {
+            // Soft colour blobs behind (pink, lilac, blue), slowly breathing.
+            Circle().fill(Color(fixed: 0xFFB3D9, opacity: 0.55)).frame(width: 170, height: 150)
+                .blur(radius: 40).offset(x: -80, y: -10 + CGFloat(sin(t / 1.3) * 6))
+            Circle().fill(Color(fixed: 0xB9C8FF, opacity: 0.6)).frame(width: 180, height: 170)
+                .blur(radius: 40).offset(x: 90, y: -40 + CGFloat(cos(t / 1.5) * 6))
+            Circle().fill(Color(fixed: 0xD9C2FF, opacity: 0.5)).frame(width: 150, height: 140)
+                .blur(radius: 40).offset(x: 10, y: 50 + CGFloat(sin(t / 1.7) * 6))
+
+            // The floor shadow shrinks while the bag is up.
+            Ellipse().fill(Color(fixed: 0x0D1433, opacity: 0.16)).frame(width: 110, height: 14).blur(radius: 6)
+                .scaleEffect(x: 1 - bag.lift * 0.012 + float * 0.01, y: 1)
+                .offset(y: 124)
+
+            ForEach(0..<Self.coins.count, id: \.self) { i in
+                coin(t: t, Self.coins[i])
             }
-            .buttonStyle(BubblePress())
-            .task(id: project.state) { await thumbnails.load(project: project, session: appState.session) }
-            .accessibilityLabel(project.title)
-        } else {
-            shape.fill(LinearGradient(colors: index == 0 ? [Color(fixed: 0x1769FF), Color(fixed: 0x4A5BFF)]
-                                                         : [Color(fixed: 0xDCE6FF), Color(fixed: 0xC9D6FF)],
-                                      startPoint: .topLeading, endPoint: .bottomTrailing))
-                .overlay {
-                    if index == 0 {
-                        Image(systemName: "sparkles").font(.system(size: 30, weight: .semibold))
-                            .foregroundStyle(Color(fixed: 0xFFFFFF))
-                    }
+
+            Image("HomeBag").resizable().interpolation(.high).frame(width: 150, height: 154)
+                .scaleEffect(x: bag.x, y: bag.y, anchor: .bottom)
+                .offset(y: -38 - bag.lift + float)
+
+            // "CutSell.ai": each letter hops a little after the one before it.
+            ZStack(alignment: .topLeading) {
+                ForEach(0..<Self.letters.count, id: \.self) { i in
+                    let hop = reduceMotion ? Squash.rest : Self.jelly(local - Double(i) * 0.09, height: 9)
+                    Image("HomeWord\(i)").resizable().interpolation(.high)
+                        .frame(width: Self.letters[i].w * Self.wordWidth, height: Self.wordHeight)
+                        .scaleEffect(x: hop.x, y: hop.y, anchor: .bottom)
+                        .offset(x: Self.letters[i].x * Self.wordWidth, y: -hop.lift)
                 }
-                .frame(width: width, height: width * 16 / 10)
-                .overlay(shape.stroke(Color(fixed: 0xFFFFFF), lineWidth: 4))
-                .shadow(color: Color(fixed: 0x1769FF, opacity: 0.18), radius: 14, x: 0, y: 10)
-                .accessibilityHidden(true)
+            }
+            .frame(width: Self.wordWidth, height: Self.wordHeight, alignment: .topLeading)
+            .offset(y: 82 + float * 0.6)
         }
+    }
+
+    struct Squash: Equatable {
+        var x: CGFloat, y: CGFloat, lift: CGFloat
+        static let rest = Squash(x: 1, y: 1, lift: 0)
+    }
+
+    /// Squash and stretch over one bounce, `s` seconds into it (a bounce lasts 1 s).
+    static func jelly(_ s: Double, height: Double) -> Squash {
+        guard s > 0, s < 1 else { return .rest }
+        let keys: [(t: Double, x: Double, y: Double, lift: Double)] = [
+            (0, 1, 1, 0), (0.18, 1.1, 0.88, 0), (0.42, 0.93, 1.08, 1), (0.66, 1.04, 0.96, 0), (0.84, 0.99, 1.01, 0), (1, 1, 1, 0)]
+        for k in 1..<keys.count where s <= keys[k].t {
+            let a = keys[k - 1], b = keys[k]
+            let p = (s - a.t) / (b.t - a.t), e = p * p * (3 - 2 * p)
+            return Squash(x: CGFloat(a.x + (b.x - a.x) * e), y: CGFloat(a.y + (b.y - a.y) * e),
+                          lift: CGFloat((a.lift + (b.lift - a.lift) * e) * height))
+        }
+        return .rest
+    }
+
+    /// A gold "$" coin that pops out of the top of the bag, spins and fades (1.6 s, every 6 s).
+    private func coin(t: Double, _ c: (dx: CGFloat, dy: CGFloat, at: Double)) -> some View {
+        let since = t - c.at
+        let p = since < 0 ? 2 : since.truncatingRemainder(dividingBy: 6) / 1.6
+        let live = !reduceMotion && p < 1
+        let e = CGFloat(1 - pow(1 - min(1, p), 3))
+        let spin = CGFloat(cos(p * 3 * .pi))
+        return Text("$")
+            .font(CS.inter(15, .heavy))
+            .foregroundStyle(Color(fixed: 0xA86A00))
+            .frame(width: 28, height: 28)
+            .background(RadialGradient(colors: [Color(fixed: 0xFFF3B0), Color(fixed: 0xFFD34D), Color(fixed: 0xF0A818)],
+                                       center: UnitPoint(x: 0.35, y: 0.3), startRadius: 1, endRadius: 18), in: Circle())
+            .shadow(color: Color(fixed: 0xF0A818, opacity: 0.35), radius: 5, y: 3)
+            .scaleEffect(x: spin * (0.4 + 0.6 * e), y: 0.4 + 0.6 * e)
+            .offset(x: c.dx * e, y: -70 + c.dy * e)
+            .opacity(live ? (p < 0.7 ? 1 : (1 - p) / 0.3) : 0)
     }
 }
 
