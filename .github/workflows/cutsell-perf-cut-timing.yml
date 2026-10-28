@@ -3,6 +3,7 @@ name: CutSell perf · cut timing (audio first, like the iPhone)
 # Speed diagnosis (PO 28 Oct). Times every step of a Record cut on the LIVE server with synthetic
 # spoken test videos (macOS "say" over a test pattern, 1080x1920 HEVC like an iPhone recording; no
 # real video or personal data). Run 2 (PO: raws are 4-5 min): 4 min once, 5 min twice in a row.
+# Run 3 (28 Oct, after deploying the speed changes b5eb3e1): the same cuts, to compare.
 # Same path as the app (build 23+ "audio first"): voice extracted -> voice uploaded -> cut starts ->
 # the video uploads meanwhile -> "video-ready" follow-up. Times the job's progress steps
 # (1 picked up · 10 downloaded · 12 transcribing · 42 Claude · 82 composing · 94/100 ready).
