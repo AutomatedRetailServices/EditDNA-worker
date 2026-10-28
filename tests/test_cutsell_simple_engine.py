@@ -822,7 +822,9 @@ def test_every_engine_call_is_tagged_with_its_step(video):
     words = [{"w": w, "s": i * 0.4, "e": i * 0.4 + 0.3} for i, w in enumerate("Hola chicas. Miren esto. Cuesta diez.".split())]
     splits, info = engine.decide_reviewed(words, 4.0, call)
     engine.fix_words_and_moments(words, splits, call)
-    assert steps == ["pass", "decision", "haul_review", "sale_review", "fixwords"]
+    # PO 28 Oct (speed): the two reviews run together, each still tagged with its own step.
+    assert steps[:2] == ["pass", "decision"] and steps[-1] == "fixwords"
+    assert sorted(steps[2:4]) == ["haul_review", "sale_review"]
 
 
 # ------------------------------------------------------------------ audio first (iOS build 23)
@@ -956,3 +958,120 @@ def test_every_step_has_a_strict_json_schema():
     for schema in E.SCHEMAS.values():
         assert schema["additionalProperties"] is False and set(schema["required"]) == set(schema["properties"])
     assert '"why"' in E.SALE_REVIEW_PROMPT
+
+
+# ------------------------------------------------------------------ speed (PO 28 Oct): reviews + word fix together
+
+class _ReviewLLM:
+    """Deterministic answers by prompt; every call waits `delay` seconds like a real model call."""
+
+    def __init__(self, delay=0.0, haul_hides=None):
+        import threading
+        self.delay, self.haul_hides = delay, haul_hides
+        self.lock, self.steps = threading.Lock(), []
+
+    def __call__(self, prompt):
+        import time
+        from cutsell_worker.simple_engine import llm
+        with self.lock:
+            self.steps.append(llm._STEP.get())
+        time.sleep(self.delay)
+        text = str(prompt)
+        if "A PASS is one continuous run" in text:
+            return '{"passes":[[1,4,true]],"backbone":[1,4]}', {"step": "pass"}
+        if "FIRST decide the TYPE" in text:
+            if self.haul_hides:
+                return json.dumps({"type": "haul", "hide": self.haul_hides, "unhide": []}), {"step": "haul_review"}
+            return '{"type":"other","hide":[],"unhide":[]}', {"step": "haul_review"}
+        if "checking a FIRST CUT" in text:
+            return '{"type":"other","fixes":[]}', {"step": "sale_review"}
+        if "index:word" in text:
+            return '{"fix":[[5,"PRODUCTO"]],"zoom":[]}', {"step": "fixwords"}
+        return json.dumps({"hide": [[1, 1, "a"]], "trim": []}), {"step": "decision"}
+
+
+def _sequential(monkeypatch):
+    """The same engine with one worker thread: every call in order, exactly the old sequence."""
+    from concurrent.futures import ThreadPoolExecutor as Pool
+    monkeypatch.setattr(se, "ThreadPoolExecutor", lambda **kw: Pool(max_workers=1))
+
+
+def _strip(out):
+    out = dict(out); out.pop("usage", None)
+    return json.loads(json.dumps(out, sort_keys=True, default=str))
+
+
+def test_parallel_reviews_give_exactly_the_sequential_cut(video, monkeypatch):
+    monkeypatch.setenv("CUTSELL_SIMPLE_ENGINE_MODE", "review")
+    together = se.process(_words(), DURATION, video, video_path=video, llm=_ReviewLLM())
+    with monkeypatch.context() as m:
+        _sequential(m)
+        in_order = se.process(_words(), DURATION, video, video_path=video, llm=_ReviewLLM())
+    assert _strip(together) == _strip(in_order)
+    assert "PRODUCTO" in [c["w"] for c in together["captions"]]          # the word fix reached the captions
+
+
+def test_parallel_reviews_save_the_wait_of_two_calls(video, monkeypatch):
+    import time
+    monkeypatch.setenv("CUTSELL_SIMPLE_ENGINE_MODE", "review")
+    llm = _ReviewLLM(delay=0.4)
+    started = time.time()
+    se.process(_words(), DURATION, video, video_path=video, llm=llm)
+    together = time.time() - started
+    with monkeypatch.context() as m:
+        _sequential(m)
+        llm2 = _ReviewLLM(delay=0.4)
+        started = time.time()
+        se.process(_words(), DURATION, video, video_path=video, llm=llm2)
+        in_order = time.time() - started
+    # 5 calls in a row (2.0 s) become 3 waits (pass, decision, then the three together): ~0.8 s less.
+    assert sorted(llm.steps) == sorted(llm2.steps) and len(llm.steps) == 5
+    assert in_order - together > 0.6, (in_order, together)
+
+
+def test_a_review_that_changes_the_cut_is_followed_exactly_like_before(video, monkeypatch):
+    """The editor review (2 of 3 haul answers agree) hides line 3: the sale review is asked again on the
+    changed cut and the word fix runs on it; the speculative word fix is thrown away (its cost counted)."""
+    monkeypatch.setenv("CUTSELL_SIMPLE_ENGINE_MODE", "review")
+    together_llm = _ReviewLLM(haul_hides=[3])
+    together = se.process(_words(), DURATION, video, video_path=video, llm=together_llm)
+    with monkeypatch.context() as m:
+        _sequential(m)
+        in_order = se.process(_words(), DURATION, video, video_path=video, llm=_ReviewLLM(haul_hides=[3]))
+    assert _strip(together) == _strip(in_order)
+    assert together["log"]["revision"]["hide"] == [3]
+    assert together_llm.steps.count("sale_review") == 2 and together_llm.steps.count("fixwords") == 2
+    assert len(together["usage"]) == len(together_llm.steps)          # every call made is in the cost report
+    kept = " ".join(c["w"] for c in together["captions"])
+    assert "días" not in kept and "todos" not in kept
+
+
+def test_the_speculative_finish_hides_loose_pieces_like_the_normal_path(monkeypatch):
+    """QA 28 Oct: with a loose piece (one kept word under 2 s), the finish started early must give the same cut
+    and captions as the finish run after the reviews (the 1.2.1 path before the speed change)."""
+    monkeypatch.setenv("CUTSELL_SIMPLE_ENGINE_MODE", "review")
+    monkeypatch.setattr(se, "refine", lambda splits, audio_path, duration, words: [dict(x) for x in splits])
+    text = [("Hola chicas hoy.", 0.0), ("Mira.", 2.8), ("Esto no.", 3.6), ("Cuesta diez dolares.", 5.0)]
+    words = []
+    for line, start in text:
+        for i, w in enumerate(line.split()):
+            words.append({"w": w, "s": round(start + i * 0.4, 3), "e": round(start + i * 0.4 + 0.3, 3)})
+
+    def call(prompt):
+        text = str(prompt)
+        if "A PASS is one continuous run" in text:
+            return '{"passes":[[1,4,true]],"backbone":[1,4]}', {}
+        if "FIRST decide the TYPE" in text:
+            return '{"type":"other","hide":[],"unhide":[]}', {}
+        if "checking a FIRST CUT" in text:
+            return '{"type":"other","fixes":[]}', {}
+        if "index:word" in text:
+            return '{"fix":[],"zoom":[]}', {}
+        return json.dumps({"hide": [[3, 3, "a"]], "trim": []}), {}
+
+    early = se.process(words, 7.0, None, scene_cut_list=[], llm=call)
+    original = se.decide_reviewed
+    monkeypatch.setattr(se, "decide_reviewed", lambda *a, **kw: original(*a, **{**kw, "after": None}))
+    late = se.process(words, 7.0, None, scene_cut_list=[], llm=call)
+    assert _strip(early) == _strip(late)
+    assert "Mira." not in [c["w"] for c in early["captions"]]          # the loose piece stays hidden
