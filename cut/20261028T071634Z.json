@@ -1,0 +1,342 @@
+[
+ {
+  "video": "30s",
+  "run": "first",
+  "steps": {
+   "voice_extract_runner_s": 0.28,
+   "create_project_s": 1.22,
+   "multipart_begin_s": 1.5,
+   "voice_upload_s": 1.27,
+   "submit_s": 5.38,
+   "draft_fetch_s": 2.74
+  },
+  "marks": [
+   [
+    "submitted",
+    9.65
+   ],
+   [
+    "uploaded@None",
+    12.09
+   ],
+   [
+    "analyzing@None",
+    17.02
+   ],
+   [
+    "analyzing@10",
+    23.58
+   ],
+   [
+    "analyzing@42",
+    25.88
+   ],
+   [
+    "analyzing@94",
+    39.81
+   ],
+   [
+    "finished@100",
+    46.69
+   ]
+  ],
+  "video_mb": 30.6,
+  "voice_kb": 163,
+  "state": "finished",
+  "error": "",
+  "cut_done_at": 46.69,
+  "draft_kb": 19,
+  "draft_clips": 2,
+  "result_keys": [
+   "audio_first_sources",
+   "brain_backend",
+   "draft",
+   "engine",
+   "external_brain_calls_enabled",
+   "hybrid_primary_model",
+   "hybrid_provider",
+   "lost_atom_exact_identity_context",
+   "notification",
+   "post_caption",
+   "primary_video",
+   "product_tagging",
+   "project_id",
+   "project_tracking",
+   "project_tracking_start",
+   "schema_version",
+   "source_format_diagnostics",
+   "source_normalization_diagnostics",
+   "stage_status",
+   "state",
+   "timeline_assets"
+  ],
+  "source_normalization_diagnostics": "[]",
+  "video_upload": {
+   "upload_s": 5.53,
+   "parts": 2,
+   "part_mb": 16,
+   "done_at": 15.18,
+   "followup_job": "8a86b7cb-0f6e-4194-a332-680712235edc",
+   "followup_submitted_at": 18.69
+  },
+  "followup_marks": [
+   [
+    "finished@None",
+    51.12
+   ]
+  ],
+  "followup_result": "{\"seconds\": 6.26, \"normalized\": null, \"source_normalization_diagnostics\": null}"
+ },
+ {
+  "video": "30s",
+  "run": "again",
+  "steps": {
+   "voice_extract_runner_s": 0.36,
+   "create_project_s": 1.26,
+   "multipart_begin_s": 0.88,
+   "voice_upload_s": 1.21,
+   "submit_s": 1.96,
+   "draft_fetch_s": 2.06
+  },
+  "marks": [
+   [
+    "submitted",
+    5.68
+   ],
+   [
+    "analyzing@12",
+    8.4
+   ],
+   [
+    "analyzing@42",
+    10.7
+   ],
+   [
+    "analyzing@94",
+    18.3
+   ],
+   [
+    "finished@100",
+    23.19
+   ]
+  ],
+  "video_mb": 30.6,
+  "voice_kb": 163,
+  "state": "finished",
+  "error": "",
+  "cut_done_at": 23.19,
+  "draft_kb": 19,
+  "draft_clips": 2,
+  "result_keys": [
+   "audio_first_sources",
+   "brain_backend",
+   "draft",
+   "engine",
+   "external_brain_calls_enabled",
+   "hybrid_primary_model",
+   "hybrid_provider",
+   "lost_atom_exact_identity_context",
+   "notification",
+   "post_caption",
+   "primary_video",
+   "product_tagging",
+   "project_id",
+   "project_tracking",
+   "project_tracking_start",
+   "schema_version",
+   "source_format_diagnostics",
+   "source_normalization_diagnostics",
+   "stage_status",
+   "state",
+   "timeline_assets"
+  ],
+  "source_normalization_diagnostics": "[]",
+  "video_upload": {
+   "upload_s": 5.47,
+   "parts": 2,
+   "part_mb": 16,
+   "done_at": 11.15,
+   "followup_job": "b7ab6742-f26a-498d-a145-95f5aa9e5bd8",
+   "followup_submitted_at": 14.08
+  },
+  "followup_marks": [
+   [
+    "analyzing@None",
+    26.91
+   ],
+   [
+    "finished@None",
+    33.01
+   ]
+  ],
+  "followup_result": "{\"seconds\": 16.58, \"normalized\": null, \"source_normalization_diagnostics\": null}"
+ },
+ {
+  "video": "60s",
+  "run": "first",
+  "steps": {
+   "voice_extract_runner_s": 0.72,
+   "create_project_s": 1.15,
+   "multipart_begin_s": 1.14,
+   "voice_upload_s": 1.61,
+   "submit_s": 2.07,
+   "draft_fetch_s": 1.92
+  },
+  "marks": [
+   [
+    "submitted",
+    6.69
+   ],
+   [
+    "analyzing@10",
+    9.71
+   ],
+   [
+    "analyzing@42",
+    12.01
+   ],
+   [
+    "analyzing@94",
+    24.31
+   ],
+   [
+    "finished@100",
+    28.85
+   ]
+  ],
+  "video_mb": 60.9,
+  "voice_kb": 343,
+  "state": "finished",
+  "error": "",
+  "cut_done_at": 28.85,
+  "draft_kb": 35,
+  "draft_clips": 4,
+  "result_keys": [
+   "audio_first_sources",
+   "brain_backend",
+   "draft",
+   "engine",
+   "external_brain_calls_enabled",
+   "hybrid_primary_model",
+   "hybrid_provider",
+   "lost_atom_exact_identity_context",
+   "notification",
+   "post_caption",
+   "primary_video",
+   "product_tagging",
+   "project_id",
+   "project_tracking",
+   "project_tracking_start",
+   "schema_version",
+   "source_format_diagnostics",
+   "source_normalization_diagnostics",
+   "stage_status",
+   "state",
+   "timeline_assets"
+  ],
+  "source_normalization_diagnostics": "[]",
+  "video_upload": {
+   "upload_s": 8.26,
+   "parts": 4,
+   "part_mb": 16,
+   "done_at": 14.95,
+   "followup_job": "8bb74871-89a6-4890-b0f2-3f9d94c5b825",
+   "followup_submitted_at": 18.88
+  },
+  "followup_marks": [
+   [
+    "analyzing@None",
+    32.4
+   ],
+   [
+    "finished@None",
+    63.51
+   ]
+  ],
+  "followup_result": "{\"seconds\": 43.64, \"normalized\": null, \"source_normalization_diagnostics\": null}"
+ },
+ {
+  "video": "60s",
+  "run": "again",
+  "steps": {
+   "voice_extract_runner_s": 0.53,
+   "create_project_s": 1.27,
+   "multipart_begin_s": 1.08,
+   "voice_upload_s": 1.07,
+   "submit_s": 2.17,
+   "draft_fetch_s": 2.09
+  },
+  "marks": [
+   [
+    "submitted",
+    6.11
+   ],
+   [
+    "analyzing@12",
+    9.42
+   ],
+   [
+    "analyzing@42",
+    11.87
+   ],
+   [
+    "analyzing@94",
+    29.08
+   ],
+   [
+    "finished@100",
+    34.35
+   ]
+  ],
+  "video_mb": 60.9,
+  "voice_kb": 343,
+  "state": "finished",
+  "error": "",
+  "cut_done_at": 34.35,
+  "draft_kb": 35,
+  "draft_clips": 4,
+  "result_keys": [
+   "audio_first_sources",
+   "brain_backend",
+   "draft",
+   "engine",
+   "external_brain_calls_enabled",
+   "hybrid_primary_model",
+   "hybrid_provider",
+   "lost_atom_exact_identity_context",
+   "notification",
+   "post_caption",
+   "primary_video",
+   "product_tagging",
+   "project_id",
+   "project_tracking",
+   "project_tracking_start",
+   "schema_version",
+   "source_format_diagnostics",
+   "source_normalization_diagnostics",
+   "stage_status",
+   "state",
+   "timeline_assets"
+  ],
+  "source_normalization_diagnostics": "[]",
+  "video_upload": {
+   "upload_s": 6.39,
+   "parts": 4,
+   "part_mb": 16,
+   "done_at": 12.5,
+   "followup_job": "85c91dee-f586-4d2e-b7d2-9ebb0f9f0569",
+   "followup_submitted_at": 16.43
+  },
+  "followup_marks": [
+   [
+    "analyzing@None",
+    38.21
+   ],
+   [
+    "finished@None",
+    99.39
+   ]
+  ],
+  "followup_result": "{\"seconds\": 80.03, \"normalized\": null, \"source_normalization_diagnostics\": null}"
+ }
+]
