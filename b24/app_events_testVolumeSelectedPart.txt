@@ -1,0 +1,2 @@
+audio_session_ready category=Playback mode=MoviePlayback output=Speaker
+video_clip
