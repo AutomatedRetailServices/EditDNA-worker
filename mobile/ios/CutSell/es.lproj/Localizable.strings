@@ -656,6 +656,7 @@
 "Make %@ video%lld" = "Hacer %1$@ video%2$lld";
 "Make %lld video%@" = "Hacer %1$lld video%2$@";
 "Make %lld video%lld" = "Hacer %1$lld video%2$lld";
+"Making your video lighter" = "Haciendo tu video más liviano";
 "Making your video…" = "Haciendo tu video…";
 "Manage" = "Gestionar";
 "Manage local cache and 4K source files" = "Administra la caché local y los originales en 4K";

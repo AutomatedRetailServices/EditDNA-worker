@@ -155,7 +155,12 @@ final class CutSubmitter: ObservableObject {
         defer { if let id = createdProjectID { ActiveUploads.shared.remove(id) } }
 
         do {
-            let uploadVideos: [LocalVideo]
+            var uploadVideos: [LocalVideo]
+            // PO 28 Oct (speed): with "audio first", a 4K / heavy video no longer waits to be made lighter
+            // before its cut starts: the voice goes first, the lighter copy is made in the background.
+            var voiceFirst = false
+            if resumeProjectID == nil { voiceFirst = await ServerCapabilities.audioFirst() }
+            var deferred: Set<Int> = []
             if resumeProjectID != nil {
                 uploadVideos = selected
                 say("Resuming upload…")
@@ -164,6 +169,12 @@ final class CutSubmitter: ObservableObject {
                 for (index, video) in selected.enumerated() {
                     // iCloud light: the original is still downloading; it is uploaded as it is.
                     if video.cloudAssetID != nil { preparedVideos.append(video); continue }
+                    if voiceFirst, await VideoPreparation.shared.needsLighterCopy(fileURL: video.url) {
+                        deferred.insert(index)
+                        preparedVideos.append(video)
+                        CutSellDiagnostics.log("prepare_deferred", ["source_order": String(index)])
+                        continue
+                    }
                     say("Preparing \(index + 1) of \(selected.count)…")
                     let title = selected.count > 1 ? "Preparing video \(index + 1) of \(selected.count)" : "Preparing your video"
                     stage(title)
@@ -221,6 +232,10 @@ final class CutSubmitter: ObservableObject {
                             cloudAssetID: $0.cloudAssetID,
                             expectedBytes: $0.expectedBytes
                         )
+                    }.enumerated().map { index, item in
+                        var item = item
+                        if deferred.contains(index) { item.prepareBeforeUpload = true }
+                        return item
                     },
                     createdAt: Date()
                 )
@@ -232,13 +247,25 @@ final class CutSubmitter: ObservableObject {
             currentProjectID = projectID
             // Build 23 (audio first): the cut starts from the voice (a few hundred KB) while the full
             // video uploads in the background; an older server keeps the whole-video flow below.
-            if resumeProjectID == nil, await ServerCapabilities.audioFirst(),
+            if resumeProjectID == nil, voiceFirst,
                let jobID = try await startFromVoice(projectID: projectID, session: session, videos: uploadVideos,
-                                                    audioOverlap: audioOverlap, autoZoom: autoZoom) {
+                                                    audioOverlap: audioOverlap, autoZoom: autoZoom, reserved: deferred) {
                 lastJobID = jobID
                 report(1)
                 try? await appState.refreshProjects()
                 return projectID
+            }
+            // The whole-video flow uploads the lighter copies: the ones deferred above are made now.
+            for index in deferred.sorted() {
+                let video = uploadVideos[index]
+                let title = uploadVideos.count > 1 ? "Preparing video \(index + 1) of \(uploadVideos.count)" : "Preparing your video"
+                stage(title)
+                let prepared = try await VideoPreparation.shared.prepare(fileURL: video.url, contentType: video.contentType) { [weak self] fraction in
+                    Task { @MainActor in self?.stage(title, fraction) }
+                }
+                if prepared.wasTranscoded { transientPreparedFiles.append(prepared.url) }
+                uploadVideos[index] = LocalVideo(url: prepared.url, name: video.name, duration: video.duration,
+                                                 contentType: prepared.contentType)
             }
             // The whole-video flow needs every original on the iPhone (iCloud light falls back here).
             for (index, video) in uploadVideos.enumerated() where video.cloudAssetID != nil
@@ -348,7 +375,7 @@ extension CutSubmitter {
     /// the background (BackgroundVideoUploads). nil = a clip has no sound track (the whole-video flow
     /// is used instead). Every step is timed in Diagnostics.
     func startFromVoice(projectID: String, session: CutSellSession, videos: [LocalVideo], audioOverlap: Bool,
-                        autoZoom: Bool) async throws -> String? {
+                        autoZoom: Bool, reserved: Set<Int> = []) async throws -> String? {
         let count = videos.count
         func clip(_ index: Int, _ text: String) -> String { count > 1 ? "Clip \(index + 1) of \(count) · \(text)" : text }
         var voices: [URL] = []
@@ -366,9 +393,15 @@ extension CutSubmitter {
         }
         CutSellDiagnostics.log("stage_timing", ["stage": "audio_extract", "seconds": String(format: "%.1f", Date().timeIntervalSince(extractStarted))])
         var starts: [MultipartStartResponse] = []
-        for video in videos {
+        for (index, video) in videos.enumerated() {
+            // A video made lighter later only reserves its place now (its copy uploads there).
+            var size = video.expectedBytes
+            if reserved.contains(index),
+               let bytes = ((try? FileManager.default.attributesOfItem(atPath: video.url.path))?[.size] as? NSNumber)?.int64Value {
+                size = VideoPreparation.reservationBytes(bytes)
+            }
             let start = try await MultipartUploadManager.shared.begin(fileURL: video.url, projectID: projectID, session: session,
-                                                                      contentType: video.contentType, knownSize: video.expectedBytes)
+                                                                      contentType: video.contentType, knownSize: size)
             // The editor plays the iPhone's own copy (the small iCloud copy until the original is here):
             // no download, even before the upload ends.
             await SourceVideoCache.shared.store(fileURL: video.previewURL ?? video.url, uri: start.sourceURI)

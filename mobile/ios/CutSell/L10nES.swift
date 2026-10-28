@@ -563,6 +563,7 @@ enum L10nES {
         "Make videos in batches and plan what to post.": "Haz videos por tandas y planea qué publicar.",
         "Make {} more to fill {}.": "Haz {} más para llenar {}.",
         "Make {} video{}": "Hacer {} video{}",
+        "Making your video lighter": "Haciendo tu video más liviano",
         "Making your video…": "Haciendo tu video…",
         "Manage": "Gestionar",
         "Manage local cache and 4K source files": "Administra la caché local y los originales en 4K",
