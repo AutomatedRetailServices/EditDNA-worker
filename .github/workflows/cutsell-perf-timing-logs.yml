@@ -1,0 +1,101 @@
+name: CutSell perf · timing lines from the worker logs
+
+# Speed diagnosis (PO 28 Oct). READ ONLY: reads the Modal worker's recent logs (no deploy, no run,
+# no paid compute) and keeps only timing facts: job start / end, each Claude call (step, tokens),
+# product tagging seconds, errors. No links, keys, prompts, transcripts or job arguments are kept
+# (the repo is public). Output: perf-results/logs/timing_<stamp>.txt. Runs on push to perf/diagnostico.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [perf/diagnostico]
+
+permissions:
+  contents: write
+
+jobs:
+  logs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Fetch the worker logs
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          pip install -q modal
+          for since in 7d 3d 2d 24h; do
+            modal app logs cutsell-worker --since "$since" --tail 200000 --timestamps > "$RUNNER_TEMP/raw.txt" 2>&1 || true
+            n=$(wc -l < "$RUNNER_TEMP/raw.txt")
+            echo "since=$since lines=$n"
+            if [ "$n" -gt 50 ]; then echo "$since" > "$RUNNER_TEMP/since.txt"; break; fi
+          done
+
+      - name: Keep only timing facts
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          tmp = os.environ["RUNNER_TEMP"]
+          raw = open(f"{tmp}/raw.txt", errors="replace").read().splitlines()
+          since = open(f"{tmp}/since.txt").read().strip() if os.path.exists(f"{tmp}/since.txt") else "?"
+          uuid = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+          stamp = re.compile(r"^(\d{4}-\d\d-\d\d[ T]\d\d:\d\d:\d\d(?:\.\d+)?(?:[+-]\d\d:\d\d|Z)?)")
+          cid = re.compile(r"\b((?:ta|fc|in|ap)-[A-Za-z0-9]{6,})\b")
+          out, shapes = [], []
+          def clean(text):
+              text = re.sub(r"https?://\S+", "<link>", text)
+              text = re.sub(r"(?i)(token|secret|password|key|signature|credential|authorization)\S*\s*[=:]\s*\S+", r"\1=<hidden>", text)
+              text = re.sub(r"\b[A-Za-z0-9+/_-]{40,}\b", "<long>", text)
+              return text
+          for line in raw:
+              m = stamp.match(line)
+              t = m.group(1) if m else "-"
+              c = cid.search(line)
+              who = c.group(1) if c else "-"
+              ids = uuid.findall(line)
+              job = ids[-1] if ids else "-"
+              fact = None
+              if "simple_engine_llm_call" in line:
+                  try:
+                      d = json.loads(line[line.index("{"):line.rindex("}") + 1])
+                      fact = "LLM " + " ".join(f"{k}={d.get(k)}" for k in ("step", "input_tokens", "output_tokens", "cache_read_input_tokens", "effort", "batch", "batch_wait_s"))
+                  except Exception:
+                      fact = "LLM ?"
+              elif "simple_engine_batch_timeout" in line:
+                  fact = "LLM_BATCH_TIMEOUT " + " ".join(re.findall(r"waited_s=\S+", line))
+              elif "product_tagging" in line:
+                  fact = "PRODUCT_TAGGING " + " ".join(re.findall(r"(?:seconds|method|frames|source)[=:]\s*\S+", line))
+              elif "post_caption" in line:
+                  fact = "POST_CAPTION"
+              elif re.search(r"cutsell: cutsell_worker\.[\w.]+\(", line):
+                  fn = re.search(r"cutsell: (cutsell_worker\.[\w.]+)\(", line).group(1)
+                  fact = f"JOB_START {fn}"
+              elif re.search(r"Job OK|Successfully completed", line):
+                  took = re.findall(r"in (\d+:\d\d:\d\d(?:\.\d+)?)", line)
+                  fact = "JOB_OK " + (took[0] if took else "")
+              elif re.search(r"(?i)Traceback|Error|failed|exception", line):
+                  fact = "ERROR " + clean(line[m.end() if m else 0:])[:140]
+              elif re.search(r"(?i)deepgram|transcri|ffmpeg|normaliz|download|upload|video_ready|scene_cut|draft_ready|stage", line):
+                  fact = "NOTE " + clean(line[m.end() if m else 0:])[:140]
+              if fact:
+                  out.append(f"{t}\t{who}\t{job}\t{fact}")
+          # A few raw lines (cleaned, arguments dropped) to see the log format itself.
+          for line in raw[:40]:
+              s = clean(re.sub(r"\(.*\)", "(…)", line))[:200]
+              shapes.append(s)
+          body = [f"since={since} raw_lines={len(raw)} facts={len(out)}", "== format sample =="] + shapes + ["== facts =="] + out[-20000:]
+          open(f"{tmp}/timing.txt", "w").write("\n".join(body) + "\n")
+          print(body[0])
+          PY
+
+      - name: Save to perf-results
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/out"
+          git clone --quiet --depth 1 --branch perf-results "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$dir"
+          mkdir -p "$dir/logs"
+          cp "$RUNNER_TEMP/timing.txt" "$dir/logs/timing_$(date -u +%Y%m%dT%H%M%SZ).txt"
+          cd "$dir"
+          git add -A logs
+          git -c user.name="cutsell-ci" -c user.email="ci@cutsell.invalid" commit --quiet -m "perf timing lines"
+          git push --quiet origin HEAD:perf-results
