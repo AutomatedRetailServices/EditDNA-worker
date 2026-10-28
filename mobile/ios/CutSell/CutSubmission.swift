@@ -158,7 +158,8 @@ final class CutSubmitter: ObservableObject {
             var uploadVideos: [LocalVideo]
             // PO 28 Oct (speed): with "audio first", a 4K / heavy video no longer waits to be made lighter
             // before its cut starts: the voice goes first, the lighter copy is made in the background.
-            let voiceFirst = resumeProjectID == nil && (await ServerCapabilities.audioFirst())
+            var voiceFirst = false
+            if resumeProjectID == nil { voiceFirst = await ServerCapabilities.audioFirst() }
             var deferred: Set<Int> = []
             if resumeProjectID != nil {
                 uploadVideos = selected
