@@ -9,6 +9,7 @@ on:
   workflow_dispatch: {}
   push:
     branches: [perf/diagnostico]
+    paths: [.github/workflows/cutsell-perf-timing-logs.yml]
 
 permissions:
   contents: write

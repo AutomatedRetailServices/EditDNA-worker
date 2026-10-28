@@ -1,0 +1,149 @@
+name: CutSell perf · cut timing (audio first, like the iPhone)
+
+# Speed diagnosis (PO 28 Oct). Times every step of a Record cut on the LIVE server with synthetic
+# spoken test videos (macOS "say" over a test pattern, 1080x1920 HEVC like an iPhone recording; no
+# real video or personal data): ~30 s and ~60 s, each twice in a row (first, then right after).
+# Same path as the app (build 23+ "audio first"): voice extracted -> voice uploaded -> cut starts ->
+# the video uploads meanwhile -> "video-ready" follow-up. Times the job's progress steps
+# (1 picked up · 10 downloaded · 12 transcribing · 42 Claude · 82 composing · 94/100 ready).
+# Cost: 4 cuts on the existing services (Deepgram + Claude + Modal CPU), well under US$1. No deploy.
+# The videos stay on this test machine; only the numbers go to perf-results/cut/.
+
+on:
+  push:
+    branches: [perf/diagnostico]
+    paths: [.github/workflows/cutsell-perf-cut-timing.yml]
+
+concurrency:
+  group: cutsell-perf-cut-timing
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  timing:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Make ~30 s and ~60 s synthetic test videos (HEVC, like the iPhone)
+        run: |
+          brew install ffmpeg >/dev/null
+          say -v Samantha -r 165 -o "$RUNNER_TEMP/s30.aiff" "Hi everyone. Today I want to show you my favorite water bottle. It keeps drinks cold for twenty four hours. Wait, let me say that again. It keeps drinks cold for a full day. It fits in any car cup holder and the lid does not leak. It comes in six colors and the black one is my favorite. The link is in my bio, grab yours today."
+          say -v Samantha -r 165 -o "$RUNNER_TEMP/s60.aiff" "Hi everyone. Today I want to show you my favorite water bottle. It keeps drinks cold for twenty four hours. Wait, let me say that again. It keeps drinks cold for a full day. It fits in any car cup holder. The lid does not leak, even in my bag. I use it at the gym, at work and on long drives. Um, what else. It is made of steel, so it does not hold any smell. It comes in six colors and the black one is my favorite. The handle folds down so it fits in the side pocket of a backpack. Right now it is on sale in my shop. The price is lower than ever this week. If you want one, the link is in my bio. Grab yours today before they sell out. Thank you for watching and see you in the next video."
+          for n in 30 60; do
+            ffmpeg -loglevel error -y -f lavfi -i "testsrc2=s=1080x1920:r=30:d=$n" -i "$RUNNER_TEMP/s$n.aiff" \
+              -t $n -c:v libx265 -tag:v hvc1 -b:v 8M -preset ultrafast -pix_fmt yuv420p -c:a aac -ar 44100 -af apad \
+              "$RUNNER_TEMP/v$n.mov"
+          done
+          ls -la "$RUNNER_TEMP"/v*.mov
+
+      - name: Cut on the live server, timing every step
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess, threading, time, urllib.request, concurrent.futures
+          API = "https://cutsell-api.onrender.com"; T = None
+          tmp = os.environ["RUNNER_TEMP"]
+          def call(m, p, b=None, timeout=300):
+              t0 = time.time()
+              r = urllib.request.Request(API + p, method=m, data=None if b is None else json.dumps(b).encode(),
+                  headers={"content-type": "application/json", **({"authorization": "Bearer " + T} if T else {})})
+              with urllib.request.urlopen(r, timeout=timeout) as x: body = json.load(x)
+              return body, round(time.time() - t0, 2)
+          def put(url, data, ctype=""):
+              req = urllib.request.Request(url, data=data, method="PUT"); req.add_header("Content-Type", ctype)
+              with urllib.request.urlopen(req, timeout=600) as r: return r.headers.get("ETag")
+          s, _ = call("POST", "/v1/auth/session"); T = s["access_token"]; u = s["user_id"]
+          print("::add-mask::" + T)
+          rows = []
+          def run(n, label):
+              row = {"video": f"{n}s", "run": label, "steps": {}, "marks": []}
+              video = open(f"{tmp}/v{n}.mov", "rb").read(); row["video_mb"] = round(len(video) / 1e6, 1)
+              T0 = time.time()
+              # 1) voice out of the video (on the iPhone: AVAssetReader -> AAC 64 kb/s; here ffmpeg, the same file)
+              a0 = time.time()
+              subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", f"{tmp}/v{n}.mov", "-vn", "-c:a", "aac", "-b:a", "64k",
+                              "-ar", "44100", "-ac", "1", f"{tmp}/voice{n}.m4a"], check=True)
+              row["steps"]["voice_extract_runner_s"] = round(time.time() - a0, 2)
+              voice = open(f"{tmp}/voice{n}.m4a", "rb").read(); row["voice_kb"] = len(voice) // 1024
+              p, row["steps"]["create_project_s"] = call("POST", "/v1/projects", {"user_id": u, "title": f"Perf {n}s {label}"})
+              pid = p["project_id"]
+              st, row["steps"]["multipart_begin_s"] = call("POST", "/v1/uploads/multipart/start", {"project_id": pid, "user_id": u,
+                  "original_name": f"v{n}.mov", "content_type": "video/quicktime", "size_bytes": len(video)})
+              v0 = time.time()
+              pre, _ = call("POST", "/v1/uploads/presign", {"project_id": pid, "user_id": u, "original_name": "voice-1.mp4",
+                                                           "content_type": "video/mp4", "size_bytes": len(voice)})
+              put(pre["upload_url"], voice, pre.get("content_type", "video/mp4"))
+              row["steps"]["voice_upload_s"] = round(time.time() - v0, 2)
+              job, row["steps"]["submit_s"] = call("POST", "/v1/flow-b/jobs", {"project_id": pid, "user_id": u, "audio_overlap": True,
+                  "dialogue_overlap_enabled": True, "auto_zoom_enabled": True, "language_hint": None,
+                  "sources": [{"original_name": f"v{n}.mov", "uri": st["source_uri"], "source_order": 0, "duration_sec": float(n),
+                               "metadata": {"audio_uri": pre["source_uri"]}}]})
+              submitted = time.time(); row["marks"].append(("submitted", round(submitted - T0, 2)))
+              # 2) the video uploads meanwhile (8 MB parts, 3 at a time like the app), then "video-ready"
+              up = {}
+              def upload_video():
+                  u0 = time.time()
+                  def part(k):
+                      sg, _ = call("POST", f"/v1/uploads/multipart/{st['upload_id']}/parts/{k}/presign", {"project_id": pid, "user_id": u})
+                      return {"part_number": k, "etag": put(sg["upload_url"], video[(k-1)*st["part_size"]: k*st["part_size"]])}
+                  with concurrent.futures.ThreadPoolExecutor(3) as pool: parts = list(pool.map(part, range(1, st["part_count"] + 1)))
+                  done, _ = call("POST", f"/v1/uploads/multipart/{st['upload_id']}/complete", {"project_id": pid, "user_id": u, "parts": parts})
+                  up["upload_s"] = round(time.time() - u0, 2); up["parts"] = st["part_count"]; up["part_mb"] = st["part_size"] // 1048576
+                  up["done_at"] = round(time.time() - T0, 2)
+                  vr, _ = call("POST", f"/v1/projects/{pid}/video-ready", {"user_id": u, "uri": done["source_uri"], "source_order": 0})
+                  up["followup_job"] = vr.get("job_id"); up["followup_submitted_at"] = round(time.time() - T0, 2)
+              th = threading.Thread(target=upload_video); th.start()
+              last = None
+              while True:
+                  j, _ = call("GET", f"/v1/jobs/{job['job_id']}")
+                  key = f"{j['state']}@{j.get('progress')}"
+                  if key != last:
+                      row["marks"].append((key, round(time.time() - T0, 2))); last = key
+                  if j["state"] in ("finished", "failed", "canceled") or time.time() - submitted > 900: break
+                  time.sleep(0.5)
+              row["state"] = j["state"]; row["error"] = (j.get("error") or "")[:200]
+              row["cut_done_at"] = round(time.time() - T0, 2)
+              snap, row["steps"]["draft_fetch_s"] = call("GET", f"/v1/projects/{pid}/draft?user_id={u}")
+              row["draft_kb"] = len(json.dumps(snap)) // 1024
+              row["draft_clips"] = len((snap.get("draft") or {}).get("selected") or [])
+              res = j.get("result") or {}
+              row["result_keys"] = sorted(res.keys())[:40] if isinstance(res, dict) else []
+              for k in ("source_normalization_diagnostics", "prompt_cache", "usage", "llm_usage", "timings"):
+                  if isinstance(res, dict) and k in res:
+                      row[k] = json.dumps(res[k])[:1500]
+              th.join()
+              row["video_upload"] = up
+              # 3) the follow-up job that handles the video once it is on storage
+              if up.get("followup_job"):
+                  f0 = time.time(); fl = None; fm = []
+                  while True:
+                      fj, _ = call("GET", f"/v1/jobs/{up['followup_job']}")
+                      key = f"{fj['state']}@{fj.get('progress')}"
+                      if key != fl: fm.append((key, round(time.time() - T0, 2))); fl = key
+                      if fj["state"] in ("finished", "failed", "canceled") or time.time() - f0 > 900: break
+                      time.sleep(1)
+                  row["followup_marks"] = fm
+                  fr = fj.get("result") or {}
+                  row["followup_result"] = json.dumps({k: fr.get(k) for k in ("seconds", "normalized", "source_normalization_diagnostics")} if isinstance(fr, dict) else {})[:800]
+              rows.append(row)
+              print(f"::notice title=cut_{n}s_{label}::{row['state']} cut_done_at={row['cut_done_at']}s marks={row['marks']}")
+          for n in (30, 60):
+              run(n, "first")
+              run(n, "again")
+          json.dump(rows, open(f"{tmp}/cut_timing.json", "w"), indent=1)
+          PY
+
+      - name: Save the numbers to perf-results
+        if: always()
+        run: |
+          set -euo pipefail
+          [ -f "$RUNNER_TEMP/cut_timing.json" ] || exit 0
+          dir="$RUNNER_TEMP/out"
+          git clone --quiet --depth 1 --branch perf-results "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$dir"
+          mkdir -p "$dir/cut"
+          cp "$RUNNER_TEMP/cut_timing.json" "$dir/cut/$(date -u +%Y%m%dT%H%M%SZ).json"
+          cd "$dir"
+          git add -A cut
+          git -c user.name="cutsell-ci" -c user.email="ci@cutsell.invalid" commit --quiet -m "cut timing for ${{ github.sha }}"
+          git push --quiet origin HEAD:perf-results
