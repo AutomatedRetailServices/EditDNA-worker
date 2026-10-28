@@ -205,7 +205,7 @@ struct ReadyBanner: View {
     }
 }
 
-/// Bottom tab bar (Figma "Tab Bar": 358 × 88, radius 26).
+/// Bottom tab bar. 28 Oct (PO): a floating white capsule; the active tab in a soft blue bubble.
 /// White Indigo bottom bar (Figma 1164:59 "Nav/White"): floating, white, radius 24, 1 pt #E6E9EF border, soft
 /// shadow; 4 tabs with the label centred under its icon; active = #1769FF + a dot, inactive = black icon, #6B7385 label.
 struct CSTabBar: View {
@@ -219,36 +219,38 @@ struct CSTabBar: View {
                 Button {
                     select(item)
                 } label: {
-                    VStack(spacing: 0) {
+                    VStack(spacing: 2) {
                         Image(item.image)
                             .renderingMode(.template)
                             .resizable()
                             .interpolation(.high)
-                            .frame(width: 26, height: 26)
+                            .frame(width: 24, height: 24)
                             .foregroundStyle(isActive ? CS.accent : CS.wiInk)
-                            .padding(.top, 8)
                         Text(L10n.tr(item.title))
-                            .font(CS.inter(11, isActive ? .semibold : .medium))
+                            .font(CS.inter(11, isActive ? .bold : .medium))
                             .foregroundStyle(isActive ? CS.accent : CS.wiSecondary)
                             .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                             .multilineTextAlignment(.center)
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 3)
-                        Circle().fill(isActive ? CS.accent : .clear).frame(width: 5, height: 5).padding(.top, 4)
-                        Spacer(minLength: 0)
                     }
-                    .frame(maxWidth: .infinity)
+                    // 28 Oct (PO, "bubbly"): the active tab sits in a soft blue bubble.
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(isActive ? CS.accentSoft : .clear, in: Capsule())
+                    .padding(.vertical, 7)
+                    .padding(.horizontal, 4)
                     .contentShape(Rectangle())
+                    .animation(.spring(response: 0.3, dampingFraction: 0.75), value: isActive)
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(isActive ? .isSelected : [])
                 .accessibilityIdentifier("tab_\(item.rawValue)")
             }
         }
-        .frame(height: 66)        // Figma 1164:59: thinner bar, just above the home indicator
-        .background(CS.wiPage, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
-        .shadow(color: Color(fixed: 0x0D1433, opacity: 0.08), radius: 8, x: 0, y: 4)
+        .padding(.horizontal, 6)
+        .frame(height: 68)        // floating capsule just above the home indicator
+        .background(CS.wiPage, in: Capsule())
+        .overlay(Capsule().stroke(CS.wiBorder, lineWidth: 1))
+        .shadow(color: Color(fixed: 0x0D1433, opacity: 0.10), radius: 16, x: 0, y: 8)
         .padding(.horizontal, 16)
         .padding(.bottom, 2)
     }

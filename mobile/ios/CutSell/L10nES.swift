@@ -2,6 +2,10 @@
 // {} = the next value · {n} = the n-th value · {n:es} = "es" when the n-th value is not empty.
 enum L10nES {
     static let table: [String: String] = [
+        "What are we promoting": "¿Qué promocionamos",
+        "today?": "hoy?",
+        "saved editing": "ahorrado editando",
+        "videos edited": "videos editados",
         " and ": " y ",
         " overlay": " superposición",
         " · reminder on": " · recordatorio activado",
