@@ -15,6 +15,8 @@ struct HomeHubView: View {
     @ObservedObject private var tracker = CutTracker.shared
     @ObservedObject private var thumbnails = ThumbnailStore.shared
     @State private var voiceOverSoon = false
+    /// 0 → 1 when the screen opens: the result numbers count up from 0.
+    @State private var countUp: Double = 0
 
     private var recent: [Project] { Array(appState.projects.prefix(3)) }
     /// Turns on the "Faceless video" row once that flow is built.
@@ -57,10 +59,10 @@ struct HomeHubView: View {
 
                     // 4) The two big pills: Record (ink) and Upload (blue).
                     HStack(spacing: 10) {
-                        bigPill(icon: "WIRecord", title: "Record", fill: AnyShapeStyle(CS.wiInk), id: "hubRecord") {
+                        bigPill(icon: "WIRecord", title: "Record", look: .ink, id: "hubRecord") {
                             askPromoting(.record, onRecord)
                         }
-                        bigPill(icon: "WIUpload", title: "Upload", fill: AnyShapeStyle(CS.accentGradient), id: "hubMode_single") {
+                        bigPill(icon: "WIUpload", title: "Upload", look: .blue, id: "hubMode_single") {
                             askPromoting(.upload(.single)) { onUpload(.single) }
                         }
                     }
@@ -125,7 +127,7 @@ struct HomeHubView: View {
     }
 
     /// Big capsule button, 58 high, white icon + label, soft coloured shadow.
-    private func bigPill(icon: String, title: String, fill: AnyShapeStyle, id: String,
+    private func bigPill(icon: String, title: String, look: PuffLook, id: String,
                          action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 8) {
@@ -136,9 +138,9 @@ struct HomeHubView: View {
                     .lineLimit(1).minimumScaleFactor(0.8)
             }
             .foregroundStyle(Color(fixed: 0xFFFFFF))
+            .shadow(color: Color(fixed: 0x000000, opacity: 0.18), radius: 0, x: 0, y: 2)
             .frame(maxWidth: .infinity, minHeight: 58, maxHeight: 58)
-            .background(fill, in: Capsule())
-            .shadow(color: Color(fixed: 0x1769FF, opacity: 0.22), radius: 12, x: 0, y: 8)
+            .puff3D(look, in: Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(BubblePress())
@@ -148,14 +150,12 @@ struct HomeHubView: View {
     /// A round white bubble (58 pt) with the blue icon, the name under it.
     private func bubble(icon: String, title: String, id: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(spacing: 7) {
+            VStack(spacing: 11) {
                 Image(icon).renderingMode(.template).resizable()
                     .frame(width: 22, height: 22)
                     .foregroundStyle(CS.accent)
                     .frame(width: 58, height: 58)
-                    .background(Color(fixed: 0xFFFFFF), in: Circle())
-                    .overlay(Circle().stroke(Color(fixed: 0x1769FF, opacity: 0.10), lineWidth: 1))
-                    .shadow(color: Color(fixed: 0x1769FF, opacity: 0.14), radius: 10, x: 0, y: 6)
+                    .puff3D(.white, in: Circle())
                 Text(L10n.tr(title))
                     .font(CS.inter(11, .semibold))
                     .foregroundStyle(CS.wiInk)
@@ -171,32 +171,59 @@ struct HomeHubView: View {
         .accessibilityIdentifier(id)
     }
 
+    /// "Your results" (PO 28 Oct): the two real numbers -- time saved editing and videos edited -- as two 3D bubbly
+    /// tiles (strong blue, pink-purple) that pop in and count up from 0 when the screen opens.
     private var statsCard: some View {
-        HStack(spacing: 0) {
-            stat(savedText, L10n.tr("saved editing"))
-            Rectangle().fill(CS.wiBorder).frame(width: 1, height: 40)
-            stat("\(editedCount)", L10n.tr("videos edited"))
+        VStack(alignment: .leading, spacing: 12) {
+            Text(L10n.tr("Your results"))
+                .font(CS.inter(19, .heavy))
+                .foregroundStyle(CS.wiInk)
+            HStack(spacing: 12) {
+                resultTile(look: .blue, icon: "WIClock", chip: L10n.tr("20 min / video"), chipColor: Color(fixed: 0x0A55F0),
+                           value: Double(editedCount) * EditStats.minutesSavedPerVideo, minutes: true,
+                           label: L10n.tr("saved editing"), delay: 0)
+                resultTile(look: .pink, icon: "WIPlay", chip: nil, chipColor: .clear,
+                           value: Double(editedCount), minutes: false, label: L10n.tr("videos edited"), delay: 0.12)
+            }
         }
-        .padding(.vertical, 16)
-        .background(Color(fixed: 0xFFFFFF, opacity: 0.85), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(Color(fixed: 0xFFFFFF), lineWidth: 1))
-        .shadow(color: Color(fixed: 0x0D1433, opacity: 0.06), radius: 14, x: 0, y: 6)
+        .onAppear { countUp = 0; withAnimation(.easeOut(duration: 1.4).delay(0.25)) { countUp = 1 } }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("hubStats")
     }
 
-    private func stat(_ value: String, _ label: String) -> some View {
-        VStack(spacing: 2) {
-            Text(value)
-                .font(CS.inter(28, .heavy))
-                .foregroundStyle(CS.accent)
-                .lineLimit(1).minimumScaleFactor(0.7)
-            Text(label)
-                .font(CS.inter(12, .medium))
-                .foregroundStyle(CS.wiSecondary)
+    private func resultTile(look: PuffLook, icon: String, chip: String?, chipColor: Color, value: Double, minutes: Bool,
+                            label: String, delay: Double) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top) {
+                Image(icon).renderingMode(.template).resizable().frame(width: 19, height: 19)
+                    .foregroundStyle(Color(fixed: 0xFFFFFF))
+                    .frame(width: 38, height: 38)
+                    .background(LinearGradient(colors: [Color(fixed: 0xFFFFFF, opacity: 0.38), Color(fixed: 0xFFFFFF, opacity: 0.14)],
+                                               startPoint: .top, endPoint: .bottom), in: Circle())
+                Spacer(minLength: 4)
+                if let chip {
+                    Text(chip).font(CS.inter(11, .heavy)).foregroundStyle(chipColor)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                        .padding(.horizontal, 9).padding(.vertical, 5)
+                        .background(Color(fixed: 0xFFFFFF), in: Capsule())
+                        .shadow(color: Color(fixed: 0x000000, opacity: 0.10), radius: 0, y: 3)
+                }
+            }
+            Spacer(minLength: 8)
+            CountUpText(value: value * countUp, minutes: minutes)
+                .font(CS.inter(32, .heavy))
+                .foregroundStyle(Color(fixed: 0xFFFFFF))
+                .shadow(color: Color(fixed: 0x000000, opacity: 0.18), radius: 0, y: 3)
+                .lineLimit(1).minimumScaleFactor(0.6)
+            Text(label).font(CS.inter(12.5, .bold)).foregroundStyle(Color(fixed: 0xFFFFFF, opacity: 0.92))
                 .lineLimit(1).minimumScaleFactor(0.8)
         }
-        .frame(maxWidth: .infinity)
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 150, maxHeight: 150, alignment: .topLeading)
+        .puff3D(look, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+        .scaleEffect(countUp > 0 ? 1 : 0.85)
+        .opacity(countUp > 0 ? 1 : 0)
+        .animation(.spring(response: 0.5, dampingFraction: 0.55).delay(delay), value: countUp > 0)
     }
 
     private var recentSheet: some View {
@@ -382,6 +409,60 @@ struct HomeLogoHero: View {
             .scaleEffect(x: spin * (0.4 + 0.6 * e), y: 0.4 + 0.6 * e)
             .offset(x: c.dx * e, y: -70 + c.dy * e)
             .opacity(live ? (p < 0.7 ? 1 : (1 - p) / 0.3) : 0)
+    }
+}
+
+/// A number that counts up smoothly (SwiftUI interpolates `value`): minutes as "2h 20m", or a plain count.
+struct CountUpText: View, Animatable {
+    var value: Double
+    let minutes: Bool
+    var animatableData: Double { get { value } set { value = newValue } }
+
+    var body: some View {
+        if minutes {
+            let total = Int(value.rounded()), h = total / 60, m = total % 60
+            Text(h == 0 ? "\(m)m" : (m == 0 ? "\(h)h" : "\(h)h \(m)m"))
+        } else {
+            Text("\(Int(value.rounded()))")
+        }
+    }
+}
+
+enum PuffLook { case ink, blue, pink, white }
+
+/// The 3D "bubbly" look (PO 28 Oct): a darker base under the face (thickness), the face gradient, soft light inside
+/// at the top and soft shade inside at the bottom, and a soft coloured shadow on the floor. No shiny highlights.
+struct Puff3D<S: Shape>: ViewModifier {
+    let look: PuffLook
+    let shape: S
+
+    private var colors: (top: Color, bottom: Color, base: Color, glow: Color) {
+        switch look {
+        case .ink: return (Color(fixed: 0x2A3045), Color(fixed: 0x0B1020), Color(fixed: 0x000000), Color(fixed: 0x0D1433, opacity: 0.25))
+        case .blue: return (Color(fixed: 0x2F7BFF), Color(fixed: 0x0A55F0), Color(fixed: 0x0636B8), Color(fixed: 0x0A55F0, opacity: 0.35))
+        case .pink: return (Color(fixed: 0xFF7DBA), Color(fixed: 0xB83DFF), Color(fixed: 0x7E1FCC), Color(fixed: 0xB83DFF, opacity: 0.30))
+        case .white: return (Color(fixed: 0xFFFFFF), Color(fixed: 0xEEF3FF), Color(fixed: 0xD3DDF5), Color(fixed: 0x1769FF, opacity: 0.16))
+        }
+    }
+
+    func body(content: Content) -> some View {
+        let c = colors
+        return content
+            .background {
+                ZStack {
+                    shape.fill(c.base).offset(y: 6)
+                    shape.fill(LinearGradient(colors: [c.top, c.bottom], startPoint: .top, endPoint: .bottom)
+                        .shadow(.inner(color: Color(fixed: 0xFFFFFF, opacity: 0.32), radius: 4, x: 0, y: 4))
+                        .shadow(.inner(color: Color(fixed: 0x000000, opacity: 0.16), radius: 8, x: 0, y: -9)))
+                }
+                .shadow(color: c.glow, radius: 12, x: 0, y: 12)
+            }
+    }
+}
+
+extension View {
+    func puff3D<S: Shape>(_ look: PuffLook, in shape: S) -> some View {
+        modifier(Puff3D(look: look, shape: shape))
     }
 }
 
