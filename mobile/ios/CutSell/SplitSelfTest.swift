@@ -179,9 +179,16 @@ final class SplitSelfTest: ObservableObject {
         pass(isRed(row[170]) && isRed(row[210]), "part 1's person over part 2 (also past the middle)",
              "x170 \(row[170].r),\(row[170].b) · x210 \(row[210].r),\(row[210].b)")
         pass(isBlue(row[295]), "part 2's person stays", "x295 \(row[295].r),\(row[295].b)")
+        // The room must be part 2's room as it decodes (compared with part 2 itself, not a fixed number:
+        // the synthetic video's own encoding already moves grey 120 a little).
+        let source2 = await Self.row(of: part2, at: 1, y: 400)
         let room = [row[40], row[100], row[245]]
-        pass(room.allSatisfy { abs(Int($0.r) - 120) < 14 && abs(Int($0.b) - 120) < 14 }, "the room is part 2's (whole background)",
-             room.map { "\($0.r)" }.joined(separator: ","))
+        let wanted = source2.map { [$0[40], $0[100], $0[245]] } ?? []
+        pass(wanted.count == 3 && zip(room, wanted).allSatisfy { abs(Int($0.r) - Int($1.r)) < 8 && abs(Int($0.b) - Int($1.b)) < 8 },
+             "the room is part 2's (whole background)",
+             "clone \(room.map { "\($0.r)" }.joined(separator: ",")) · part 2 \(wanted.map { "\($0.r)" }.joined(separator: ","))")
+        let source1 = await Self.row(of: part1, at: 1, y: 400)
+        lines.append("INFO decoded part 1 room \(source1.map { "\($0[40].r)" } ?? "-") · part 2 room \(source2.map { "\($0[40].r)" } ?? "-")")
         // No line in the middle: across the room (x 235..255, away from both people) and on part 1's own side
         // (x 20..140) nothing jumps.
         var jump = 0
