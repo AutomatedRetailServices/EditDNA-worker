@@ -234,9 +234,9 @@ struct YouView: View {
                 .padding(.top, 12)
             }
             .padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 16)
-            .background(CS.accentGradient, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .puff3D(.blue, in: RoundedRectangle(cornerRadius: 24, style: .continuous), depth: 5)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(BubblePress())
         .accessibilityIdentifier("youUsageCard")
     }
 
@@ -335,6 +335,7 @@ struct YouScreen<Content: View>: View {
             .padding(.bottom, 30)
         }
         .scrollBounceBehavior(.basedOnSize)
+        .background(HomeBackdrop())      // 29 Oct (PO): every page on the same soft backdrop
     }
 }
 
@@ -1038,8 +1039,8 @@ enum YouStyle {
 }
 
 extension View {
+    /// 29 Oct (PO): the same white 3D card as the rest of the app.
     func youCard(radius: CGFloat, border: Color = YouStyle.border) -> some View {
-        background(YouStyle.card, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).stroke(border, lineWidth: 1))
+        puff3D(.white, in: RoundedRectangle(cornerRadius: max(radius, 22), style: .continuous), depth: 4)
     }
 }
