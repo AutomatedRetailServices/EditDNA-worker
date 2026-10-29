@@ -4,12 +4,13 @@ import CoreImage.CIFilterBuiltins
 import Foundation
 import Vision
 
-/// Split clone (PO 27 Oct): joins part 1 (left) and part 2 (right) of one fixed shot into one video,
-/// on the iPhone.
-/// - Basic: a soft horizontal mask in the middle (~60 px at 1080 wide) — no visible line.
-/// - Pro (beta): the person of part 1, cut out frame by frame (Vision person segmentation), over the
-///   whole of part 2 — the two "yous" may cross the middle.
-/// The small shift measured before part 2 (the phone moved a little) is applied to part 1.
+/// Clon (beta, PO 29 Oct; was "Split"): joins part 1 (left) and part 2 (right) of one fixed shot into one
+/// video, on the iPhone.
+/// - Silhouette (default): the WHOLE of part 2 (room + person 2) as the background and, on top, ONLY the person
+///   of part 1, cut out frame by frame (Vision person segmentation, .accurate, or .balanced when too slow),
+///   with a soft 3–6 px edge, lined up with part 2 (the measured shift) and matched to part 2's colour/brightness.
+/// - Halves (fallback): left half part 1 + right half part 2 with a soft ~60 px (at 1080) gradient in the middle,
+///   used when the cut-out fails or the phone moved too much.
 /// Length = part 2's; a shorter part 1 holds its last frame. Both sounds are mixed at an even level.
 
 /// How far part 1 must move to line up with part 2: fractions of the width / height, in CoreImage
@@ -22,15 +23,41 @@ struct SplitOffset: Equatable, Sendable {
     var magnitude: Double { (x * x + y * y).squareRoot() }
 }
 
-enum SplitBlend: String, Sendable { case basic, pro }
+enum SplitBlend: String, Sendable { case silhouette, halves }
+
+/// What the silhouette pass saw, frame by frame (the caller falls back to halves when it went badly).
+final class SplitStats: @unchecked Sendable {
+    private let lock = NSLock()
+    private(set) var frames = 0, failed = 0, empty = 0, balancedFrames = 0
+    private(set) var segmentSeconds = 0.0
+    func add(failed f: Bool, empty e: Bool, balanced: Bool, seconds: Double) {
+        lock.lock(); defer { lock.unlock() }
+        frames += 1
+        if f { failed += 1 }
+        if e { empty += 1 }
+        if balanced { balancedFrames += 1 }
+        segmentSeconds += seconds
+    }
+    /// The cut-out worked: Vision answered on most frames and found a person on most of them.
+    var usable: Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard frames > 0 else { return false }
+        return Double(failed) / Double(frames) < 0.2 && Double(empty) / Double(frames) < 0.5
+    }
+    var summary: String {
+        lock.lock(); defer { lock.unlock() }
+        return "frames \(frames) failed \(failed) empty \(empty) balanced \(balancedFrames) seg \(String(format: "%.1f", segmentSeconds)) s"
+    }
+}
 
 enum SplitError: LocalizedError {
-    case noVideo, exportFailed(String), timedOut
+    case noVideo, exportFailed(String), timedOut, silhouetteFailed(String)
     var errorDescription: String? {
         switch self {
         case .noVideo: return "A part has no video."
         case .exportFailed(let detail): return "The video could not be joined. \(detail)"
         case .timedOut: return "Joining took too long."
+        case .silhouetteFailed(let detail): return "The cut-out did not work. \(detail)"
         }
     }
 }
@@ -78,6 +105,18 @@ enum SplitAligner {
         return context.createCGImage(scaled, from: CGRect(x: 0, y: 0, width: width, height: (extent.height * scale).rounded()))
     }
 
+    /// The average colour (linear 0...1 RGB) of a frame.
+    static func average(_ image: CIImage) -> (Double, Double, Double)? {
+        let filter = CIFilter.areaAverage()
+        filter.inputImage = image
+        filter.extent = image.extent
+        guard let out = filter.outputImage else { return nil }
+        var px = [Float](repeating: 0, count: 4)
+        context.render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+                       format: .RGBAf, colorSpace: nil)
+        return (Double(px[0]), Double(px[1]), Double(px[2]))
+    }
+
     /// Part 1's first frame, upright (the ghost lines up with it).
     static func firstFrame(of url: URL) async -> CIImage? {
         let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
@@ -93,7 +132,26 @@ enum SplitAligner {
 
 enum SplitCompositor {
     /// Joins the two parts into a new .mov (same codec family as part 2). `progress` is 0...1.
+    /// More than this (a fraction of the width) and the phone moved too much for a clean cut-out.
+    static let tooFarForSilhouette = 0.08
+
+    /// The shift between the two RECORDED parts (first frames), or nil when Vision can't tell.
+    static func measuredOffset(part1: URL, part2: URL) async -> SplitOffset? {
+        guard let a = await SplitAligner.firstFrame(of: part1), let b = await SplitAligner.firstFrame(of: part2) else { return nil }
+        return SplitAligner.offset(part1: a, live: b)
+    }
+
+    /// Per-channel gains that bring part 1's colour and brightness to part 2's (simple exposure + temperature
+    /// match from the average colour of their first frames), kept within ±18 %.
+    static func colourGains(part1: URL, part2: URL) async -> (Double, Double, Double) {
+        guard let a = await SplitAligner.firstFrame(of: part1), let b = await SplitAligner.firstFrame(of: part2),
+              let ma = SplitAligner.average(a), let mb = SplitAligner.average(b) else { return (1, 1, 1) }
+        func g(_ x: Double, _ y: Double) -> Double { x > 0.02 ? max(0.82, min(1.18, y / x)) : 1 }
+        return (g(ma.0, mb.0), g(ma.1, mb.1), g(ma.2, mb.2))
+    }
+
     static func join(part1: URL, part2: URL, offset: SplitOffset, blend: SplitBlend,
+                     gains: (Double, Double, Double) = (1, 1, 1), stats: SplitStats? = nil,
                      progress: (@Sendable (Double) -> Void)? = nil) async throws -> URL {
         let asset1 = AVURLAsset(url: part1), asset2 = AVURLAsset(url: part2)
         guard let video1 = try await asset1.loadTracks(withMediaType: .video).first,
@@ -160,7 +218,7 @@ enum SplitCompositor {
         videoComposition.instructions = [SplitInstruction(
             timeRange: CMTimeRange(start: .zero, duration: d2), part1: track1.trackID, part2: track2.trackID,
             orientation1: Self.orientation(transform1), orientation2: Self.orientation(transform2),
-            renderSize: renderSize, offset: offset, blend: blend)]
+            renderSize: renderSize, offset: offset, blend: blend, gains: gains, stats: stats ?? SplitStats())]
 
         let hevc = await isHEVC(video2)
         let preset = hevc ? AVAssetExportPresetHEVCHighestQuality : AVAssetExportPresetHighestQuality
@@ -188,6 +246,10 @@ enum SplitCompositor {
         if Task.isCancelled { try? FileManager.default.removeItem(at: output); throw CancellationError() }
         guard export.status == .completed else {
             throw SplitError.exportFailed(export.error?.localizedDescription ?? "")
+        }
+        if blend == .silhouette, let stats, !stats.usable {
+            try? FileManager.default.removeItem(at: output)
+            throw SplitError.silhouetteFailed(stats.summary)
         }
         progress?(1)
         return output
@@ -255,14 +317,17 @@ final class SplitInstruction: NSObject, AVVideoCompositionInstructionProtocol {
     let renderSize: CGSize
     let offset: SplitOffset
     let blend: SplitBlend
+    let gains: (Double, Double, Double)
+    let stats: SplitStats
 
     init(timeRange: CMTimeRange, part1: CMPersistentTrackID, part2: CMPersistentTrackID,
          orientation1: CGImagePropertyOrientation, orientation2: CGImagePropertyOrientation,
-         renderSize: CGSize, offset: SplitOffset, blend: SplitBlend) {
+         renderSize: CGSize, offset: SplitOffset, blend: SplitBlend, gains: (Double, Double, Double), stats: SplitStats) {
         self.timeRange = timeRange
         self.part1 = part1; self.part2 = part2
         self.orientation1 = orientation1; self.orientation2 = orientation2
         self.renderSize = renderSize; self.offset = offset; self.blend = blend
+        self.gains = gains; self.stats = stats
         self.requiredSourceTrackIDs = [NSNumber(value: part1), NSNumber(value: part2)]
     }
 }
@@ -279,12 +344,24 @@ final class SplitVideoCompositor: NSObject, AVVideoCompositing {
     ]
     private let queue = DispatchQueue(label: "cutsell.split.compositor")
     private let context = CIContext(options: [.cacheIntermediates: false])
-    private let segmentation: VNGeneratePersonSegmentationRequest = {
+    /// .accurate first; after a few frames, .balanced if one frame takes longer than ~0.12 s (too slow for a
+    /// 30 s video). One request for the whole video (Vision keeps the edges steady from frame to frame).
+    private var segmentation: VNGeneratePersonSegmentationRequest = SplitVideoCompositor.request(.accurate)
+    private var balanced = false
+    private var timed: [Double] = []
+    private var lastMask: CIImage?
+
+    private static func request(_ quality: VNGeneratePersonSegmentationRequest.QualityLevel) -> VNGeneratePersonSegmentationRequest {
         let request = VNGeneratePersonSegmentationRequest()
-        request.qualityLevel = .balanced
+        request.qualityLevel = quality
         request.outputPixelFormat = kCVPixelFormatType_OneComponent8
         return request
-    }()
+    }
+
+    #if DEBUG
+    /// Self-test only: a stand-in for Vision on synthetic videos (no real person in them).
+    nonisolated(unsafe) static var testMask: ((CIImage) -> CIImage?)?
+    #endif
 
     func renderContextChanged(_ newRenderContext: AVVideoCompositionRenderContext) {}
 
@@ -304,10 +381,32 @@ final class SplitVideoCompositor: NSObject, AVVideoCompositing {
                 let upright1 = CIImage(cvPixelBuffer: frame1).oriented(instruction.orientation1)
                 let move = CGAffineTransform(translationX: CGFloat(instruction.offset.x) * size.width,
                                              y: CGFloat(instruction.offset.y) * size.height)
+                let g = instruction.gains
                 let image1 = Self.fill(upright1, into: size).transformed(by: move)
+                    .applyingFilter("CIColorMatrix", parameters: [
+                        "inputRVector": CIVector(x: g.0, y: 0, z: 0, w: 0),
+                        "inputGVector": CIVector(x: 0, y: g.1, z: 0, w: 0),
+                        "inputBVector": CIVector(x: 0, y: 0, z: g.2, w: 0),
+                    ])
                 let mask: CIImage
-                if instruction.blend == .pro, let person = personMask(upright1) {
-                    mask = Self.fill(person, into: size).transformed(by: move)
+                if instruction.blend == .silhouette {
+                    let started = Date()
+                    let person = personMask(upright1)
+                    let seconds = Date().timeIntervalSince(started)
+                    adapt(seconds)
+                    let found = person.map(Self.hasPerson) ?? false
+                    instruction.stats.add(failed: person == nil, empty: person != nil && !found, balanced: balanced, seconds: seconds)
+                    // A frame Vision misses keeps the last good outline (no flicker); none yet = part 2 only.
+                    let shape = (found ? person : nil) ?? lastMask
+                    if found { lastMask = person }
+                    if let shape {
+                        // A soft 3–6 px edge so the cut-out never looks cut.
+                        let feather = max(1.5, 4 * size.width / 1080)
+                        mask = Self.fill(shape, into: size).transformed(by: move)
+                            .clampedToExtent().applyingGaussianBlur(sigma: feather).cropped(to: canvas)
+                    } else {
+                        mask = CIImage(color: .black).cropped(to: canvas)
+                    }
                 } else {
                     mask = Self.middleMask(size: size)
                 }
@@ -344,8 +443,21 @@ final class SplitVideoCompositor: NSObject, AVVideoCompositing {
             .transformed(by: CGAffineTransform(translationX: (size.width - w) / 2, y: (size.height - h) / 2))
     }
 
-    /// Pro: where the person of part 1 is (white), at the frame's size; nil when Vision can't tell.
+    /// .accurate → .balanced once the first frames show it is too slow for the phone.
+    private func adapt(_ seconds: Double) {
+        guard !balanced else { return }
+        timed.append(seconds)
+        if timed.count >= 8, timed.reduce(0, +) / Double(timed.count) > 0.12 {
+            balanced = true
+            segmentation = Self.request(.balanced)
+        }
+    }
+
+    /// Where the person of part 1 is (white), at the frame's size; nil when Vision can't tell.
     private func personMask(_ image: CIImage) -> CIImage? {
+        #if DEBUG
+        if let testMask = Self.testMask { return testMask(image) }
+        #endif
         let handler = VNImageRequestHandler(ciImage: image, options: [:])
         do { try handler.perform([segmentation]) } catch { return nil }
         guard let buffer = segmentation.results?.first?.pixelBuffer else { return nil }
@@ -353,6 +465,18 @@ final class SplitVideoCompositor: NSObject, AVVideoCompositing {
         let sx = image.extent.width / mask.extent.width, sy = image.extent.height / mask.extent.height
         return mask.transformed(by: CGAffineTransform(scaleX: sx, y: sy))
             .transformed(by: CGAffineTransform(translationX: image.extent.minX, y: image.extent.minY))
-            .clampedToExtent().applyingGaussianBlur(sigma: 2).cropped(to: image.extent)
+            .cropped(to: image.extent)
+    }
+
+    /// The mask shows a person (more than ~1 % of the frame).
+    private static let probe = CIContext(options: [.useSoftwareRenderer: false])
+    static func hasPerson(_ mask: CIImage) -> Bool {
+        let filter = CIFilter.areaAverage()
+        filter.inputImage = mask
+        filter.extent = mask.extent
+        guard let out = filter.outputImage else { return false }
+        var px = [Float](repeating: 0, count: 4)
+        probe.render(out, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+        return px[0] > 0.01
     }
 }

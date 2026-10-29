@@ -36,7 +36,7 @@ struct CreateCameraView: View {
     var previewMode = false
     /// Teleprompter: the product (and Mix section) this recording is for.
     var scriptContext: TeleprompterContext? = nil
-    /// Split clone (PO 27 Oct): the "Split" control, only on the Create tab's Record camera.
+    /// Clon (beta; was Split clone, PO 27 Oct): the "Clon" control, only on the Create tab's Record camera.
     var allowsSplit = false
 
     @StateObject private var camera = CameraController()
@@ -272,11 +272,13 @@ struct CreateCameraView: View {
                     showingSplit = true
                 } label: {
                     VStack(spacing: 4) {
-                        Image(systemName: "rectangle.split.2x1")
-                            .font(.system(size: 27, weight: .regular))
+                        // Clon (beta, PO 29 Oct; was "Split"): two people + a small BETA tag.
+                        Image(systemName: "person.2.fill")
+                            .font(.system(size: 24, weight: .regular))
                             .foregroundStyle(.white)
                             .frame(width: 36, height: 36)
-                        Text(L10n.tr("Split"))
+                            .overlay(alignment: .topTrailing) { CloneBetaTag(size: 7.5).offset(x: 14, y: -6) }
+                        Text(L10n.tr("Clon"))
                             .font(CS.inter(13, .semibold))
                             .lineLimit(1).minimumScaleFactor(0.75)
                             .foregroundStyle(.white)
