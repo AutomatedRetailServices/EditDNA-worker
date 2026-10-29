@@ -171,59 +171,53 @@ struct HomeHubView: View {
         .accessibilityIdentifier(id)
     }
 
-    /// "Your results" (PO 28 Oct): the two real numbers -- time saved editing and videos edited -- as two 3D bubbly
-    /// tiles (strong blue, pink-purple) that pop in and count up from 0 when the screen opens.
+    /// "Your results" (PO 29 Oct, the design she picked): one white 3D card -- a blue 3D clock whose hands turn while
+    /// the time saved counts up, the time saved in big blue, and a pink 3D bubble with the number of videos edited.
+    /// Real numbers only (EditStats: 20 min of hand editing per video). Pops in and counts up when the screen opens.
     private var statsCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let minutes = Double(editedCount) * EditStats.minutesSavedPerVideo
+        return VStack(alignment: .leading, spacing: 12) {
             Text(L10n.tr("Your results"))
                 .font(CS.inter(19, .heavy))
                 .foregroundStyle(CS.wiInk)
-            HStack(spacing: 12) {
-                resultTile(look: .blue, icon: "WIClock", chip: L10n.tr("20 min / video"), chipColor: Color(fixed: 0x0A55F0),
-                           value: Double(editedCount) * EditStats.minutesSavedPerVideo, minutes: true,
-                           label: L10n.tr("saved editing"), delay: 0)
-                resultTile(look: .pink, icon: "WIPlay", chip: nil, chipColor: .clear,
-                           value: Double(editedCount), minutes: false, label: L10n.tr("videos edited"), delay: 0.12)
-            }
-        }
-        .onAppear { countUp = 0; withAnimation(.easeOut(duration: 1.4).delay(0.25)) { countUp = 1 } }
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("hubStats")
-    }
-
-    private func resultTile(look: PuffLook, icon: String, chip: String?, chipColor: Color, value: Double, minutes: Bool,
-                            label: String, delay: Double) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top) {
-                Image(icon).renderingMode(.template).resizable().frame(width: 19, height: 19)
-                    .foregroundStyle(Color(fixed: 0xFFFFFF))
-                    .frame(width: 38, height: 38)
-                    .background(LinearGradient(colors: [Color(fixed: 0xFFFFFF, opacity: 0.38), Color(fixed: 0xFFFFFF, opacity: 0.14)],
-                                               startPoint: .top, endPoint: .bottom), in: Circle())
-                Spacer(minLength: 4)
-                if let chip {
-                    Text(chip).font(CS.inter(11, .heavy)).foregroundStyle(chipColor)
+            HStack(spacing: 14) {
+                ClockFace(minutes: minutes * countUp)
+                    .frame(width: 74, height: 74)
+                VStack(alignment: .leading, spacing: 0) {
+                    CountUpText(value: minutes * countUp, minutes: true)
+                        .font(CS.inter(34, .heavy))
+                        .foregroundStyle(Color(fixed: 0x0A55F0))
+                        .shadow(color: Color(fixed: 0x0A55F0, opacity: 0.16), radius: 0, y: 3)
+                        .lineLimit(1).minimumScaleFactor(0.6)
+                    Text(L10n.tr("saved editing"))
+                        .font(CS.inter(13, .bold))
+                        .foregroundStyle(CS.wiSecondary)
                         .lineLimit(1).minimumScaleFactor(0.8)
-                        .padding(.horizontal, 9).padding(.vertical, 5)
-                        .background(Color(fixed: 0xFFFFFF), in: Capsule())
-                        .shadow(color: Color(fixed: 0x000000, opacity: 0.10), radius: 0, y: 3)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(spacing: 8) {
+                    CountUpText(value: Double(editedCount) * countUp, minutes: false)
+                        .font(CS.inter(23, .heavy))
+                        .foregroundStyle(Color(fixed: 0xFFFFFF))
+                        .shadow(color: Color(fixed: 0x000000, opacity: 0.18), radius: 0, y: 2)
+                        .lineLimit(1).minimumScaleFactor(0.6)
+                        .frame(width: 58, height: 58)
+                        .puff3D(.pink, in: Circle(), depth: 5)
+                    Text(L10n.tr("videos"))
+                        .font(CS.inter(11.5, .bold))
+                        .foregroundStyle(CS.wiInk)
                 }
             }
-            Spacer(minLength: 8)
-            CountUpText(value: value * countUp, minutes: minutes)
-                .font(CS.inter(32, .heavy))
-                .foregroundStyle(Color(fixed: 0xFFFFFF))
-                .shadow(color: Color(fixed: 0x000000, opacity: 0.18), radius: 0, y: 3)
-                .lineLimit(1).minimumScaleFactor(0.6)
-            Text(label).font(CS.inter(12.5, .bold)).foregroundStyle(Color(fixed: 0xFFFFFF, opacity: 0.92))
-                .lineLimit(1).minimumScaleFactor(0.8)
+            .padding(.leading, 18).padding(.trailing, 16).padding(.vertical, 18)
+            .puff3D(.white, in: RoundedRectangle(cornerRadius: 32, style: .continuous))
+            .scaleEffect(countUp > 0 ? 1 : 0.88)
+            .opacity(countUp > 0 ? 1 : 0)
+            .animation(.spring(response: 0.5, dampingFraction: 0.55), value: countUp > 0)
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, minHeight: 150, maxHeight: 150, alignment: .topLeading)
-        .puff3D(look, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
-        .scaleEffect(countUp > 0 ? 1 : 0.85)
-        .opacity(countUp > 0 ? 1 : 0)
-        .animation(.spring(response: 0.5, dampingFraction: 0.55).delay(delay), value: countUp > 0)
+        .onAppear { countUp = 0; withAnimation(.easeOut(duration: 1.4).delay(0.25)) { countUp = 1 } }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(L10n.tr("Your results") + ": " + savedText + " " + L10n.tr("saved editing") + ", \(editedCount) " + L10n.tr("videos"))
+        .accessibilityIdentifier("hubStats")
     }
 
     private var recentSheet: some View {
@@ -428,6 +422,27 @@ struct CountUpText: View, Animatable {
     }
 }
 
+/// The 3D blue clock of "Your results": white face, dark hour hand, blue minute hand; the hands turn with `minutes`.
+struct ClockFace: View, Animatable {
+    var minutes: Double
+    var animatableData: Double { get { minutes } set { minutes = newValue } }
+
+    var body: some View {
+        ZStack {
+            Circle().fill(Color(fixed: 0xFFFFFF))
+                .shadow(color: Color(fixed: 0x0D1433, opacity: 0.18), radius: 3, x: 0, y: 3)
+                .padding(13)
+            Capsule().fill(Color(fixed: 0x0B1020)).frame(width: 4, height: 14)
+                .offset(y: -7).rotationEffect(.degrees(minutes * 0.5))
+            Capsule().fill(Color(fixed: 0x0A55F0)).frame(width: 3, height: 19)
+                .offset(y: -9.5).rotationEffect(.degrees(minutes * 6))
+            Circle().fill(Color(fixed: 0x0B1020)).frame(width: 8, height: 8)
+        }
+        .puff3D(.blue, in: Circle())
+        .accessibilityHidden(true)
+    }
+}
+
 enum PuffLook { case ink, blue, pink, white }
 
 /// The 3D "bubbly" look (PO 28 Oct): a darker base under the face (thickness), the face gradient, soft light inside
@@ -435,6 +450,7 @@ enum PuffLook { case ink, blue, pink, white }
 struct Puff3D<S: Shape>: ViewModifier {
     let look: PuffLook
     let shape: S
+    var depth: CGFloat = 6
 
     private var colors: (top: Color, bottom: Color, base: Color, glow: Color) {
         switch look {
@@ -450,7 +466,7 @@ struct Puff3D<S: Shape>: ViewModifier {
         return content
             .background {
                 ZStack {
-                    shape.fill(c.base).offset(y: 6)
+                    shape.fill(c.base).offset(y: depth)
                     shape.fill(LinearGradient(colors: [c.top, c.bottom], startPoint: .top, endPoint: .bottom)
                         .shadow(.inner(color: Color(fixed: 0xFFFFFF, opacity: 0.32), radius: 4, x: 0, y: 4))
                         .shadow(.inner(color: Color(fixed: 0x000000, opacity: 0.16), radius: 8, x: 0, y: -9)))
@@ -461,8 +477,8 @@ struct Puff3D<S: Shape>: ViewModifier {
 }
 
 extension View {
-    func puff3D<S: Shape>(_ look: PuffLook, in shape: S) -> some View {
-        modifier(Puff3D(look: look, shape: shape))
+    func puff3D<S: Shape>(_ look: PuffLook, in shape: S, depth: CGFloat = 6) -> some View {
+        modifier(Puff3D(look: look, shape: shape, depth: depth))
     }
 }
 
