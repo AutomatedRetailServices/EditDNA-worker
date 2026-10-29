@@ -341,12 +341,13 @@ struct PrimaryButton: View {
             Text(L10n.tr(title))
                 .font(CS.inter(fontSize, .semibold))
                 .foregroundStyle(textColor)
+                .shadow(color: Color(fixed: 0x000000, opacity: 0.16), radius: 0, x: 0, y: 2)
                 .frame(maxWidth: .infinity)
                 .frame(height: height)
-                .background(gradient, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .puff3D(.blue, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous), depth: 5)
                 .opacity(isEnabled ? 1 : 0.45)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(BubblePress())
         .disabled(!isEnabled)
     }
 }
@@ -366,13 +367,9 @@ struct SecondaryButton: View {
                 .foregroundStyle(CS.wiInk)
                 .frame(maxWidth: .infinity)
                 .frame(height: height)
-                .background(CS.wiPage, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .stroke(CS.wiInk, lineWidth: 1.5)
-                )
+                .puff3D(.white, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous), depth: 5)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(BubblePress())
     }
 }
 
@@ -430,10 +427,10 @@ struct OptionCard: View {
             }
             .frame(maxWidth: .infinity)
             .frame(height: 56)
-            .background(CS.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .puff3D(.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous), depth: 4)
             .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(isSelected ? CS.selectedCardBorder : CS.cardBorder, lineWidth: isSelected ? 2 : 1)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(isSelected ? Color(fixed: 0x0A55F0) : .clear, lineWidth: 2)
             )
         }
         .buttonStyle(.plain)
@@ -456,18 +453,7 @@ struct FilterChip: View {
                 .minimumScaleFactor(0.8)
                 .frame(maxWidth: .infinity)
                 .frame(height: 40)
-                .background {
-                    if isSelected {
-                        RoundedRectangle(cornerRadius: 19, style: .continuous).fill(CS.selectedGradient)
-                    } else {
-                        RoundedRectangle(cornerRadius: 19, style: .continuous).fill(CS.chipInactive)
-                    }
-                }
-                .overlay {
-                    if !isSelected {
-                        RoundedRectangle(cornerRadius: 19, style: .continuous).stroke(CS.chipBorder, lineWidth: 1)
-                    }
-                }
+                .puff3D(isSelected ? .blue : .white, in: Capsule(), depth: 3)
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -484,11 +470,9 @@ struct CircleIconButton<Icon: View>: View {
         Button(action: action) {
             icon()
                 .frame(width: size, height: size)
-                // White Indigo: #F3F5F9 with a 1 pt border, black icon.
-                .background(CS.wiSurface2, in: Circle())
-                .overlay(Circle().stroke(CS.wiBorder, lineWidth: 1))
+                .puff3D(.white, in: Circle(), depth: 3)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(BubblePress())
     }
 }
 
@@ -572,7 +556,7 @@ struct BottomSheetOverlay<Content: View>: View {
 /// Dark full-screen background used by every redesigned screen.
 struct ScreenBackground: View {
     var body: some View {
-        CS.wiPage.ignoresSafeArea()
+        HomeBackdrop()      // 29 Oct (PO): the same soft blue backdrop as Create on every screen
     }
 }
 

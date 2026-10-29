@@ -24,7 +24,7 @@ struct CutProgressView: View {
 
     var body: some View {
         ZStack {
-            CS.wiPage.ignoresSafeArea()
+            HomeBackdrop()
             if let cut, cut.isReady, let project = readyProject(cut) {
                 ReadyContent(cut: cut, project: project, onBack: onClose, onReview: { openEditor = true })
             } else {

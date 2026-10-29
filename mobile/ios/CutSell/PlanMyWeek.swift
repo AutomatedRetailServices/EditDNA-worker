@@ -176,7 +176,7 @@ struct PlanMyWeekView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            CS.wiPage.ignoresSafeArea()
+            HomeBackdrop()
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     PlanBackButton(title: "Plan") { dismiss() }.padding(.top, 8)

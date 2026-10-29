@@ -127,7 +127,7 @@ struct YouView: View {
     /// White Indigo Profile (Figma 1174:2): user card, blue plan card, one menu card with dividers.
     var body: some View {
         ZStack {
-            CS.wiPage.ignoresSafeArea()
+            HomeBackdrop()
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     WIHeader { EmptyView() }

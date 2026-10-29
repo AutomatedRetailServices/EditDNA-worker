@@ -5,10 +5,18 @@ import SwiftUI
 extension View {
     /// Figma card: #F8F9FB, 1 pt #E6E9EF border, radius 20, soft shadow (0 2 10, #0D1433 at 8 %).
     func wiCard(radius: CGFloat = 20, fill: Color = CS.wiCard, border: Color = CS.wiBorder, shadow: Bool = true) -> some View {
-        self
-            .background(fill, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).stroke(border, lineWidth: 1))
-            .shadow(color: shadow ? Color(fixed: 0x0D1433, opacity: 0.08) : .clear, radius: 5, x: 0, y: 2)
+        // 29 Oct (PO): every screen follows Create's 3D bubbly line -- the default card is a soft white 3D card.
+        // A card with its own fill (a coloured note, an error) keeps its flat look.
+        Group {
+            if fill == CS.wiCard && shadow {
+                self.puff3D(.white, in: RoundedRectangle(cornerRadius: max(radius, 22), style: .continuous), depth: 4)
+            } else {
+                self
+                    .background(fill, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).stroke(border, lineWidth: 1))
+                    .shadow(color: shadow ? Color(fixed: 0x0D1433, opacity: 0.08) : .clear, radius: 5, x: 0, y: 2)
+            }
+        }
     }
 }
 
@@ -44,8 +52,7 @@ struct WIHeaderIcon: View {
         Image(image).renderingMode(.template).resizable().frame(width: 20, height: 20)
             .foregroundStyle(CS.wiInk)
             .frame(width: 40, height: 40)
-            .background(CS.wiSurface2, in: Circle())
-            .overlay(Circle().stroke(CS.wiBorder, lineWidth: 1))
+            .puff3D(.white, in: Circle(), depth: 3)
             .contentShape(Circle())
     }
 }
@@ -103,7 +110,9 @@ struct WISegmented<ID: Hashable>: View {
                     .minimumScaleFactor(0.7)
                     .padding(.horizontal, 4)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(active ? CS.accent : .clear, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+                    .background {
+                        if active { Capsule().fill(.clear).puff3D(.blue, in: Capsule(), depth: 3) }
+                    }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -266,11 +275,10 @@ struct WIPillButton: View {
             .foregroundStyle(style == .outline ? CS.wiInk : Color(fixed: 0xFFFFFF))
             .frame(maxWidth: .infinity)
             .frame(height: 52)
-            .background(style == .primary ? CS.accent : style == .neutral ? CS.neutralButton : CS.wiPage, in: Capsule())
-            .overlay(Capsule().stroke(style == .outline ? CS.wiInk : .clear, lineWidth: 1.5))
+            .puff3D(style == .primary ? .blue : style == .neutral ? .ink : .white, in: Capsule(), depth: 5)
             .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(BubblePress())
     }
 }
 

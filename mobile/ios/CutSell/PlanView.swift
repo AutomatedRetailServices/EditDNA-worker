@@ -71,7 +71,7 @@ struct PlanView: View {
 
     private var home: some View {
         ZStack {
-            CS.wiPage.ignoresSafeArea()
+            HomeBackdrop()
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     // White Indigo (Figma 1166:107): no Sales Mix / Bulk cards here (they are on Create).

@@ -370,7 +370,7 @@ struct ExportFailedView: View {
 
     var body: some View {
         ZStack {
-            CS.wiPage.ignoresSafeArea()
+            HomeBackdrop()
             ScrollView {
                 VStack(spacing: 0) {
                     WIBackBar(title: "Export failed", onBack: onBack)
