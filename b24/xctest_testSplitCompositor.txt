@@ -1,0 +1,20 @@
+B24UI   264.8 RUNNING INFO silhouette · frames 105 failed 0 empty 0 balanced 0 seg 0.1 s · gains 0.82 0.82 1.09
+B24UI   264.9 PASS part 1's person over part 2 (also past the middle) · x170 210,39 · x210 210,39
+B24UI   264.9 PASS part 2's person stays · x295 36,229
+B24UI   264.9 FAIL the room is part 2's (whole background) · 143,143,143
+B24UI   264.9 PASS no line in the middle of the clone · 0 jumps
+B24UI   264.9 PASS part 1 matched to part 2's brightness · gain 0.82
+B24UI   264.9 PASS the cut-out is toned to part 2 · R 210 (unmatched 220)
+B24UI   264.9 PASS soft edge on the cut-out · 14 px in between
+B24UI   264.9 PASS clone length = part 2 · 7.00 s
+B24UI   264.9 PASS both voices, even level · 440 0.183 · 660 0.183
+B24UI   264.9 PASS no person found → the silhouette reports it (fallback) · frames 105 failed 0 empty 98 balanced 98 seg 170.1 s
+B24UI   264.9 PASS the fallback blend still makes the video · 7.00 s
+B24UI   265.6 FAIL self-test finished
+B24UI   265.6 FAIL all compositor checks pass · FAIL the room is part 2's (whole background) · 143,143,143
+B24UI   265.6 FAILURES: self-test finished | all compositor checks pass
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:1360: error: -[CutSellUITests.Build24UITests testSplitCompositor] : XCTAssertTrue failed - self-test finished | all compositor checks pass
+Test Case '-[CutSellUITests.Build24UITests testSplitCompositor]' failed (267.369 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-29 23:33:11.026.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-29 23:33:11.032.
+Test Suite 'Selected tests' failed at 2026-10-29 23:33:11.032.

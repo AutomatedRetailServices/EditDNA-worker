@@ -1,0 +1,19 @@
+B24UI    12.3 PASS camera_split shows cameraSplit
+B24UI    12.6 camera_split: Flip | Flash | Grid | Mirror | Beta | Clon | ≡ | Script | Upload
+B24UI    20.4 PASS split_setup shows splitStart
+B24UI    20.6 split_setup: Clon | Beta | Record yourself twice. We put both of you in the same room. | Record | Tips | Put your phone on a stand — keep it still | Part 1: stand on the LEFT · Part 2: stand on the RIGHT | Stay on your side — don't walk in front of yourself | When you finish talking, stay and react | Use headphones for part 2
+B24UI    28.5 PASS split_part1 shows splitRecBadge
+B24UI    28.6 split_part1: Part 1 of 2 | REC 0:06 · Part 1 | Stand on the LEFT | Flip | Script
+B24UI    35.6 PASS split_part1_ready shows splitRecordPart2
+B24UI    35.8 split_part1_ready: Part 1 of 2 | Part 1 · 0:08 | Now record part 2 | Part 1 plays as a ghost while you record. Stand on the RIGHT.
+B24UI    43.7 PASS split_part2 shows splitMoved
+B24UI    43.8 split_part2: Part 2 of 2 | Now stand on the RIGHT | Your phone moved — line it up with the ghost | Use headphones to hear part 1 | Script
+B24UI    50.9 PASS split_joining shows splitJoining
+B24UI    51.1 split_joining: Creating your clone… | 42%
+B24UI    60.5 PASS split_result shows splitUse
+B24UI    60.6 split_result: Your clone | Beta
+B24UI    61.9 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testSplitScreens]' passed (61.732 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-29 23:35:24.098.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-29 23:35:24.099.
+Test Suite 'Selected tests' passed at 2026-10-29 23:35:24.099.
