@@ -697,10 +697,11 @@ struct EditorV4View: View {
                 Text(L10n.tr("Export"))
                     .font(CS.inter(14, .semibold))
                     .foregroundStyle(Color(fixed: 0xFFFFFF))
-                    .frame(width: 74, height: 32)
-                    .background(CS.accent, in: RoundedRectangle(cornerRadius: 10))
+                    .shadow(color: Color(fixed: 0x000000, opacity: 0.16), radius: 0, x: 0, y: 1.5)
+                    .frame(width: 78, height: 34)
+                    .puff3D(.blue, in: Capsule(), depth: 4)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(BubblePress())
             .padding(.leading, 8)
             .accessibilityIdentifier("editorExport")
         }
@@ -1909,7 +1910,7 @@ struct ToolbarV4: View {
     }
 
     /// 6 + 51 (icon 34 · 4 · label) + bottom padding (at least 10, or what the home indicator needs).
-    static var height: CGFloat { 6 + 51 + max(10, bottomInset - 14) }
+    static var height: CGFloat { 8 + 62 + max(10, bottomInset - 14) }
 
     let active: EditorTool?
     let onTap: (EditorTool) -> Void
@@ -1919,20 +1920,23 @@ struct ToolbarV4: View {
             HStack(alignment: .top, spacing: 0) {
                 ForEach(EditorTool.allCases, id: \.self) { tool in
                     Button { onTap(tool) } label: {
-                        VStack(spacing: 4) {
-                            // White Indigo (Figma 04_Editor): every icon black (Voice Over too), names grey.
-                            Image(tool.icon).renderingMode(.template).resizable().foregroundStyle(CS.wiInk)
-                                .frame(width: 34, height: 34)
+                        VStack(spacing: 5) {
+                            // 29 Oct (PO): each tool sits in a small 3D bubble (the open one in blue).
+                            Image(tool.icon).renderingMode(.template).resizable()
+                                .foregroundStyle(active == tool ? Color(fixed: 0xFFFFFF) : CS.wiInk)
+                                .frame(width: 24, height: 24)
+                                .frame(width: 38, height: 38)
+                                .puff3D(active == tool ? .blue : .white, in: RoundedRectangle(cornerRadius: 13, style: .continuous), depth: 3)
                             Text(L10n.tr(tool.title))
                                 .font(CS.inter(10.5, .medium))
                                 .foregroundStyle(CS.wiSecondary)
                                 .lineLimit(1)
                                 .fixedSize()
                         }
-                        .frame(width: 53, height: 51)
+                        .frame(width: 56, height: 62)
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(BubblePress())
                     .accessibilityIdentifier("tool_\(tool.rawValue)")
                     if tool == .rotate {
                         Rectangle().fill(CS.wiBorder).frame(width: 1, height: 40)
@@ -1942,7 +1946,7 @@ struct ToolbarV4: View {
             .padding(.leading, 4)
             .padding(.trailing, 6)
         }
-        .padding(.top, 6)
+        .padding(.top, 8)
         .frame(height: Self.height, alignment: .top)
         .background(Color(fixed: 0xF3F5F9, opacity: 0.85).ignoresSafeArea(edges: .bottom))
         .overlay(alignment: .top) { Rectangle().fill(CS.wiBorder).frame(height: 1) }
@@ -1982,9 +1986,8 @@ struct ExportQualityMenu: View {
                 Image("Ed4Chevron").renderingMode(.template).resizable().frame(width: 10, height: 10).foregroundStyle(CS.accent)
             }
             .padding(.leading, 12).padding(.trailing, 10)
-            .frame(width: 108, height: 32)
-            .background(Color(fixed: 0xF3F5F9), in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(CS.wiBorder, lineWidth: 1))
+            .frame(width: 108, height: 34)
+            .puff3D(.white, in: Capsule(), depth: 4)
         }
         .accessibilityLabel(L10n.tr(on4K ? "Export quality: 4K" : "Export quality: 1080p"))
         .accessibilityIdentifier("exportQuality")
@@ -2401,9 +2404,8 @@ struct EditorBackButton: View {
         Image(systemName: "chevron.left")
             .font(.system(size: 12, weight: .bold))
             .foregroundStyle(CS.accent)
-            .frame(width: 26, height: 26)
-            .background(CS.accentSoft, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(Color(fixed: 0x1769FF, opacity: 0.35), lineWidth: 1))
+            .frame(width: 32, height: 32)
+            .puff3D(.white, in: Circle(), depth: 3)      // 29 Oct (PO): 3D like the rest of the app
             .contentShape(Rectangle())
     }
 }
