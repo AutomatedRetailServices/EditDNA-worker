@@ -2,10 +2,10 @@ import AVFoundation
 import CoreImage
 import SwiftUI
 
-/// Split clone (PO 27 Oct): two "yous" in the same room from one fixed shot, joined on the iPhone.
-/// Figma rXfUuJQgwZIZJTuONvU1Z7 · "💡 09 · Record Split (propuesta)" for the style; the cameras are
-/// full screen (not two halves): a dotted guide in the middle, part 1 as a 35 % ghost while part 2 is
-/// recorded. "Use this video" hands the joined video to the same flow as any Record video.
+/// Clon (beta, PO 29 Oct; was "Split"): two "yous" in the same room from one fixed shot, joined on the iPhone
+/// with the SILHOUETTE method (part 2 whole + the cut-out person of part 1; halves as the fallback). The cameras
+/// are full screen: a dotted guide in the middle, part 1 as a 35 % ghost while part 2 is recorded.
+/// "Use this video" hands the joined video to the same flow as any Record video (the engine is unchanged).
 struct SplitCloneView: View {
     enum Step: Equatable { case setup, part1, part1Ready, part2, joining, result }
 
@@ -37,12 +37,10 @@ struct SplitCloneView: View {
 
     // Joining / result
     @State private var joinProgress: Double = 0
-    @State private var basic: URL?
-    @State private var pro: URL?
-    @State private var showing: SplitBlend = .basic
-    @State private var proProgress: Double?
-    @State private var proTask: Task<Void, Never>?
-    @State private var proNotice: String?
+    @State private var joined: URL?
+    @State private var usedBlend: SplitBlend = .silhouette
+    @State private var fallbackNotice: String?
+    @State private var joinTask: Task<Void, Never>?
     @State private var review = AVPlayer()
 
     private var isPreview: Bool { previewStep != nil }
@@ -73,7 +71,7 @@ struct SplitCloneView: View {
         }
     }
 
-    // MARK: 1 · Split screen (white)
+    // MARK: 1 · Clon start screen (white)
 
     private var setupScreen: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -88,14 +86,16 @@ struct SplitCloneView: View {
             .buttonStyle(.plain)
             .accessibilityIdentifier("splitBack")
             .padding(.top, 6)
-            Text(L10n.tr("Split screen")).font(CS.inter(28, .bold)).foregroundStyle(CS.wiInk)
-                .padding(.top, 4)
-            Text(L10n.tr("Record yourself twice. We put both takes together, side by side."))
+            HStack(spacing: 10) {
+                Text(L10n.tr("Clon")).font(CS.inter(28, .bold)).foregroundStyle(CS.wiInk)
+                CloneBetaTag(size: 12)
+            }
+            .padding(.top, 4)
+            Text(L10n.tr("Record yourself twice. We put both of you in the same room."))
                 .font(CS.inter(15, .medium)).foregroundStyle(CS.wiSecondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 6)
-            optionCard.padding(.top, 24)
-            tipsCard.padding(.top, 16)
+            tipsCard.padding(.top, 24)
             Spacer(minLength: 16)
             Button { start() } label: {
                 Text(L10n.tr("Start part 1")).font(CS.inter(16, .bold)).foregroundStyle(Color(fixed: 0xFFFFFF))
@@ -111,46 +111,16 @@ struct SplitCloneView: View {
         .preferredColorScheme(.light)
     }
 
-    private var optionCard: some View {
-        HStack(spacing: 16) {
-            HStack(spacing: 4) {
-                ForEach(0..<2, id: \.self) { _ in
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(LinearGradient(colors: [Color(fixed: 0x2A3350), Color(fixed: 0x0B1020)], startPoint: .top, endPoint: .bottom))
-                        .overlay(Image(systemName: "person.fill").font(.system(size: 18)).foregroundStyle(Color(fixed: 0xFFFFFF).opacity(0.85)))
-                }
-            }
-            .padding(4)
-            .frame(width: 66, height: 118)
-            .background(CS.wiPage, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
-            VStack(alignment: .leading, spacing: 6) {
-                Text(L10n.tr("Left / Right")).font(CS.inter(17, .bold)).foregroundStyle(CS.wiInk)
-                Text(L10n.tr("Best for question & answer, “me vs me” or two opinions."))
-                    .font(CS.inter(13, .medium)).foregroundStyle(CS.wiSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(fixed: 0xEEF3FF), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(CS.accent, lineWidth: 2))
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isSelected)
-        .accessibilityIdentifier("splitOptionLeftRight")
-    }
-
     private static let tips = [
-        "Put your phone on a stand — don't move it",
-        "Part 1: stay on the LEFT · Part 2: stay on the RIGHT",
-        "Don't cross the middle",
+        "Put your phone on a stand — keep it still",
+        "Part 1: stand on the LEFT · Part 2: stand on the RIGHT",
+        "Stay on your side — don't walk in front of yourself",
         "When you finish talking, stay and react",
         "Use headphones for part 2",
     ]
 
     private var tipsCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             Text(L10n.tr("Tips")).font(CS.inter(14, .bold)).foregroundStyle(CS.wiInk)
             ForEach(Self.tips, id: \.self) { tip in
                 HStack(alignment: .top, spacing: 8) {
@@ -162,7 +132,7 @@ struct SplitCloneView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(CS.wiCard, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Color(fixed: 0xFFFFFF), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("splitTips")
@@ -200,7 +170,7 @@ struct SplitCloneView: View {
                 // The label sits in the middle of its own half.
                 HStack(spacing: 0) {
                     if isPart2 { Color.clear.frame(maxWidth: .infinity, maxHeight: 1) }
-                    sideLabel(isPart2 ? "Now stay on the RIGHT" : "Stay on the LEFT")
+                    sideLabel(isPart2 ? "Now stand on the RIGHT" : "Stand on the LEFT")
                         .frame(maxWidth: .infinity)
                     if !isPart2 { Color.clear.frame(maxWidth: .infinity, maxHeight: 1) }
                 }
@@ -387,7 +357,7 @@ struct SplitCloneView: View {
                 Spacer()
                 VStack(spacing: 6) {
                     Text(L10n.tr("Now record part 2")).font(CS.inter(18, .bold)).foregroundStyle(Color(fixed: 0xFFFFFF))
-                    Text(L10n.tr("Part 1 plays as a ghost while you record. Stay on the RIGHT."))
+                    Text(L10n.tr("Part 1 plays as a ghost while you record. Stand on the RIGHT."))
                         .font(CS.inter(13, .medium)).foregroundStyle(Color(fixed: 0xFFFFFF).opacity(0.75))
                         .multilineTextAlignment(.center)
                 }
@@ -417,13 +387,13 @@ struct SplitCloneView: View {
         .preferredColorScheme(.dark)
     }
 
-    // MARK: 5 · Joining + result (white)
+    // MARK: 5 · Creating the clone + result (white)
 
     private var joiningScreen: some View {
         VStack(spacing: 18) {
             Spacer()
             BrandRing(size: 110)
-            Text(L10n.tr("Joining your video…")).font(CS.inter(20, .bold)).foregroundStyle(CS.wiInk)
+            Text(L10n.tr("Creating your clone…")).font(CS.inter(20, .bold)).foregroundStyle(CS.wiInk)
             Text(verbatim: "\(Int((joinProgress * 100).rounded()))%").font(CS.inter(15, .semibold)).foregroundStyle(CS.wiSecondary)
                 .monospacedDigit()
             Spacer()
@@ -436,32 +406,16 @@ struct SplitCloneView: View {
 
     private var resultScreen: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button { backToPart1Ready() } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "chevron.left").font(.system(size: 14, weight: .semibold))
-                    Text(L10n.tr("Back")).font(CS.inter(15, .semibold))
-                }
-                .foregroundStyle(CS.accent).frame(height: 44)
+            HStack(spacing: 10) {
+                Text(L10n.tr("Your clone")).font(CS.inter(24, .bold)).foregroundStyle(CS.wiInk)
+                CloneBetaTag(size: 11)
             }
-            .buttonStyle(.plain)
-            .disabled(proProgress != nil)
-            .accessibilityIdentifier("splitResultBack")
-            .padding(.top, 6)
-            Text(L10n.tr("Your split video")).font(CS.inter(24, .bold)).foregroundStyle(CS.wiInk)
-            ZStack {
+            .padding(.top, 16)
+            Group {
                 if isPreview {
-                    HStack(spacing: 0) { PreviewRoom(side: .left); PreviewRoom(side: .right) }
+                    PreviewRoom(side: .both)
                 } else {
                     PlayerLayerView(player: review, fill: true)
-                }
-                if let proProgress {
-                    Color.black.opacity(0.55)
-                    VStack(spacing: 12) {
-                        BrandRing(size: 72)
-                        Text(L10n.tr("Pro blend… \(Int((proProgress * 100).rounded()))%"))
-                            .font(CS.inter(14, .bold)).foregroundStyle(Color(fixed: 0xFFFFFF)).monospacedDigit()
-                    }
-                    .accessibilityIdentifier("splitProProgress")
                 }
             }
             .frame(width: 250, height: 444)
@@ -469,61 +423,34 @@ struct SplitCloneView: View {
             .frame(maxWidth: .infinity)
             .padding(.top, 14)
             .accessibilityIdentifier("splitResultVideo")
-            if pro != nil {
-                blendPicker.padding(.top, 14).frame(maxWidth: .infinity)
-            }
-            if let proNotice {
-                Text(L10n.tr(proNotice)).font(CS.inter(13, .medium)).foregroundStyle(CS.wiSecondary)
+            if let fallbackNotice {
+                Text(L10n.tr(fallbackNotice)).font(CS.inter(13, .medium)).foregroundStyle(CS.wiSecondary)
                     .frame(maxWidth: .infinity).multilineTextAlignment(.center).padding(.top, 12)
-                    .accessibilityIdentifier("splitProNotice")
+                    .accessibilityIdentifier("splitFallbackNotice")
             }
             Spacer(minLength: 12)
-            if pro == nil {
-                Button { tryPro() } label: {
-                    Text(L10n.tr("Try Pro blend (beta)")).font(CS.inter(16, .bold)).foregroundStyle(CS.wiInk)
+            HStack(spacing: 12) {
+                Button { backToPart1Ready() } label: {
+                    Text(L10n.tr("Retake")).font(CS.inter(16, .bold)).foregroundStyle(CS.wiInk)
                         .frame(maxWidth: .infinity).frame(height: 52)
-                        .background(CS.wiPage, in: Capsule())
+                        .background(Color(fixed: 0xFFFFFF), in: Capsule())
                         .overlay(Capsule().stroke(CS.wiBorder, lineWidth: 1.5))
                 }
                 .buttonStyle(.plain)
-                .disabled(proProgress != nil)
-                .accessibilityIdentifier("splitTryPro")
-                .padding(.bottom, 12)
+                .accessibilityIdentifier("splitResultRetake")
+                Button { useVideo() } label: {
+                    Text(L10n.tr("Use this video")).font(CS.inter(16, .bold)).foregroundStyle(Color(fixed: 0xFFFFFF))
+                        .frame(maxWidth: .infinity).frame(height: 52)
+                        .background(CS.accent, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("splitUse")
             }
-            Button { useVideo() } label: {
-                Text(L10n.tr("Use this video")).font(CS.inter(16, .bold)).foregroundStyle(Color(fixed: 0xFFFFFF))
-                    .frame(maxWidth: .infinity).frame(height: 52)
-                    .background(CS.accent, in: Capsule())
-            }
-            .buttonStyle(.plain)
-            .disabled(proProgress != nil)
-            .accessibilityIdentifier("splitUse")
             .padding(.bottom, 16)
         }
         .padding(.horizontal, 20)
         .background(CS.wiPage.ignoresSafeArea())
         .preferredColorScheme(.light)
-    }
-
-    private var blendPicker: some View {
-        HStack(spacing: 4) {
-            ForEach([SplitBlend.basic, .pro], id: \.self) { blend in
-                let selected = showing == blend
-                Button { show(blend) } label: {
-                    Text(L10n.tr(blend == .basic ? "Basic" : "Pro"))
-                        .font(CS.inter(14, .bold))
-                        .foregroundStyle(selected ? Color(fixed: 0xFFFFFF) : CS.wiInk)
-                        .frame(width: 96, height: 36)
-                        .background(selected ? AnyShapeStyle(CS.accent) : AnyShapeStyle(Color.clear), in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selected ? .isSelected : [])
-                .accessibilityIdentifier(blend == .basic ? "splitShowBasic" : "splitShowPro")
-            }
-        }
-        .padding(4)
-        .background(CS.wiSurface2, in: Capsule())
-        .overlay(Capsule().stroke(CS.wiBorder, lineWidth: 1))
     }
 
     // MARK: Actions
@@ -616,11 +543,11 @@ struct SplitCloneView: View {
     }
 
     private func backToPart1Ready() {
-        proTask?.cancel(); proTask = nil; proProgress = nil
+        joinTask?.cancel(); joinTask = nil
         alignTask?.cancel()
-        ghost.pause()
-        for url in [part2, basic, pro].compactMap({ $0 }) { try? FileManager.default.removeItem(at: url) }
-        part2 = nil; basic = nil; pro = nil; proNotice = nil; showing = .basic
+        ghost.pause(); review.pause()
+        for url in [part2, joined].compactMap({ $0 }) { try? FileManager.default.removeItem(at: url) }
+        part2 = nil; joined = nil; fallbackNotice = nil
         if let part1 { review.replaceCurrentItem(with: AVPlayerItem(url: part1)); loop(review); review.play() }
         step = .part1Ready
     }
@@ -649,78 +576,83 @@ struct SplitCloneView: View {
         guard let part1, let part2 else { return }
         step = .joining
         joinProgress = 0
-        do {
-            let url = try await SplitCompositor.join(part1: part1, part2: part2, offset: offset, blend: .basic) { value in
-                Task { @MainActor in joinProgress = value }
-            }
-            basic = url
-            showing = .basic
-            review.replaceCurrentItem(with: AVPlayerItem(url: url))
-            loop(review)
-            review.play()
-            step = .result
-        } catch {
-            problem = "The video could not be joined. Try recording part 2 again."
-            step = .part1Ready
-        }
-    }
-
-    /// Pro (beta): the person of part 1 over all of part 2. Falls back to Basic when it fails or takes
-    /// longer than 3 minutes.
-    private func tryPro() {
-        guard !isPreview, let part1, let part2, proTask == nil else { return }
-        review.pause()
-        proProgress = 0
-        proNotice = nil
-        let measured = offset
-        proTask = Task {
+        fallbackNotice = nil
+        let started = Date()
+        // The shift between the two recorded parts (more exact than the live check); the live one otherwise.
+        let measured = await SplitCompositor.measuredOffset(part1: part1, part2: part2) ?? offset
+        let gains = await SplitCompositor.colourGains(part1: part1, part2: part2)
+        var blend: SplitBlend = .silhouette
+        var url: URL?
+        var reason = ""
+        if measured.magnitude <= SplitCompositor.tooFarForSilhouette {
+            let stats = SplitStats()
             let work = Task {
-                try await SplitCompositor.join(part1: part1, part2: part2, offset: measured, blend: .pro) { value in
-                    Task { @MainActor in if proProgress != nil { proProgress = value } }
+                try await SplitCompositor.join(part1: part1, part2: part2, offset: measured, blend: .silhouette,
+                                               gains: gains, stats: stats) { value in
+                    Task { @MainActor in joinProgress = value * 0.97 }
                 }
             }
-            let watchdog = Task { try await Task.sleep(for: .seconds(180)); work.cancel() }
+            joinTask = Task { _ = await work.result }
+            // A 30 s clone should take well under this; past it, the simpler blend.
+            let watchdog = Task { try await Task.sleep(for: .seconds(240)); work.cancel() }
             let result = await work.result
             watchdog.cancel()
-            proProgress = nil
-            proTask = nil
             switch result {
-            case .success(let url):
-                pro = url
-                show(.pro)
-            case .failure:
-                proNotice = "Pro blend not available for this video"
-                show(.basic)
+            case .success(let made): url = made
+            case .failure(let error): reason = String(describing: error).prefix(160).description
+            }
+            reason += " " + stats.summary
+        } else {
+            reason = String(format: "moved %.3f", measured.magnitude)
+        }
+        if url == nil {
+            if Task.isCancelled || step != .joining { return }
+            blend = .halves
+            joinProgress = 0
+            do {
+                url = try await SplitCompositor.join(part1: part1, part2: part2, offset: measured, blend: .halves, gains: gains) { value in
+                    Task { @MainActor in joinProgress = value }
+                }
+                fallbackNotice = "We used a simpler blend for this video"
+            } catch {
+                problem = "The video could not be joined. Try recording part 2 again."
+                step = .part1Ready
+                return
             }
         }
-    }
-
-    private func show(_ blend: SplitBlend) {
-        showing = blend
-        guard let url = blend == .pro ? pro : basic else { return }
+        guard let url, step == .joining else { return }
+        let seconds = Date().timeIntervalSince(started)
+        let length = (try? await AVURLAsset(url: url).load(.duration).seconds) ?? 0
+        CutSellDiagnostics.log("clone_joined", ["method": blend.rawValue, "seconds": String(format: "%.1f", seconds),
+                                                "video_s": String(format: "%.1f", length),
+                                                "shift": String(format: "%.3f", measured.magnitude), "note": reason])
+        joined = url
+        usedBlend = blend
         review.replaceCurrentItem(with: AVPlayerItem(url: url))
+        review.isMuted = false
         loop(review)
         review.play()
+        step = .result
     }
 
     private func useVideo() {
-        guard let chosen = showing == .pro ? (pro ?? basic) : basic else { return }
+        guard let chosen = joined else { return }
         review.pause()
-        // Only the chosen video stays on the iPhone.
-        for url in [part1, part2, chosen == pro ? basic : pro].compactMap({ $0 }) where url != chosen {
+        // Only the joined video stays on the iPhone.
+        for url in [part1, part2].compactMap({ $0 }) where url != chosen {
             try? FileManager.default.removeItem(at: url)
         }
         Task {
             let seconds = (try? await AVURLAsset(url: chosen).load(.duration).seconds) ?? 0
-            CutSellDiagnostics.log("split_clone_used", ["blend": showing.rawValue, "seconds": String(format: "%.1f", seconds)])
-            onUse(LocalVideo(url: chosen, name: "Split video", duration: max(0, seconds), contentType: "video/quicktime"))
+            CutSellDiagnostics.log("clone_used", ["method": usedBlend.rawValue, "seconds": String(format: "%.1f", seconds)])
+            onUse(LocalVideo(url: chosen, name: "Clon video", duration: max(0, seconds), contentType: "video/quicktime"))
         }
     }
 
     private func leave() {
         stopTimer()
         alignTask?.cancel()
-        proTask?.cancel()
+        joinTask?.cancel()
         ghost.pause(); review.pause()
         guard !isPreview else { return }
         camera.unlockCamera()
@@ -781,21 +713,40 @@ private struct MiddleGuide: View {
     }
 }
 
-/// Screenshots only: a stand-in for the camera (a room with a person on one side).
+/// Screenshots only: a stand-in for the camera (a room with a person on one side, or both for the result).
 private struct PreviewRoom: View {
-    enum Side { case left, right }
+    enum Side { case left, right, both }
     let side: Side
 
     var body: some View {
         GeometryReader { geo in
             ZStack {
                 LinearGradient(colors: [Color(fixed: 0x3A4256), Color(fixed: 0x161B29)], startPoint: .top, endPoint: .bottom)
-                Image(systemName: "person.fill")
-                    .resizable().scaledToFit()
-                    .frame(width: geo.size.width * 0.32)
-                    .foregroundStyle(Color(fixed: side == .left ? 0xC9B6A6 : 0xA6B8C9))
-                    .position(x: geo.size.width * (side == .left ? 0.27 : 0.73), y: geo.size.height * 0.58)
+                if side != .right { person(geo, x: 0.27, color: 0xC9B6A6) }
+                if side != .left { person(geo, x: 0.73, color: 0xA6B8C9) }
             }
         }
+    }
+
+    private func person(_ geo: GeometryProxy, x: CGFloat, color: UInt32) -> some View {
+        Image(systemName: "person.fill")
+            .resizable().scaledToFit()
+            .frame(width: geo.size.width * 0.32)
+            .foregroundStyle(Color(fixed: color))
+            .position(x: geo.size.width * x, y: geo.size.height * 0.58)
+    }
+}
+
+/// The small "BETA" tag next to Clon: #1769FF, white text, rounded corners.
+struct CloneBetaTag: View {
+    var size: CGFloat = 10
+    var body: some View {
+        Text(verbatim: "BETA")
+            .font(CS.inter(size, .heavy))
+            .tracking(0.4)
+            .foregroundStyle(Color(fixed: 0xFFFFFF))
+            .padding(.horizontal, size * 0.55).padding(.vertical, size * 0.22)
+            .background(Color(fixed: 0x1769FF), in: RoundedRectangle(cornerRadius: size * 0.45, style: .continuous))
+            .accessibilityLabel(L10n.tr("Beta"))
     }
 }
