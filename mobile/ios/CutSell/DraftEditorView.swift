@@ -50,10 +50,10 @@ struct DraftEditorView: View {
                 }
                 .padding(24)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(CS.wiPage.ignoresSafeArea())
+                .background(EditorBackdrop())
             } else {
                 ZStack {
-                    CS.wiPage.ignoresSafeArea()
+                    EditorBackdrop()
                     VStack(spacing: 14) {
                         BrandRing(size: 96)
                         Text(L10n.tr("Opening your cut…")).font(CS.inter(15, .semibold)).foregroundStyle(CS.wiSecondary)

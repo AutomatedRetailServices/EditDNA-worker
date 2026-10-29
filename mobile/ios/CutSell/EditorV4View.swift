@@ -75,7 +75,9 @@ struct EditorV4View: View {
 
     private var content: some View {
         ZStack {
-            Color(hex: 0x050814).ignoresSafeArea()
+            // 29 Oct (PO): the same soft background as the logo area on Create -- pink, lilac and blue glows --
+            // seen around the video and through the lighter panels below it.
+            EditorBackdrop()
             #if DEBUG
             if MixSelfTest.enabled {
                 Text(verbatim: !playback.mixTestLoudness.isEmpty ? playback.mixTestLoudness
@@ -1403,7 +1405,7 @@ struct EditorV4View: View {
                 ToolbarV4(active: activeTool) { tool in toolTapped(tool) }
             }
             // White Indigo: the timeline's light grey reaches the toolbar (no white gap); panels stay white.
-            .background(timelineShown ? Color(fixed: 0xE9ECF1) : CS.wiPage)
+            .background(timelineShown ? Color(fixed: 0xE9ECF1, opacity: 0.72) : Color(fixed: 0xFFFFFF, opacity: 0.7))
         }
     }
 
@@ -1942,7 +1944,7 @@ struct ToolbarV4: View {
         }
         .padding(.top, 6)
         .frame(height: Self.height, alignment: .top)
-        .background(Color(fixed: 0xF3F5F9).ignoresSafeArea(edges: .bottom))
+        .background(Color(fixed: 0xF3F5F9, opacity: 0.85).ignoresSafeArea(edges: .bottom))
         .overlay(alignment: .top) { Rectangle().fill(CS.wiBorder).frame(height: 1) }
     }
 }

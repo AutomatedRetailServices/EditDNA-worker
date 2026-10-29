@@ -292,6 +292,31 @@ struct HomeBackdrop: View {
     }
 }
 
+/// The editor's background (PO 29 Oct): Create's soft backdrop plus the same pink, lilac and blue glows as the
+/// logo area, so they show around the video and through the lighter panels. Still (the editor stays calm).
+struct EditorBackdrop: View {
+    var body: some View {
+        ZStack {
+            HomeBackdrop()
+            GeometryReader { geo in
+                let w = geo.size.width, h = geo.size.height
+                ZStack {
+                    Circle().fill(Color(fixed: 0xFFB3D9, opacity: 0.55)).frame(width: 240, height: 220)
+                        .blur(radius: 60).position(x: w * 0.08, y: h * 0.22)
+                    Circle().fill(Color(fixed: 0xB9C8FF, opacity: 0.65)).frame(width: 260, height: 240)
+                        .blur(radius: 60).position(x: w * 0.95, y: h * 0.12)
+                    Circle().fill(Color(fixed: 0xD9C2FF, opacity: 0.55)).frame(width: 240, height: 220)
+                        .blur(radius: 60).position(x: w * 0.85, y: h * 0.62)
+                    Circle().fill(Color(fixed: 0xFFB3D9, opacity: 0.40)).frame(width: 220, height: 200)
+                        .blur(radius: 60).position(x: w * 0.12, y: h * 0.85)
+                }
+            }
+            .ignoresSafeArea()
+        }
+        .allowsHitTesting(false)
+    }
+}
+
 /// The Create hero (PO 28 Oct): the CutSell logo -- the same bag and name, matte black with a soft puffy volume --
 /// bouncing like jelly, the letters of the name hopping one after another, and a few gold coins popping out of
 /// the bag. Livelier for the first seconds after opening, then calmer. Reduce Motion: still.
