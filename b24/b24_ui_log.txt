@@ -1,7 +1,5 @@
-B24UI    39.8 PASS light: Perfil opens
-B24UI    32.1 PASS a Ready video's ••• in Edits · 6 · all tiles 0
-B24UI    35.5 PASS ••• shows Personal · don't plan
-B24UI    43.1 PASS after marking it: Use in Plan
-B24UI    50.0 PASS back in Plan: Personal · don't plan
-B24UI    51.0 PASS personal videos stay in Edits
-B24UI    51.0 FAILURES: none
+B24UI   183.6 FAIL editor open on a real cut
+B24UI   277.0 FAIL editor tools in Spanish
+B24UI   282.7 missing tool_voiceOver
+B24UI   299.0 missing tool_captions
+B24UI   300.7 FAILURES: editor open on a real cut | editor tools in Spanish
