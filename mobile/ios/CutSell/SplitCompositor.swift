@@ -214,6 +214,9 @@ enum SplitCompositor {
         let videoComposition = AVMutableVideoComposition()
         videoComposition.customVideoCompositorClass = SplitVideoCompositor.self
         videoComposition.renderSize = renderSize
+        videoComposition.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
+        videoComposition.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
+        videoComposition.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
         videoComposition.frameDuration = CMTime(value: 1, timescale: CMTimeScale(max(15, min(60, fps2 > 0 ? fps2.rounded() : 30))))
         videoComposition.instructions = [SplitInstruction(
             timeRange: CMTimeRange(start: .zero, duration: d2), part1: track1.trackID, part2: track2.trackID,
@@ -414,12 +417,15 @@ final class SplitVideoCompositor: NSObject, AVVideoCompositing {
                     kCIInputBackgroundImageKey: image2, kCIInputMaskImageKey: mask,
                 ])
             }
-            context.render(result.cropped(to: canvas), to: output, bounds: canvas, colorSpace: CGColorSpaceCreateDeviceRGB())
+            // sRGB (≈ the video's Rec. 709 curve): rendering to device RGB brightened the whole video (120 -> 143).
+            context.render(result.cropped(to: canvas), to: output, bounds: canvas, colorSpace: Self.outputSpace)
             request.finish(withComposedVideoFrame: output)
         }
     }
 
     func cancelAllPendingVideoCompositionRequests() {}
+
+    private static let outputSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
 
     /// White on the left (part 1), black on the right (part 2), with a soft ~60 px (at 1080) edge.
     static func middleMask(size: CGSize) -> CIImage {
