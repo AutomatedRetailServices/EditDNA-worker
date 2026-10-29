@@ -1,0 +1,6 @@
+B24UI    39.8 PASS light: Perfil opens
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:895: error: -[CutSellUITests.Build24UITests testLightMode] : Failed to tap "prefAppearance" Any: No matches found for first query match sequence: `Descendants matching type Any` -> `Elements matching predicate '"prefAppearance" IN identifiers'`, given input App element pid: 18226
+Test Case '-[CutSellUITests.Build24UITests testLightMode]' failed (78.588 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-29 14:56:46.664.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-29 14:56:46.665.
+Test Suite 'Selected tests' failed at 2026-10-29 14:56:46.667.

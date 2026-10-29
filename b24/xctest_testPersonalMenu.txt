@@ -1,0 +1,10 @@
+B24UI    32.1 PASS a Ready video's ••• in Edits · 6 · all tiles 0
+B24UI    35.5 PASS ••• shows Personal · don't plan
+B24UI    43.1 PASS after marking it: Use in Plan
+B24UI    50.0 PASS back in Plan: Personal · don't plan
+B24UI    51.0 PASS personal videos stay in Edits
+B24UI    51.0 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testPersonalMenu]' passed (54.846 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-29 15:00:43.720.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-29 15:00:43.720.
+Test Suite 'Selected tests' passed at 2026-10-29 15:00:43.721.
