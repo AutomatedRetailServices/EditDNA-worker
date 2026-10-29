@@ -177,7 +177,7 @@ struct HomeHubView: View {
     private var statsCard: some View {
         let minutes = Double(editedCount) * EditStats.minutesSavedPerVideo
         return VStack(alignment: .leading, spacing: 12) {
-            Text(L10n.tr("Your results"))
+            Text(L10n.tr("Stats"))
                 .font(CS.inter(19, .heavy))
                 .foregroundStyle(CS.wiInk)
             HStack(spacing: 14) {
@@ -216,7 +216,7 @@ struct HomeHubView: View {
         }
         .onAppear { countUp = 0; withAnimation(.easeOut(duration: 1.4).delay(0.25)) { countUp = 1 } }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(L10n.tr("Your results") + ": " + savedText + " " + L10n.tr("saved editing") + ", \(editedCount) " + L10n.tr("videos"))
+        .accessibilityLabel(L10n.tr("Stats") + ": " + savedText + " " + L10n.tr("saved editing") + ", \(editedCount) " + L10n.tr("videos"))
         .accessibilityIdentifier("hubStats")
     }
 
