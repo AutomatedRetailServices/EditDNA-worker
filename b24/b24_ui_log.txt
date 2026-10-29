@@ -1,41 +1,41 @@
-B24UI    14.2 PASS no avatar on Create
-B24UI    14.4 PASS no plan meter on Create
-B24UI    14.5 PASS no 'Create more' title
-B24UI    14.7 PASS hubRecord shown
-B24UI    15.0 PASS hubFaceless shown
-B24UI    15.2 PASS hubMix shown
-B24UI    15.5 PASS hubPlanWeek shown
-B24UI    15.7 PASS hubMode_single shown
-B24UI    16.1 PASS hubMode_bulk shown
-B24UI    16.4 PASS hubMode_combine shown
-B24UI    18.6 PASS Record: 'What are you promoting?' first
-B24UI    18.8 PASS Record: no Detect for me
-B24UI    18.9 PASS Record: Continue off without a product
-B24UI    20.8 PASS Record: her products listed
-B24UI    23.6 PASS Record opens the camera
-B24UI    32.6 PASS Faceless: 'What are you promoting?' first
-B24UI    32.9 PASS Faceless: no Detect for me
-B24UI    33.0 PASS Faceless: Continue off without a product
-B24UI    34.3 PASS Faceless: her products listed
-B24UI    37.1 PASS Faceless shows Coming soon
-B24UI    46.8 PASS Sales Mix: 'What are you promoting?' first
-B24UI    47.2 PASS Sales Mix: no Detect for me
-B24UI    47.3 PASS Sales Mix: Continue off without a product
-B24UI    48.6 PASS Sales Mix: her products listed
-B24UI    51.4 PASS Sales Mix opens Sales Mix · Setup
-B24UI    77.2 FAIL Plan my week opens Plan my week
-B24UI    87.4 PASS single: 'What are you promoting?' first
-B24UI    87.8 PASS single: no Detect for me
-B24UI    87.8 PASS single: Continue off without a product
-B24UI    89.2 PASS single: her products listed
-B24UI   100.7 Photos access allowed
-B24UI   103.0 PASS single opens the gallery in single
-B24UI   114.2 PASS bulk: 'What are you promoting?' first
-B24UI   114.3 PASS bulk: Detect for me (Bulk only)
-B24UI   120.3 PASS bulk opens the gallery in bulk
-B24UI   131.9 PASS combine: 'What are you promoting?' first
-B24UI   132.4 PASS combine: no Detect for me
-B24UI   132.5 PASS combine: Continue off without a product
-B24UI   133.9 PASS combine: her products listed
-B24UI   141.1 PASS combine opens the gallery in combine
-B24UI   141.5 FAILURES: Plan my week opens Plan my week
+B24UI    18.4 PASS no avatar on Create
+B24UI    20.7 PASS no plan meter on Create
+B24UI    20.9 PASS no 'Create more' title
+B24UI    22.8 PASS hubRecord shown
+B24UI    25.5 PASS hubFaceless shown
+B24UI    28.0 PASS hubMix shown
+B24UI    29.4 PASS hubPlanWeek shown
+B24UI    30.4 PASS hubMode_single shown
+B24UI    31.9 PASS hubMode_bulk shown
+B24UI    32.9 PASS hubMode_combine shown
+B24UI    36.1 PASS Record: 'What are you promoting?' first
+B24UI    37.1 PASS Record: no Detect for me
+B24UI    37.6 PASS Record: Continue off without a product
+B24UI    40.0 PASS Record: her products listed
+B24UI    43.4 PASS Record opens the camera
+B24UI    56.2 PASS Faceless: 'What are you promoting?' first
+B24UI    57.2 PASS Faceless: no Detect for me
+B24UI    57.6 PASS Faceless: Continue off without a product
+B24UI    59.9 PASS Faceless: her products listed
+B24UI    66.1 PASS Faceless shows Coming soon
+B24UI    77.6 PASS Sales Mix: 'What are you promoting?' first
+B24UI    79.0 PASS Sales Mix: no Detect for me
+B24UI    79.4 PASS Sales Mix: Continue off without a product
+B24UI    80.7 PASS Sales Mix: her products listed
+B24UI    83.9 PASS Sales Mix opens Sales Mix · Setup
+B24UI   131.3 FAIL Plan my week opens Plan my week
+B24UI   146.4 PASS single: 'What are you promoting?' first
+B24UI   147.3 PASS single: no Detect for me
+B24UI   147.5 PASS single: Continue off without a product
+B24UI   149.6 PASS single: her products listed
+B24UI   166.4 Photos access allowed
+B24UI   168.9 PASS single opens the gallery in single
+B24UI   185.2 PASS bulk: 'What are you promoting?' first
+B24UI   186.1 PASS bulk: Detect for me (Bulk only)
+B24UI   194.2 PASS bulk opens the gallery in bulk
+B24UI   203.6 PASS combine: 'What are you promoting?' first
+B24UI   204.2 PASS combine: no Detect for me
+B24UI   204.4 PASS combine: Continue off without a product
+B24UI   206.2 PASS combine: her products listed
+B24UI   214.1 PASS combine opens the gallery in combine
+B24UI   214.4 FAILURES: Plan my week opens Plan my week
