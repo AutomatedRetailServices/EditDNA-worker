@@ -1,3 +1,25 @@
+# Clon (beta) — was "Split clone" (iOS) — branch `feature/split-clone`
+
+**29 Oct 2026 (PO): Split is now "Clon" (BETA) and joins with the SILHOUETTE method.**
+- Camera rail: `person.2.fill` + "Clon" + a small BETA tag (#1769FF). Same id `cameraSplit`.
+- Start screen (white): "Clon" + BETA, "Record yourself twice. We put both of you in the same room.", 5 tips,
+  *Start part 1*. Labels "Stand on the LEFT" / "Now stand on the RIGHT".
+- Join (`SplitCompositor`, blend `.silhouette` by default): the WHOLE of part 2 as the background and only the
+  person of part 1 on top (`VNGeneratePersonSegmentationRequest`, `.accurate`, switching to `.balanced` when a
+  frame takes > ~0.12 s), soft 3–6 px edge, the shift measured between the two RECORDED parts (live check as a
+  backup), part 1 matched to part 2 (per-channel gains from the average colour, ±18 %), length = part 2, the
+  last frame of a shorter part 1 held, both sounds even. Rendered in sRGB with Rec. 709 tags.
+- Fallback `.halves` (soft ~60 px middle) when the cut-out fails (Vision fails on ≥ 20 % of frames or finds
+  no person on ≥ 50 %), takes > 240 s, or the phone moved > 8 % — with "We used a simpler blend for this video".
+- "Creating your clone…" with the BrandRing; result: preview, *Retake*, *Use this video* (same flow as a Record
+  video; the engine is unchanged). Diagnostics: `clone_joined` (method, seconds, video length, shift).
+- Self-test (`split_selftest`, synthetic videos made in the test): silhouette over part 2 (also past the
+  middle), part 2's person and room kept, no line, colour match, soft edge, length, sound, fallback.
+  Speed: the simulator has no Neural Engine (~0.8–1.6 s per frame), so the real speed is read on the iPhone.
+- TestFlight build 64 = `build/clon-and-style` (3D style + big icon + Clon). No merge to `main`, no deploy.
+
+---
+
 # Split clone (iOS) — branch `feature/split-clone`
 
 PO request 27 Oct 2026. Two "yous" in the same room from one fixed shot, joined **on the iPhone**.
