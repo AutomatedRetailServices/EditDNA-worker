@@ -1,16 +1,16 @@
-B24UI    34.6 PASS timeline clips · 2
-B24UI    34.8 before: timelineClip_0= · timelineClip_1=
-B24UI    36.2 after tap clip 0: selected
-B24UI    39.3 PASS Volume panel
-B24UI    41.3 panel texts: Preview video is temporarily unavailable. | 00:00, / 00:38 | 00:00 | • | 00:02 | • | 00:04 | • | Volume | Part 0:00–0:06 | 100% | Only this part changes. Tap it again to change the whole video. | 1080p HD | 00:00 | / 00:38 | Mute | Clean up voice | Removes background noise from the voice | Split | Delete | Mirror | Rotate | Overlay | Voice Over | Audio | Volume | Speed | Captions | Style | This deal saves you money every week
-B24UI    41.4 PASS Volume says Part m:ss–m:ss (not Whole video)
-B24UI    43.8 after mute: selected muted · 
-B24UI    43.8 PASS the selected part is muted
-B24UI    43.8 PASS the other parts are not muted
-B24UI    46.6 after deselect: Preview video is temporarily unavailable. | 00:00, / 00:38 | 00:00 | • | 00:02 | • | 00:04 | • | Volume | Whole video | 100% | Tap a part of the video on the timeline to change only that part. | 1080p HD | 00:00 | / 00:38 | Mute | Clean up voice | Removes background noise from the voice | Split | Delete | Mirror | Rotate | Overlay | Voice Over | Audio | Volume | Speed | Captions | Style | This deal saves you money every week
-B24UI    47.3 PASS nothing selected → Whole video
-B24UI    47.6 FAILURES: none
-Test Case '-[CutSellUITests.Build24UITests testVolumeSelectedPart]' passed (47.880 seconds).
-Test Suite 'Build24UITests' passed at 2026-10-29 15:42:22.572.
-Test Suite 'CutSellUITests.xctest' passed at 2026-10-29 15:42:22.573.
-Test Suite 'Selected tests' passed at 2026-10-29 15:42:22.573.
+B24UI    20.6 PASS timeline clips · 2
+B24UI    20.9 before: timelineClip_0= · timelineClip_1=
+B24UI    22.3 after tap clip 0: selected
+B24UI    25.1 PASS Volume panel
+B24UI    26.1 panel texts: Preview video is temporarily unavailable. | 00:00, / 00:38 | 00:00 | • | 00:02 | • | 00:04 | • | Volume | Part 0:00–0:06 | 100% | Only this part changes. Tap it again to change the whole video. | 1080p HD | 00:00 | / 00:38 | Mute | Clean up voice | Removes background noise from the voice | Split | Delete | Mirror | Rotate | Overlay | Voice Over | Audio | Volume | Speed | Captions | Style | This deal saves you money every week
+B24UI    26.2 PASS Volume says Part m:ss–m:ss (not Whole video)
+B24UI    28.3 after mute: selected muted · 
+B24UI    28.3 PASS the selected part is muted
+B24UI    28.3 PASS the other parts are not muted
+B24UI    31.7 after deselect: Preview video is temporarily unavailable. | 00:00, / 00:38 | 00:00 | • | 00:02 | • | 00:04 | • | Volume | Whole video | 100% | Tap a part of the video on the timeline to change only that part. | 1080p HD | 00:00 | / 00:38 | Mute | Clean up voice | Removes background noise from the voice | Split | Delete | Mirror | Rotate | Overlay | Voice Over | Audio | Volume | Speed | Captions | Style | This deal saves you money every week
+B24UI    31.7 PASS nothing selected → Whole video
+B24UI    31.9 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testVolumeSelectedPart]' passed (34.558 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-29 16:21:13.100.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-29 16:21:13.101.
+Test Suite 'Selected tests' passed at 2026-10-29 16:21:13.102.
