@@ -2,10 +2,12 @@
 used by BOTH the iPhone preview (it downloads and plays the file) and the export (it renders
 with the same file), so what the creator hears is what the video gets.
 
-Cleaning = background-noise reduction + even loudness:
-    highpass 80 Hz -> afftdn (adaptive broadband denoise) -> level to about -20 LUFS (measured)
-    -> agate (pushes the noise left between words down) -> acompressor (evens the voice)
+Cleaning (v2, PO 30 Oct 2026) = the voice alone + even loudness:
+    AI voice isolation (voice_isolation.py: MDX-Net vocals model, drops music and room noise)
+    -> highpass 80 Hz -> level to about -20 LUFS (measured) -> acompressor (evens the voice)
     -> loudnorm -16 LUFS / -1.5 dBTP -> 48 kHz stereo, padded/trimmed to the input's length
+The v1 filter (afftdn + gate) left the music in and made the voice sound "like in a fish tank"; it is
+used only when the voice model cannot run, and the job record says so (method "filter").
 
 The copy keeps the input's timeline (same length, no shift), so a clip plays the same window of
 the cleaned file as of the original.
@@ -16,7 +18,7 @@ What gets cleaned:
     target "asset":  a voice-over / music recording (timeline asset).
 
 Stored next to the project's uploads (deleted with the project / account):
-    {upload_prefix}{user16}/{project16}/clean/v1/{target}-{sha16(id)}.m4a
+    {upload_prefix}{user16}/{project16}/clean/v2/{target}-{sha16(id)}.m4a
 """
 from __future__ import annotations
 
@@ -28,7 +30,7 @@ from pathlib import Path
 
 from .media_probe import probe_media
 
-CLEAN_VERSION = "v1"
+CLEAN_VERSION = "v2"     # v2: AI voice isolation (v1 copies are never reused)
 TARGETS = ("source", "asset")
 #: Longest sound cleaned (a longer source is refused, never half-cleaned).
 MAX_CLEAN_SECONDS = 20 * 60
@@ -79,9 +81,15 @@ def clean_filter_chain(measured_lufs: float | None) -> str:
     return ",".join([*DENOISE, f"volume={gain_db:.2f}dB", GATE, COMPRESSOR, FINAL, _FORMAT])
 
 
-def make_clean_audio(input_path: str, output_path: str) -> dict:
+def voice_filter_chain(measured_lufs: float | None) -> str:
+    """After the voice is isolated: no denoise / gate (they made the "fish tank" sound), only level."""
+    gain_db = 0.0 if measured_lufs is None else max(-20.0, min(30.0, PRE_LEVEL_LUFS - measured_lufs))
+    return ",".join(["highpass=f=80", f"volume={gain_db:.2f}dB", COMPRESSOR, FINAL, _FORMAT])
+
+
+def make_clean_audio(input_path: str, output_path: str, progress=None) -> dict:
     """Write the cleaned copy of `input_path`'s sound to `output_path` (AAC .m4a, same length).
-    Returns facts for the job record."""
+    Returns facts for the job record (`method`: "voice_ai" or, when the model cannot run, "filter")."""
     probe = probe_media(str(input_path))
     if not probe.has_audio:
         raise ValueError("clean_audio_no_sound")
@@ -90,15 +98,34 @@ def make_clean_audio(input_path: str, output_path: str) -> dict:
         raise ValueError("clean_audio_empty")
     if duration > MAX_CLEAN_SECONDS:
         raise ValueError("clean_audio_too_long")
-    measured = _measure_lufs(str(input_path), ",".join(DENOISE))
-    chain = clean_filter_chain(measured) + f",apad=whole_dur={duration:.6f},atrim=duration={duration:.6f}"
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(input_path), "-vn", "-af", chain,
-         "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2", "-movflags", "+faststart", str(output_path)],
-        check=True, capture_output=True, timeout=1200,
-    )
-    return {"duration_sec": round(duration, 3), "measured_lufs": measured}
+    method, model_error, source = "voice_ai", None, str(input_path)
+    voice_wav = str(Path(output_path).with_suffix(".voice.wav"))
+    try:
+        from . import voice_isolation
+        voice_isolation.isolate_file(str(input_path), voice_wav,
+                                     progress=(lambda f: progress(f)) if progress else None)
+        source = voice_wav
+    except Exception as exc:                     # never silent: the record and the log say which cleaning ran
+        method, model_error = "filter", f"{exc.__class__.__name__}: {str(exc)[:120]}"
+        print(f"clean_audio: voice model unavailable, using the v1 filter ({model_error})", flush=True)
+    try:
+        if method == "voice_ai":
+            measured = _measure_lufs(source, "highpass=f=80")
+            chain = voice_filter_chain(measured)
+        else:
+            measured = _measure_lufs(source, ",".join(DENOISE))
+            chain = clean_filter_chain(measured)
+        chain += f",apad=whole_dur={duration:.6f},atrim=duration={duration:.6f}"
+        subprocess.run(
+            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", source, "-vn", "-af", chain,
+             "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2", "-movflags", "+faststart", str(output_path)],
+            check=True, capture_output=True, timeout=1200,
+        )
+    finally:
+        Path(voice_wav).unlink(missing_ok=True)
+    return {"duration_sec": round(duration, 3), "measured_lufs": measured, "method": method,
+            "model_error": model_error}
 
 
 # --- Status record (Redis) and the worker job ----------------------------------------------------
@@ -202,7 +229,8 @@ def ensure_clean_audio(*, user_id: str, project_id: str, target: str, ident: str
     source = local_input or fetch_input(user_id=user_id, project_id=project_id, target=target, ident=ident,
                                         directory=directory, snapshot=snapshot)
     report(35)
-    make_clean_audio(source, local)
+    facts = make_clean_audio(source, local, progress=lambda f: report(35 + int(50 * max(0.0, min(1.0, f)))))
+    print(f"clean_audio: {target} cleaned with {facts.get('method')} ({facts.get('duration_sec')} s)", flush=True)
     report(85)
     storage_routing.default_client().upload_file(local, bucket, key, ExtraArgs={"ContentType": "audio/mp4"})
     report(100)

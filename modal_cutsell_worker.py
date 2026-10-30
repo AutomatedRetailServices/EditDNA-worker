@@ -43,6 +43,16 @@ image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("ffmpeg")
     .pip_install_from_requirements("requirements.cutsell.worker.cpu.txt")
+    # Clean up voice v2 (PO 30 Oct): the voice isolation model (MDX-Net Kim_Vocal_2, 66.8 MB), baked into the
+    # image once and checked by sha256 -- a wrong or missing file fails the image build, never a job.
+    .run_commands(
+        "mkdir -p /root/models",
+        "python -c \"import urllib.request; urllib.request.urlretrieve("
+        "'https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/Kim_Vocal_2.onnx', "
+        "'/root/models/Kim_Vocal_2.onnx')\"",
+        "echo 'ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b  /root/models/Kim_Vocal_2.onnx'"
+        " | sha256sum -c -",
+    )
     .env({
         "CUTSELL_ENGINE": "simple",
         "CUTSELL_EXPORT_DELIVERY_GATE": "technical_qc",
