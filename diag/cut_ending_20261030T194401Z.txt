@@ -1,0 +1,73 @@
+queue cutsell: 11 finished, reading the newest 11
+JOB 92d11b5b ended 2026-10-30 18:09:20.501146+00:00 source 50.64s cut 39.386s words 152 lang es passes 1
+  part 00   0.00-  0.47 hide reason=silencio
+  part 01   0.47-  6.49 KEEP reason=se queda
+  part 02   6.49-  6.55 hide reason=silencio
+Stopping app - uncaught exception raised locally: TypeError("unhashable type: 'slice'").
+  part 03   6.55- 18.84 KEEP reason=se queda
+  part 04  18.84- 21.81 hide reason=frase abandonada
+  part 05  21.81- 26.24 KEEP reason=se queda
+  part 06  26.24- 27.11 hide reason=silencio
+  part 07  27.11- 30.56 KEEP reason=se queda
+  part 08  30.56- 34.07 hide reason=tropiezo
+  part 09  34.07- 36.50 KEEP reason=se queda
+  part 10  36.50- 39.27 hide reason=silencio
+  part 11  39.27- 47.80 KEEP reason=se queda
+  part 12  47.80- 47.84 hide reason=silencio
+  part 13  47.84- 50.56 KEEP reason=se queda
+  part 14  50.56- 50.64 hide reason=silencio
+  captions: 134 words, last caption ends at 39.26s of the cut
+  kept clips: 7; last kept clip ends at source 50.56s
+  word  17.02- 17.18 KEEP len=5 end=-
+  word  17.18- 17.59 KEEP len=5 end=,
+  word  17.59- 17.82 KEEP len=5 end=-
+  word  17.82- 18.07 KEEP len=4 end=-
+  word  18.07- 18.14 KEEP len=2 end=-
+  word  18.14- 18.62 KEEP len=9 end=,
+  word  18.62- 18.70 KEEP len=2 end=-
+  word  18.70- 19.02 hide len=8 end=,
+  word  19.02- 19.34 hide len=5 end=,
+  word  19.34- 19.66 hide len=5 end=,
+  word  19.66- 19.82 hide len=3 end=-
+  word  19.82- 19.98 hide len=2 end=-
+  word  19.98- 20.39 hide len=5 end=,
+  word  20.39- 20.46 hide len=2 end=-
+  word  20.46- 20.70 hide len=4 end=-
+  word  20.70- 21.27 hide len=4 end=-
+  word  21.98- 22.46 KEEP len=4 end=-
+  word  22.46- 22.79 KEEP len=1 end=-
+  word  22.79- 23.50 KEEP len=5 end=,
+  word  23.50- 23.82 KEEP len=4 end=-
+  word  23.82- 23.98 KEEP len=1 end=-
+  word  23.98- 24.62 KEEP len=7 end=,
+  word  24.62- 24.70 KEEP len=1 end=-
+  word  24.70- 25.34 KEEP len=9 end=,
+  word  25.34- 25.59 KEEP len=3 end=-
+  word  25.59- 25.82 KEEP len=4 end=-
+  word  27.28- 27.52 KEEP len=4 end=-
+  word  27.52- 27.68 KEEP len=2 end=-
+  word  27.68- 27.84 KEEP len=2 end=-
+  word  27.84- 28.24 KEEP len=9 end=,
+  word  28.24- 28.32 KEEP len=2 end=-
+  word  28.32- 28.48 KEEP len=5 end=,
+  word  28.48- 28.64 KEEP len=6 end=-
+  word  28.64- 28.80 KEEP len=2 end=-
+  word  28.80- 29.04 KEEP len=3 end=-
+  word  29.04- 29.68 KEEP len=9 end=.
+  word  29.68- 30.32 KEEP len=6 end=,
+  word  30.40- 30.80 hide len=4 end=-
+  word  30.80- 31.44 hide len=5 end=,
+  word  31.52- 31.76 hide len=1 end=-
+  word  31.76- 31.92 hide len=2 end=-
+  word  31.92- 32.56 hide len=7 end=,
+  word  32.72- 33.04 hide len=4 end=-
+  word  33.04- 33.28 hide len=5 end=-
+  word  33.28- 33.52 hide len=4 end=-
+  word  33.52- 34.08 hide len=4 end=,
+  word  34.24- 34.56 KEEP len=4 end=-
+  word  34.56- 34.80 KEEP len=4 end=-
+  word  34.80- 35.28 KEEP len=10 end=,
+Traceback (most recent call last):
+TypeError: unhashable type: 'slice'
+╭───────────────────── Traceback (most recent call last) ──────────────────────╮
+TypeError: unhashable type: 'slice'
