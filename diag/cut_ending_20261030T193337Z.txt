@@ -1,0 +1,24 @@
+queue cutsell: 11 finished, reading the newest 11
+JOB 92d11b5b ended 2026-10-30 18:09:20.501146+00:00 source 50.64s cut 39.386s words 152 lang es passes 1
+  part 00   0.00-  0.47 hide reason=silencio
+Stopping app - uncaught exception raised locally: TypeError("unhashable type: 'slice'").
+  part 01   0.47-  6.49 KEEP reason=se queda
+  part 02   6.49-  6.55 hide reason=silencio
+  part 03   6.55- 18.84 KEEP reason=se queda
+  part 04  18.84- 21.81 hide reason=frase abandonada
+  part 05  21.81- 26.24 KEEP reason=se queda
+  part 06  26.24- 27.11 hide reason=silencio
+  part 07  27.11- 30.56 KEEP reason=se queda
+  part 08  30.56- 34.07 hide reason=tropiezo
+  part 09  34.07- 36.50 KEEP reason=se queda
+  part 10  36.50- 39.27 hide reason=silencio
+  part 11  39.27- 47.80 KEEP reason=se queda
+  part 12  47.80- 47.84 hide reason=silencio
+  part 13  47.84- 50.56 KEEP reason=se queda
+  part 14  50.56- 50.64 hide reason=silencio
+  captions: 134 words, last caption ends at 39.26s of the cut
+  kept clips: 7; last kept clip ends at source 50.56s
+Traceback (most recent call last):
+TypeError: unhashable type: 'slice'
+╭───────────────────── Traceback (most recent call last) ──────────────────────╮
+TypeError: unhashable type: 'slice'
