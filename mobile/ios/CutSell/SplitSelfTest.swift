@@ -153,11 +153,11 @@ final class SplitSelfTest: ObservableObject {
     private func silhouette() async throws {
         let size = CGSize(width: 360, height: 640)
         // Part 1: a brighter grey room (140) and a red "person" from x 150 to 230 -- it crosses the middle (180).
-        let part1 = try await Self.movie(name: "clone-st-p1", size: size, seconds: 5, tone: 440, amplitude: 6_000) { _, x, y in
+        let part1 = try await Self.movie(name: "clone-st-p1t", size: size, seconds: 5, tone: 440, amplitude: 6_000) { _, x, y in
             (x >= 150 && x < 230 && y >= 200 && y < 600) ? (220, 30, 30) : (140, 140, 140)
         }
         // Part 2: the room (120) and a blue person on the right, from x 260 to 330.
-        let part2 = try await Self.movie(name: "clone-st-p2", size: size, seconds: 7, tone: 660, amplitude: 6_000) { _, x, y in
+        let part2 = try await Self.movie(name: "clone-st-p2t", size: size, seconds: 7, tone: 660, amplitude: 6_000) { _, x, y in
             (x >= 260 && x < 330 && y >= 200 && y < 600) ? (30, 30, 220) : (120, 120, 120)
         }
         // A stand-in for Vision: the red shape is "the person".
@@ -256,6 +256,10 @@ final class SplitSelfTest: ObservableObject {
         let video = AVAssetWriterInput(mediaType: .video, outputSettings: [
             AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: w, AVVideoHeightKey: h,
             AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: 4_000_000],
+            // Tagged Rec. 709 like an iPhone SDR recording (untagged test videos decode a little off).
+            AVVideoColorPropertiesKey: [AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+                                        AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+                                        AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2],
         ])
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: video, sourcePixelBufferAttributes: [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
