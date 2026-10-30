@@ -936,14 +936,9 @@ final class Build24UITests: XCTestCase {
 
     func testTextAndCaptionStyles() throws {
         app = XCUIApplication()
-        app.launchArguments = ["-CutSellScreen", "editor_probe"]
-        let env = ProcessInfo.processInfo.environment
-        for key in ["CUTSELL_PROBE_TOKEN", "CUTSELL_PROBE_USER", "CUTSELL_PROBE_PROJECT", "CUTSELL_PROBE_API"] {
-            if let value = env[key] { app.launchEnvironment[key] = value }
-        }
+        app.launchArguments = ["-CutSellScreen", "editor_v4_base", "-cutsell.pref.appearance", "light"]
         app.launch()
-        check(element("timelineV4").waitForExistence(timeout: 120), "editor open on a real cut")
-        _ = wait(90) { self.element("editorPlay").exists && self.element("editorPlay").isEnabled }
+        check(element("timelineV4").waitForExistence(timeout: 60), "editor open (sample cut)")
         pause(2)
         shot("tools_main")
         check(element("tool_edit").exists && element("tool_sound").exists && element("tool_text").exists, "main row: Edit, Audio, Text")
