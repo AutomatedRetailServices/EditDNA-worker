@@ -315,6 +315,8 @@ def process_with_simple_engine(
     diagnostics = {
         "engine": ENGINE_NAME,
         "engine_version": ENGINE_VERSION,
+        # The app shows "Almost no voice in this video, check the cut" when this is true (PO 2026-10-29).
+        "little_speech": any(item.get("little_speech") for item in per_source),
         "simple_engine": {
             "model": _llm.model_name(),
             "asr": "deepgram-nova-3",

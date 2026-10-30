@@ -190,6 +190,7 @@ def test_adapter_returns_the_existing_draft_contract(video):
     assert restored.diagnostics["engine"] == "simple"
     assert [c["w"] for c in engine_diag["captions"]][:4] == ["Este", "producto", "es", "increíble."]
     assert engine_diag["caption_groups"] and engine_diag["sources"][0]["language"] == "es"
+    assert restored.diagnostics["little_speech"] is False                # a normal talk: no notice in the app
 
     # the editor's existing "restore" edit can bring the hidden spoken part back
     edited = draft_edits.restore_clip(payload["draft"], draft.alternates[0].clip_id, position=0)
@@ -1100,3 +1101,5 @@ def test_a_few_quiet_words_then_silence_is_cut_where_the_speech_ends(tmp_path):
     assert selected and " ".join(c.text for c in selected).startswith("Hola")
     assert max(c.end for c in selected) < 4.0                          # the silent 3 s – 25 s is cut away
     assert result.draft.diagnostics["simple_engine"]["sources"][0]["little_speech"] is True
+    payload = json.loads(json.dumps(result_to_dict(result)))           # what the app receives
+    assert draft_from_dict(payload["draft"]).diagnostics["little_speech"] is True
