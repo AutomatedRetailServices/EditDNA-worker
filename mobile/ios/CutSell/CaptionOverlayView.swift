@@ -51,6 +51,8 @@ struct CaptionOverlayView: View {
     let x: Double
     let y: Double
     let scale: Double
+    /// 30 Oct (PO): the look from the Fonts / Style sheet (draft.caption_style); nil = the preset's own look.
+    var style: TextLook? = nil
     /// Set while the Captions panel is open: the caption can be tapped (to
     /// fix its words), dragged and pinched (position and size for the whole video).
     var editing: CaptionEditing? = nil
@@ -110,19 +112,32 @@ struct CaptionOverlayView: View {
         let font = Font.custom(spec.postScriptName, fixedSize: CGFloat(max(1, em)))
         let active = look.kind == .highlight ? cue.activeWordIndex(at: time) : nil
 
-        return CaptionGlyphs(
-            words: colouredText(cue, look: look, activeIndex: active),
-            plain: Text(cue.text),
-            font: font,
-            outline: CGFloat(isBox ? 0 : CaptionLook.outline * safeScale * unitY),
-            shadow: CGFloat(isBox ? 0 : CaptionLook.shadow * safeScale * unitY),
-            // The server's renderer spaces wrapped lines by the render size.
-            lineSpacing: CGFloat(max(0, lineHeight - naturalHeight))
-        )
-        .offset(y: CGFloat(baselineShift))
-        .padding(.horizontal, CGFloat(boxPadding))
-        .padding(.vertical, CGFloat(verticalPadding))
-        .background(look.boxHex.map { Color(captionHex: $0) } ?? Color.clear)
+        let styledPad: CGFloat = {
+            guard let style, style.bgColor != nil, style.bgOpacity > 0 else { return 0 }
+            return CGFloat(16 * safeScale * unitY)
+        }()
+        return Group {
+            if let style {
+                LookedText(text: cue.text, look: style, font: font, unit: CGFloat(safeScale * unitY),
+                           words: cue.words, activeWord: style.highlightColor != nil ? cue.activeWordIndex(at: time) : nil)
+                    .offset(y: CGFloat(baselineShift))
+                    .padding(.vertical, CGFloat(max(0, (lineHeight - naturalHeight) / 2)))
+            } else {
+                CaptionGlyphs(
+                    words: colouredText(cue, look: look, activeIndex: active),
+                    plain: Text(cue.text),
+                    font: font,
+                    outline: CGFloat(isBox ? 0 : CaptionLook.outline * safeScale * unitY),
+                    shadow: CGFloat(isBox ? 0 : CaptionLook.shadow * safeScale * unitY),
+                    // The server's renderer spaces wrapped lines by the render size.
+                    lineSpacing: CGFloat(max(0, lineHeight - naturalHeight))
+                )
+                .offset(y: CGFloat(baselineShift))
+                .padding(.horizontal, CGFloat(boxPadding))
+                .padding(.vertical, CGFloat(verticalPadding))
+                .background(look.boxHex.map { Color(captionHex: $0) } ?? Color.clear)
+            }
+        }
         .overlay {
             if editing != nil {
                 // Shows the caption can be moved and resized.
@@ -131,7 +146,7 @@ struct CaptionOverlayView: View {
                     .padding(-4)
             }
         }
-        .frame(width: CGFloat(placement.column * unitX + 2 * boxPadding))
+        .frame(width: CGFloat(placement.column * unitX + 2 * (style == nil ? boxPadding : Double(styledPad))))
         .modifier(CaptionTapModifier(onTap: onTap))
         .modifier(CaptionMoveModifier(
             isActive: editing != nil,

@@ -29,6 +29,7 @@ struct DraftPlaybackView: View {
                             x: model.captionX,
                             y: model.captionY,
                             scale: model.captionScale,
+                            style: model.captionStyle,
                             editing: editing(for: cue)
                         )
                     }

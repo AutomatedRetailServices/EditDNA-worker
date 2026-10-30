@@ -880,10 +880,7 @@ struct ExportOverlayLayer: View {
                 let start = item["start"]?.doubleValue ?? 0
                 let end = item["end"]?.doubleValue ?? start
                 if time >= start && time < end {
-                    Text(L10n.tr(item["text"]?.stringValue ?? ""))
-                        .font(CS.inter(CGFloat(18 * (item["scale"]?.doubleValue ?? 1)), .bold))
-                        .foregroundStyle(.white)
-                        .shadow(color: .black.opacity(0.6), radius: 2)
+                    TextOverlayLabel(item: item, look: model.textLook(item), font: model.textFont(item))
                         .position(x: frame.width * CGFloat(item["x"]?.doubleValue ?? 0.5),
                                   y: frame.height * CGFloat(item["y"]?.doubleValue ?? 0.2))
                 }
@@ -896,7 +893,8 @@ struct ExportOverlayLayer: View {
             }
             if model.captionsEnabled {
                 CaptionOverlayView(cue: cues.first { time >= $0.start && time < $0.end }, time: time, preset: model.captionPreset,
-                                   fontKey: model.captionFont, x: model.captionX, y: model.captionY, scale: model.captionScale)
+                                   fontKey: model.captionFont, x: model.captionX, y: model.captionY, scale: model.captionScale,
+                                   style: model.captionStyle)
             }
         }
         .frame(width: frame.width, height: frame.height)

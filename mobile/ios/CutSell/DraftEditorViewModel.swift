@@ -133,6 +133,9 @@ final class DraftEditorViewModel: ObservableObject {
     private var overlayUploads: Set<String> = []
     /// The overlay just added (the editor selects it).
     @Published var lastAddedOverlayID: String?
+    /// 30 Oct: a look being changed in the Fonts / Style sheet (a slider still moving), drawn at once and
+    /// saved when the finger lifts. Key "captions" or a text overlay id.
+    @Published var liveLooks: [String: TextLook] = [:]
     /// An overlay that finished uploading: its upload id and its id on the draft.
     @Published var placedOverlayRename: OverlayRename?
     /// A full-screen B-roll video going into the main track (upload %).

@@ -143,7 +143,7 @@ struct EditorV2View: View {
                     let cue = playback.captionCue(at: playback.currentTime)
                     CaptionOverlayView(
                         cue: cue, time: playback.currentTime, preset: model.captionPreset, fontKey: model.captionFont,
-                        x: model.captionX, y: model.captionY, scale: model.captionScale, editing: nil
+                        x: model.captionX, y: model.captionY, scale: model.captionScale, style: model.captionStyle, editing: nil
                     )
                 }
                 if !playback.isPlaying && !playback.isBuilding {

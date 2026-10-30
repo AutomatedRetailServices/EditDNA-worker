@@ -62,10 +62,10 @@ def test_phrase_rules_equal_the_servers():
 # The nine typefaces: same list, same sizes, the server's own files.
 # ---------------------------------------------------------------------------
 
-def test_the_app_offers_exactly_the_servers_nine_fonts():
+def test_the_app_offers_exactly_the_servers_fonts():
     fonts = _swift_fonts()
     assert set(fonts) == set(caption_render.CAPTION_FONTS)
-    assert len(fonts) == 9
+    assert len(fonts) == 33          # 9 + 24 added 30 Oct (PO)
     assert f'static let defaultKey = "{caption_render.DEFAULT_CAPTION_FONT}"' in RULES.read_text()
 
 

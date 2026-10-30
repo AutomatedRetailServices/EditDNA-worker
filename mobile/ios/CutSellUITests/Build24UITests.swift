@@ -920,7 +920,7 @@ final class Build24UITests: XCTestCase {
         check(element("timelineV4").waitForExistence(timeout: 120), "editor open on a real cut")
         _ = wait(90) { self.element("editorPlay").exists && self.element("editorPlay").isEnabled }
         pause(3)
-        check(app.staticTexts["Dividir"].exists && app.staticTexts["Exportar"].exists || app.buttons["Exportar"].exists, "editor tools in Spanish")
+        check(app.staticTexts["Editar"].exists && app.staticTexts["Exportar"].exists || app.buttons["Exportar"].exists, "editor tools in Spanish")
         shot("es_editor")
         editorTool("voiceOver")
         if element("voiceRecordSheet").waitForExistence(timeout: 10) {
@@ -929,6 +929,56 @@ final class Build24UITests: XCTestCase {
             element("voiceRecordSheet").swipeDown(velocity: .fast); pause(1)
         }
         editorTool("captions"); pause(1.5); shot("es_captions")
+        done()
+    }
+
+    // MARK: 30 Oct: editor rows (Edit / Audio) and the Fonts / Style sheet for captions and text
+
+    func testTextAndCaptionStyles() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["-CutSellScreen", "editor_probe"]
+        let env = ProcessInfo.processInfo.environment
+        for key in ["CUTSELL_PROBE_TOKEN", "CUTSELL_PROBE_USER", "CUTSELL_PROBE_PROJECT", "CUTSELL_PROBE_API"] {
+            if let value = env[key] { app.launchEnvironment[key] = value }
+        }
+        app.launch()
+        check(element("timelineV4").waitForExistence(timeout: 120), "editor open on a real cut")
+        _ = wait(90) { self.element("editorPlay").exists && self.element("editorPlay").isEnabled }
+        pause(2)
+        shot("tools_main")
+        check(element("tool_edit").exists && element("tool_sound").exists && element("tool_text").exists, "main row: Edit, Audio, Text")
+        element("tool_edit").tap(); pause(0.8)
+        check(element("toolBack").exists && element("tool_split").exists && element("tool_duplicate").exists
+              && element("tool_mirror").exists && element("tool_rotate").exists, "Edit row: back, Split, Delete, Duplicate, Mirror, Rotate")
+        shot("tools_edit")
+        element("toolBack").tap(); pause(0.6)
+        element("tool_sound").tap(); pause(0.8)
+        check(element("tool_voiceOver").exists && element("tool_volume").exists && element("tool_speed").exists, "Audio row")
+        shot("tools_audio")
+        element("toolBack").tap(); pause(0.6)
+
+        element("tool_captions").tap(); pause(1.2)
+        check(element("textStyleSheet").waitForExistence(timeout: 5), "captions: Fonts / Style sheet")
+        shot("captions_style")
+        element("textPreset_pop").tap(); pause(1)
+        element("textStylePart_Background").tap(); pause(0.5)
+        shot("captions_background")
+        element("textStyleTab_Fonts").tap(); pause(0.8)
+        check(element("textFont_pacifico").exists && element("textFont_bungee").exists, "the new fonts are offered")
+        shot("captions_fonts")
+        app.swipeUp(); pause(0.5)
+        shot("captions_fonts_more")
+        element("textStyleDone").tap(); pause(1)
+
+        element("tool_text").tap(); pause(1)
+        check(element("textStyleField").waitForExistence(timeout: 5), "text: field to write")
+        element("textStyleField").typeText("SALE 50%")
+        element("textFont_bungee").tap(); pause(0.5)
+        element("textStyleTab_Style").tap(); pause(0.5)
+        element("textPreset_dark_box").tap(); pause(0.5)
+        shot("text_style")
+        element("textStyleDone").tap(); pause(3)
+        shot("text_on_video")
         done()
     }
 
@@ -942,6 +992,15 @@ final class Build24UITests: XCTestCase {
         return rest.isEmpty ? [] : rest.split(separator: ",").map(String.init)
     }
     private func editorTool(_ name: String) {
+        // 30 Oct: tools live in rows -- Edit (split, delete, duplicate, mirror, rotate), Audio (voiceOver, audio,
+        // volume, speed) and the main row. Open the right row first.
+        let editRow = ["split", "delete", "duplicate", "mirror", "rotate"]
+        let soundRow = ["voiceOver", "audio", "volume", "speed"]
+        if !element("tool_\(name)").exists {
+            if element("toolBack").exists { element("toolBack").tap(); pause(0.6) }
+            if editRow.contains(name) { element("tool_edit").tap(); pause(0.6) }
+            if soundRow.contains(name) { element("tool_sound").tap(); pause(0.6) }
+        }
         let button = element("tool_\(name)")
         guard button.waitForExistence(timeout: 5) else { log("missing tool_\(name)"); return }
         let screen = app.windows.firstMatch.frame
@@ -1378,7 +1437,7 @@ final class Build24UITests: XCTestCase {
         clips.element(boundBy: 0).tap(); pause(0.8)
         log("after tap clip 0: \(clips.element(boundBy: 0).value ?? "")")
         shot("vol_clip_selected")
-        element("tool_volume").tap(); pause(1)
+        editorTool("volume"); pause(1)
         let panel = element("volumePanel")
         check(panel.waitForExistence(timeout: 5), "Volume panel")
         log("panel texts: \(screenTexts())")
@@ -1420,7 +1479,7 @@ final class Build24UITests: XCTestCase {
         check(before.prefix(6).allSatisfy { $0 > -30 }, "part 1 plays before mute")
         let clips = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'timelineClip_'"))
         clips.element(boundBy: 0).tap(); pause(0.8)
-        element("tool_volume").tap(); pause(1)
+        editorTool("volume"); pause(1)
         element("volumeMute").tap()
         let old = meter.label
         check(wait(30) { meter.label != old && levels().count >= 30 }, "preview rebuilt after mute")

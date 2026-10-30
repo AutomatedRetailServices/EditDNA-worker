@@ -45,6 +45,8 @@ struct EditorV4View: View {
     @State private var recordAgainID: String?
     @State private var musicPicker = false
     @State private var musicNotice = false
+    /// 30 Oct (PO): which row the toolbar shows (main tools, or the Edit / Audio row).
+    @State private var toolMenu: ToolMenu = .main
     /// "Almost no voice" is shown once each time this editor opens on such a cut.
     @State private var littleSpeechShown = false
     @AppStorage("cutsell.musicRightsNoticeShown") private var musicNoticeShown = false
@@ -258,6 +260,8 @@ struct EditorV4View: View {
         case .captions: return controls + 1 + TimelineV4.height + toolbar
         // Style (Figma 1054:2497): no controls; the panel sits where the controls and timeline were.
         case .style: return controls + 1 + TimelineV4.height + toolbar
+        // 30 Oct (PO): the Fonts / Style sheet rises over the timeline and the toolbar.
+        case .textStyle: return TextStyleSheet.height
         // Figma 1119:2316 / 1120:4: with the voice-over sheet up the video keeps its full 472 pt and the sheet
         // covers the controls and the timeline (nothing of the editor shows between the video and the sheet).
         case .voiceRecord, .voiceReview: return VoiceOverSheetV5.height(.review)
@@ -277,7 +281,7 @@ struct EditorV4View: View {
 
     private var showsControls: Bool {
         switch panel {
-        case .style, .captions: return false
+        case .style, .captions, .textStyle: return false
         default: return true
         }
     }
@@ -303,6 +307,10 @@ struct EditorV4View: View {
             .onChange(of: selection) { _, newValue in
                 selectionChanged(newValue)
                 clearKeyPending()
+                // 30 Oct (PO): a video clip selected shows the Edit row (Split, Delete, Duplicate...).
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                    if case .video = newValue { toolMenu = .edit } else if newValue == nil, toolMenu == .edit { toolMenu = .main }
+                }
             }
             .onChange(of: playback.currentTime) { _, time in
                 // A framing not kept with ◇ belongs to its moment: moving the cursor drops it.
@@ -934,12 +942,16 @@ struct EditorV4View: View {
             captionEditor(clipID: clipID, frame: frame)
         } else {
             let cue = playback.captionCue(at: playback.currentTime)
-            let menuOpen: Bool = { if case .captions = panel { return true } else { return false } }()
+            let menuOpen: Bool = {
+                if case .captions = panel { return true }
+                if case .textStyle(.captions) = panel { return true }
+                return false
+            }()
             // With the captions menu open the caption can be dragged and pinched (dashed box);
             // otherwise it looks like the export, and tapping it starts writing on it.
             CaptionOverlayView(
                 cue: cue, time: playback.currentTime, preset: model.captionPreset, fontKey: model.captionFont,
-                x: model.captionX, y: model.captionY, scale: model.captionScale,
+                x: model.captionX, y: model.captionY, scale: model.captionScale, style: model.captionStyle,
                 editing: menuOpen ? captionEditing(for: cue) : nil
             )
             if !menuOpen, let cue {
@@ -1024,13 +1036,21 @@ struct EditorV4View: View {
             ForEach(Array(model.textOverlays.enumerated()), id: \.offset) { _, item in
                 let start = item["start"]?.doubleValue ?? 0
                 let end = item["end"]?.doubleValue ?? start
+                let id = item["overlay_id"]?.stringValue ?? ""
                 if playback.currentTime >= start && playback.currentTime < end {
-                    Text(L10n.tr(item["text"]?.stringValue ?? ""))
-                        .font(CS.inter(CGFloat(18 * (item["scale"]?.doubleValue ?? 1)), .bold))
-                        .foregroundStyle(.white)
-                        .shadow(color: .black.opacity(0.6), radius: 2)
-                        .position(x: frame.width * CGFloat(item["x"]?.doubleValue ?? 0.5),
-                                  y: frame.height * CGFloat(item["y"]?.doubleValue ?? 0.2))
+                    // 30 Oct (PO): tap to select, tap again for Fonts / Style; drag to move, pinch to resize.
+                    TextOverlayOnVideo(
+                        item: item, look: model.textLook(item), font: model.textFont(item), frame: frame,
+                        isSelected: selection == .overlay(id, isText: true),
+                        onTap: {
+                            if selection == .overlay(id, isText: true) {
+                                playback.pause(); card = nil; panel = .textStyle(.text(id))
+                            } else {
+                                selection = .overlay(id, isText: true)
+                            }
+                        },
+                        onMoved: { x, y, scale in Task { await model.updateTextOverlay(id: id, x: x, y: y, scale: scale) } }
+                    )
                 }
             }
             // Higher layer on top (the export draws them in the same order).
@@ -1385,6 +1405,13 @@ struct EditorV4View: View {
     @ViewBuilder
     private var bottomArea: some View {
         switch panel {
+        case .textStyle(let target):
+            TextStyleSheet(model: model, target: target, playhead: playback.currentTime) { addedID in
+                if case .newText = target, let addedID { selection = .overlay(addedID, isText: true) }
+                if case .captions = target { finishCaptionEditing() }
+                panel = .none
+            }
+            .transition(.move(edge: .bottom))
         default:
             VStack(spacing: 0) {
                 switch panel {
@@ -1414,7 +1441,7 @@ struct EditorV4View: View {
                     }
                 }
                 if case .style = panel {} else { Spacer(minLength: 0) }
-                ToolbarV4(active: activeTool) { tool in toolTapped(tool) }
+                ToolbarV4(active: activeTool, menu: toolMenu, onBack: { toolMenu = .main; card = nil }) { tool in toolTapped(tool) }
             }
             // White Indigo: the timeline's light grey reaches the toolbar (no white gap); panels stay white.
             .background(timelineShown ? Color(fixed: 0xE9ECF1, opacity: 0.72) : Color(fixed: 0xFFFFFF, opacity: 0.7))
@@ -1423,7 +1450,7 @@ struct EditorV4View: View {
 
     private var timelineShown: Bool {
         switch panel {
-        case .captions, .style: return false
+        case .captions, .style, .textStyle: return false
         default: return true
         }
     }
@@ -1513,6 +1540,8 @@ struct EditorV4View: View {
         switch panel {
         case .captions: return .captions
         case .style: return .style
+        case .textStyle(.captions): return .captions
+        case .textStyle: return .text
         case .voiceRecord, .voiceReview, .micPermission: return .voiceOver
         case .none:
             switch card {
@@ -1630,7 +1659,32 @@ struct EditorV4View: View {
         case .captions:
             playback.pause()
             card = nil
-            panel = panel == .captions(nil) ? .none : .captions(nil)
+            panel = panel == .textStyle(.captions) ? .none : .textStyle(.captions)
+        case .edit:
+            card = nil
+            toolMenu = .edit
+        case .sound:
+            card = nil
+            toolMenu = .sound
+        case .text:
+            playback.pause()
+            card = nil
+            if case .overlay(let id, isText: true) = selection {
+                panel = .textStyle(.text(id))
+            } else {
+                panel = .textStyle(.newText)
+            }
+        case .duplicate:
+            guard let clipID = selectedVideoClip ?? playback.clipID(at: playback.currentTime) else {
+                show(.message("Select a clip first."))
+                return
+            }
+            Task {
+                if let copy = await model.duplicateClip(clipID) {
+                    selection = .video(copy)
+                    show(.message("Clip duplicated", undo: true))
+                }
+            }
         case .style:
             card = nil
             panel = panel == .style ? .none : .style
@@ -1874,10 +1928,41 @@ enum EditorPanel: Equatable {
     case voiceReview
     case micPermission
     case style
+    /// 30 Oct (PO): the Fonts / Style sheet, for the captions or a text.
+    case textStyle(TextStyleTarget)
 }
+
+enum TextStyleTarget: Equatable {
+    case captions
+    case newText
+    case text(String)
+}
+
+/// 30 Oct (PO): the toolbar shows the main tools; Edit and Audio open their own row (with a back button).
+enum ToolMenu: Equatable { case main, edit, sound }
 
 enum EditorTool: String, CaseIterable {
     case split, delete, mirror, rotate, overlay, voiceOver, audio, volume, speed, captions, style
+    case edit, sound, text, duplicate
+
+    static func row(_ menu: ToolMenu) -> [EditorTool] {
+        switch menu {
+        case .main: return [.edit, .sound, .text, .captions, .overlay, .style]
+        case .edit: return [.split, .delete, .duplicate, .mirror, .rotate]
+        case .sound: return [.voiceOver, .audio, .volume, .speed]
+        }
+    }
+
+    /// SF Symbol for the tools added on 30 Oct (the others keep their drawn icons).
+    var systemIcon: String? {
+        switch self {
+        case .edit: return "scissors"
+        case .sound: return "music.note"
+        case .text: return "textformat"
+        case .duplicate: return "plus.square.on.square"
+        default: return nil
+        }
+    }
 
     var title: String {
         switch self {
@@ -1887,11 +1972,15 @@ enum EditorTool: String, CaseIterable {
         case .rotate: return "Rotate"
         case .overlay: return "Overlay"
         case .voiceOver: return "Voice Over"
-        case .audio: return "Audio"
+        case .audio: return "Music"
         case .volume: return "Volume"
         case .speed: return "Speed"
         case .captions: return "Captions"
         case .style: return "Style"
+        case .edit: return "Edit"
+        case .sound: return "Audio"
+        case .text: return "Text"
+        case .duplicate: return "Duplicate"
         }
     }
 
@@ -1908,6 +1997,7 @@ enum EditorTool: String, CaseIterable {
         case .speed: return "Ed5Speed"
         case .captions: return "Ed4Captions"
         case .style: return "Ed4Style"
+        case .edit, .sound, .text, .duplicate: return ""
         }
     }
 }
@@ -1924,16 +2014,39 @@ struct ToolbarV4: View {
     static var height: CGFloat { 8 + 62 + max(10, bottomInset - 14) }
 
     let active: EditorTool?
+    var menu: ToolMenu = .main
+    var onBack: () -> Void = {}
     let onTap: (EditorTool) -> Void
 
     var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            if menu != .main {
+                // 30 Oct (PO): a sub-row (Edit / Audio) starts with the way back to the main tools.
+                Button(action: onBack) {
+                    Image(systemName: "chevron.left").font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(Color(fixed: 0xFFFFFF))
+                        .frame(width: 44, height: 44)
+                        .puff3D(.blue, in: Circle(), depth: 3)
+                        .frame(width: 56, height: 62)
+                }
+                .buttonStyle(BubblePress())
+                .accessibilityIdentifier("toolBack")
+                .transition(.move(edge: .leading).combined(with: .opacity))
+            }
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(alignment: .top, spacing: 0) {
-                ForEach(EditorTool.allCases, id: \.self) { tool in
+                ForEach(EditorTool.row(menu), id: \.self) { tool in
                     Button { onTap(tool) } label: {
                         VStack(spacing: 5) {
                             // 29 Oct (PO): each tool sits in a small 3D bubble (the open one in blue).
-                            Image(tool.icon).renderingMode(.template).resizable()
+                            Group {
+                                if let symbol = tool.systemIcon {
+                                    Image(systemName: symbol).resizable().scaledToFit().fontWeight(.semibold)
+                                        .padding(1)
+                                } else {
+                                    Image(tool.icon).renderingMode(.template).resizable()
+                                }
+                            }
                                 .foregroundStyle(active == tool ? Color(fixed: 0xFFFFFF) : CS.wiInk)
                                 .frame(width: 24, height: 24)
                                 .frame(width: 38, height: 38)
@@ -1944,19 +2057,20 @@ struct ToolbarV4: View {
                                 .lineLimit(1)
                                 .fixedSize()
                         }
-                        .frame(width: 56, height: 62)
+                        .frame(width: menu == .main ? max(56, (UIScreen.main.bounds.width - 10) / CGFloat(EditorTool.row(.main).count)) : 60, height: 62)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(BubblePress())
                     .accessibilityIdentifier("tool_\(tool.rawValue)")
-                    if tool == .rotate {
-                        Rectangle().fill(CS.wiBorder).frame(width: 1, height: 40)
-                    }
                 }
             }
             .padding(.leading, 4)
             .padding(.trailing, 6)
         }
+        .id(menu)
+        .transition(.move(edge: .trailing).combined(with: .opacity))
+        }
+        .animation(.spring(response: 0.32, dampingFraction: 0.86), value: menu)
         .padding(.top, 8)
         .frame(height: Self.height, alignment: .top)
         .background(Color(fixed: 0xF3F5F9, opacity: 0.85).ignoresSafeArea(edges: .bottom))
