@@ -1,39 +1,38 @@
-B24UI   143.8 INFO silhouette · frames 105 failed 0 empty 0 balanced 0 seg 0.0 s · gains 0.82 0.82 1.09
-B24UI   143.8 PASS part 1's person over part 2 (also past the middle) · x170 210,39 · x210 210,39
-B24UI   143.8 PASS part 2's person stays · x295 36,229
-B24UI   143.8 FAIL the room is part 2's (whole background) · clone 143,143,143 · part 2 131,131,131
-B24UI   143.8 INFO decoded part 1 room 151 · part 2 room 131
-B24UI   143.8 PASS no line in the middle of the clone · 0 jumps
-B24UI   143.8 PASS part 1 matched to part 2's brightness · gain 0.82
-B24UI   143.8 PASS the cut-out is toned to part 2 · R 210 (unmatched 220)
-B24UI   143.8 PASS soft edge on the cut-out · 14 px in between
-B24UI   143.8 PASS clone length = part 2 · 7.00 s
-B24UI   143.8 PASS both voices, even level · 440 0.183 · 660 0.183
-B24UI   143.8 PASS no person found → the silhouette reports it (fallback) · frames 105 failed 0 empty 98 balanced 98 seg 104.7 s
-B24UI   143.8 PASS the fallback blend still makes the video · 7.00 s
-B24UI   143.8 INFO timing · Vision pass in the simulator: frames 105 failed 0 empty 98 balanced 98 seg 104.7 s
-B24UI   143.8 PASS length = part 2 · 7.00 s
-B24UI   143.8 PASS left is part 1 at 1 s · R 132 B 0
-B24UI   143.8 PASS right is part 2 · B 255 R 1
-B24UI   143.8 PASS no line at the seam (smooth change)
-B24UI   143.8 PASS no dark or bright stripe at the seam
-B24UI   143.8 PASS soft edge ≈ 60 px at 1080 · 12 px of 360
-B24UI   143.8 PASS part 1 holds its last frame · R 233 ≈ 227
-B24UI   143.8 PASS both voices heard · 440 Hz 0.122 · 660 Hz 0.146
-B24UI   143.8 PASS voices at an even level · ratio 0.83 (before: 0.25)
-B24UI   143.8 PASS only part 2's sound after part 1 ends · 440 0.0000 · 660 0.1465
-B24UI   143.8 INFO vision 270 · w 270x480 a 1.0 b 0.0 c 0.0 d 1.0 tx 13.0 ty 0.0 conf 1.0
-B24UI   143.8 INFO vision full · w 360x640 a 1.0 b 0.0 c 0.0 d 1.0 tx 18.0 ty 0.0 conf 1.0
-B24UI   143.8 INFO vision same · w 270x480 a 1.0 b 0.0 c 0.0 d 1.0 tx -0.0 ty 0.0 conf 1.0
-B24UI   143.8 INFO extents (0.0, 0.0, 360.0, 640.0) (0.0, 0.0, 360.0, 640.0)
-B24UI   143.8 PASS aligner measured the shift · x 0.048 (expected 0.050) y 0.000
-B24UI   143.8 PASS a 5% move is flagged (> 2%)
-B24UI   143.8 PASS shift applied: part 1 lines up with part 2 · square centre 97.0 (part 2: 97.5; without the fix: 79.5)
-B24UI   144.4 PASS self-test finished
-B24UI   144.4 FAIL all compositor checks pass · FAIL the room is part 2's (whole background) · clone 143,143,143 · part 2 131,131,131
-B24UI   144.4 FAILURES: all compositor checks pass
-/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:1360: error: -[CutSellUITests.Build24UITests testSplitCompositor] : XCTAssertTrue failed - all compositor checks pass
-Test Case '-[CutSellUITests.Build24UITests testSplitCompositor]' failed (145.326 seconds).
-Test Suite 'Build24UITests' failed at 2026-10-30 00:31:18.578.
-Test Suite 'CutSellUITests.xctest' failed at 2026-10-30 00:31:18.579.
-Test Suite 'Selected tests' failed at 2026-10-30 00:31:18.579.
+B24UI   173.7 INFO silhouette · frames 105 failed 0 empty 0 balanced 0 seg 0.0 s · gains 0.82 0.82 1.09
+B24UI   173.7 PASS part 1's person over part 2 (also past the middle) · x170 207,33 · x210 207,33
+B24UI   173.7 PASS part 2's person stays · x295 33,224
+B24UI   173.7 PASS the room is part 2's (whole background) · clone 131,131,131 · part 2 131,131,131
+B24UI   173.7 INFO decoded part 1 room 151 · part 2 room 131
+B24UI   173.7 PASS no line in the middle of the clone · 0 jumps
+B24UI   173.7 PASS part 1 matched to part 2's brightness · gain 0.82
+B24UI   173.7 PASS the cut-out is toned to part 2 · R 207 (unmatched 220)
+B24UI   173.7 PASS soft edge on the cut-out · 15 px in between
+B24UI   173.7 PASS clone length = part 2 · 7.00 s
+B24UI   173.7 PASS both voices, even level · 440 0.183 · 660 0.183
+B24UI   173.7 PASS no person found → the silhouette reports it (fallback) · frames 105 failed 0 empty 98 balanced 98 seg 132.3 s
+B24UI   173.7 PASS the fallback blend still makes the video · 7.00 s
+B24UI   173.7 INFO timing · Vision pass in the simulator: frames 105 failed 0 empty 98 balanced 98 seg 132.3 s
+B24UI   173.7 PASS length = part 2 · 7.00 s
+B24UI   173.7 PASS left is part 1 at 1 s · R 120 B 0
+B24UI   173.7 PASS right is part 2 · B 255 R 1
+B24UI   173.7 PASS no line at the seam (smooth change)
+B24UI   173.7 PASS no dark or bright stripe at the seam
+B24UI   173.7 PASS soft edge ≈ 60 px at 1080 · 12 px of 360
+B24UI   173.7 PASS part 1 holds its last frame · R 231 ≈ 227
+B24UI   173.7 PASS both voices heard · 440 Hz 0.122 · 660 Hz 0.146
+B24UI   173.7 PASS voices at an even level · ratio 0.83 (before: 0.25)
+B24UI   173.7 PASS only part 2's sound after part 1 ends · 440 0.0000 · 660 0.1465
+B24UI   173.7 INFO vision 270 · w 270x480 a 1.0 b 0.0 c 0.0 d 1.0 tx 13.0 ty 0.0 conf 1.0
+B24UI   173.7 INFO vision full · w 360x640 a 1.0 b 0.0 c 0.0 d 1.0 tx 18.0 ty 0.0 conf 1.0
+B24UI   173.7 INFO vision same · w 270x480 a 1.0 b 0.0 c 0.0 d 1.0 tx -0.0 ty 0.0 conf 1.0
+B24UI   173.7 INFO extents (0.0, 0.0, 360.0, 640.0) (0.0, 0.0, 360.0, 640.0)
+B24UI   173.7 PASS aligner measured the shift · x 0.048 (expected 0.050) y 0.000
+B24UI   173.7 PASS a 5% move is flagged (> 2%)
+B24UI   173.7 PASS shift applied: part 1 lines up with part 2 · square centre 97.0 (part 2: 97.5; without the fix: 79.5)
+B24UI   174.1 PASS self-test finished
+B24UI   174.1 PASS all compositor checks pass
+B24UI   174.1 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testSplitCompositor]' passed (174.951 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-30 00:47:54.598.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-30 00:47:54.599.
+Test Suite 'Selected tests' passed at 2026-10-30 00:47:54.599.
