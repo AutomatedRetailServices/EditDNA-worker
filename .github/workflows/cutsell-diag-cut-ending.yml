@@ -23,7 +23,7 @@ jobs:
         run: |
           pip install -q modal
           modal run ops/diag_cut_ending.py > "$RUNNER_TEMP/raw.txt" 2>&1 || true
-          grep -E "^queue |^JOB |^  part |^  captions|^  kept clips|^  log:|Error|Traceback" "$RUNNER_TEMP/raw.txt" \
+          grep -E "^queue |^JOB |^  part |^  captions|^  kept clips|^  word |^  log:|Error|Traceback" "$RUNNER_TEMP/raw.txt" \
             | sed -E 's#https?://[^ ]+#<link>#g' > "$RUNNER_TEMP/diag.txt" || true
           wc -l "$RUNNER_TEMP/raw.txt" "$RUNNER_TEMP/diag.txt"
       - name: Save

@@ -57,9 +57,21 @@ def diagnose():
                     print(f"  captions: {len(caps)} words, last caption ends at {float(caps[-1]['e']):.2f}s of the cut")
                 sel = draft.get("selected") or []
                 print(f"  kept clips: {len(sel)}; last kept clip ends at source {max((float(c.get('end') or 0) for c in sel), default=0):.2f}s")
+                # Every word the engine had in 17-35 s: timing, kept/hidden, length and end punctuation only.
+                rows = []
+                for kind, clips in (("KEEP", draft.get("selected") or []), ("hide", draft.get("alternates") or [])):
+                    for c in clips:
+                        for w in c.get("words") or []:
+                            st, en = float(w.get("start", w.get("s", 0))), float(w.get("end", w.get("e", 0)))
+                            t = str(w.get("text", w.get("w", "")))
+                            rows.append((st, en, kind, len(t), t[-1:] if t[-1:] in ".,?!" else "-"))
+                for st, en, kind, n, p in sorted(rows):
+                    if 17.0 <= st <= 35.0:
+                        print(f"  word {st:6.2f}-{en:6.2f} {kind} len={n} end={p}")
                 for line in (src.get("log") or [])[-12:]:
-                    print("  log:", str(line)[:160] if not isinstance(line, dict) else {k: v for k, v in line.items() if k not in ('text', 'w', 'words')})
-            if shown >= 3:
+                    if isinstance(line, dict):
+                        print("  log:", {k: v for k, v in line.items() if isinstance(v, (int, float, bool)) or k in ("kind", "step", "why", "reason")})
+            if shown >= 1:
                 return
 
 
