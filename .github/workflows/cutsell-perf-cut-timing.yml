@@ -1,4 +1,5 @@
 name: CutSell perf · cut timing (audio first, like the iPhone)
+# Run 30 Oct: check after the deploy d19a866 (little speech, sentence ends, voice AI, fonts).
 
 # Speed diagnosis (PO 28 Oct). Times every step of a Record cut on the LIVE server with synthetic
 # spoken test videos (macOS "say" over a test pattern, 1080x1920 HEVC like an iPhone recording; no
