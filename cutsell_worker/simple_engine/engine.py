@@ -665,7 +665,7 @@ def finish_sentences(splits, words):
         last, nxt = words[inside[-1]], words[inside[-1] + 1]
         if (last["w"].rstrip().endswith(_END_PUNCT) or not nxt["w"].rstrip().endswith(_END_PUNCT)
                 or nxt["s"] - last["e"] > FINISH_GAP_MAX or nxt["e"] - nxt["s"] > MAX_WORD
-                or not (h["start"] - 0.05 <= nxt["s"] and nxt["e"] <= h["end"] + 0.05)):
+                or not (nxt["e"] > v["end"] + 0.05 and nxt["e"] <= h["end"] + 0.05)):   # cut off by h (even half)
             continue
         after = words[inside[-1] + 2]["s"] - 0.02 if inside[-1] + 2 < len(words) else h["end"]
         end = min(h["end"], after, nxt["e"] + 0.10)

@@ -314,8 +314,9 @@ def test_gold_file_and_scorer_reproduce_the_recorded_reference_score():
     spec.loader.exec_module(module)
 
     gold = json.loads(module.GOLD.read_text(encoding="utf-8"))
-    # 26 videos since G01 (Swanny's own Gold, 37 decisions) was added; it has no frozen run yet
-    assert len(gold["videos"]) == 26 and sum(len(v["decisions"]) for v in gold["videos"]) == 592
+    # 26 videos since G01 (Swanny's own Gold, 37 decisions) was added; 27 since G02 (30 Oct, her gym perfume
+    # video, 19 decisions); neither has a frozen run yet
+    assert len(gold["videos"]) == 27 and sum(len(v["decisions"]) for v in gold["videos"]) == 611
     result = module.score()                                # frozen v1.0 run on the 24 videos that have one
     assert (result["agree"], result["total"]) == (478, 514)
     # a cut that keeps everything agrees only with the "keep" marks
@@ -1150,3 +1151,18 @@ def test_a_word_the_asr_missed_after_a_mid_sentence_stop_is_kept(tmp_path):
     words[1]["w"] = "cosa."
     first = next(s for s in se.refine(splits, str(path), 4.0, words) if s["visible"])
     assert first["end"] <= 1.0 + se.RF_LOOK_FWD + 0.01
+
+
+def test_g02_the_two_words_the_cut_lost_are_kept_by_the_fix():
+    """G02 (PO 30 Oct): engine 1.2.4 kept only 54 % of "...la mira," and 65 % of "una cosa [exótica]" -- enough for
+    the 50 % Gold score, not for the ear. The 1.2.5 cut (replayed on the real audio) keeps both nearly whole."""
+    gold = json.loads((Path(__file__).resolve().parents[1] / "benchmarks/simple_engine_gold/gold_v1.json").read_text())
+    g02 = next(v for v in gold["videos"] if v["id"] == "G02")
+    words = [w for w in g02["words"] if float(w["e"]) > float(w["s"])]
+    splits = [{"start": 6.55, "end": 18.84, "visible": True, "reason": "se queda"},
+              {"start": 18.84, "end": 21.81, "visible": False, "reason": "frase abandonada"},
+              {"start": 21.81, "end": 26.24, "visible": True, "reason": "se queda"}]
+    se.finish_sentences(splits, words)
+    mira = next(d for d in g02["decisions"] if d["s"] == 18.62)
+    covered = max(0.0, min(mira["e"], splits[0]["end"]) - mira["s"]) / (mira["e"] - mira["s"])
+    assert mira["mark"] == "keep" and covered >= 0.9
