@@ -647,9 +647,15 @@ final class Build24UITests: XCTestCase {
             }
             check(!element("promotingDetect").exists, "\(name): no Detect for me")
             check(!element("promotingContinue").isEnabled, "\(name): Continue off without a product")
+            // 30 Oct: one row per brand; tapping it shows its products.
+            let brand = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'promotingBrand_'")).firstMatch
+            check(brand.waitForExistence(timeout: 10), "\(name): her brands listed")
+            shot("hub_promoting_brands")
+            brand.tap()
             let row = app.descendants(matching: .any).matching(identifier: "promotingRow").firstMatch
-            check(row.waitForExistence(timeout: 10), "\(name): her products listed")
+            check(row.waitForExistence(timeout: 5), "\(name): the brand's products open under it")
             row.tap()
+            shot("hub_promoting_open")
             element("promotingContinue").tap()
         }
         element("hubRecord").tap()

@@ -203,10 +203,19 @@ struct ProductsList: View {
     @State private var search = ""
     @ObservedObject private var thumbnails = ThumbnailStore.shared
 
+    /// 30 Oct (PO): brands A→Z, and inside each brand its products A→Z.
+    private var sortedBrands: [CatalogBrand] {
+        store.overview.brands.map { brand in
+            var copy = brand
+            copy.products = brand.products.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            return copy
+        }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
     private var brands: [CatalogBrand] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return store.overview.brands }
-        return store.overview.brands.compactMap { brand in
+        guard !query.isEmpty else { return sortedBrands }
+        return sortedBrands.compactMap { brand in
             if brand.name.localizedCaseInsensitiveContains(query) { return brand }
             var copy = brand
             copy.products = brand.products.filter { $0.name.localizedCaseInsensitiveContains(query) }

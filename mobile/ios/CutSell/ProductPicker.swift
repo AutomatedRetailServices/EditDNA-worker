@@ -56,9 +56,9 @@ enum PromotingPurpose: Equatable {
     var allowsDetect: Bool { self == .upload(.bulk) }
 }
 
-/// The sheet (white, radius 28, 45 % dim, grey handle): title, blue-bordered search, "Brand · Product" rows (last used
-/// first), "Add “…” as a new product", the blue Continue (only with a product chosen) and, in Bulk only,
-/// "Mixed products? Detect for me".
+/// The sheet (white, radius 28, 45 % dim, grey handle): title, blue-bordered search, one row per brand A→Z that opens
+/// its products A→Z (30 Oct, PO), "Add product" under a brand, "Add “…” as a new product" (one step: saves, chooses
+/// and goes on), the blue Continue (only with a product chosen) and, in Bulk only, "Mixed products? Detect for me".
 struct PromotingSheet: View {
     let purpose: PromotingPurpose
     let onContinue: (PromotingChoice.Pick?) -> Void
@@ -72,19 +72,49 @@ struct PromotingSheet: View {
     @State private var newBrand = ""
     @State private var newProduct = ""
     @State private var saving = false
+    @State private var expanded: Set<String> = []
+    /// The brand is already known (from "Add product" under it): only the product is asked.
+    @State private var brandLocked = false
     @FocusState private var focus: Field?
 
     enum Field { case search, brand, product }
 
-    private struct Row: Identifiable { let id: String; let brand: String; let product: String }
+    /// 30 Oct (PO): one row per brand (A→Z); tapping a brand shows its products A→Z under it.
+    private struct BrandGroup: Identifiable {
+        let name: String
+        let products: [(id: String, name: String)]
+        var id: String { name.lowercased() }
+    }
 
-    private var rows: [Row] {
-        let order = Dictionary(uniqueKeysWithValues: PromotingChoice.recent.enumerated().map { ($1, $0) })
-        let all = catalog.allProducts.map { Row(id: $0.product.productID, brand: $0.brand.name, product: $0.product.name) }
-            .sorted { (order[$0.id] ?? Int.max, $0.brand + $0.product) < (order[$1.id] ?? Int.max, $1.brand + $1.product) }
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    private var groups: [BrandGroup] {
+        var byBrand: [String: (name: String, products: [(id: String, name: String)])] = [:]
+        for item in catalog.allProducts {
+            let key = item.brand.name.trimmingCharacters(in: .whitespaces).lowercased()
+            var entry = byBrand[key] ?? (item.brand.name, [])
+            if !entry.products.contains(where: { $0.id == item.product.productID }) {
+                entry.products.append((item.product.productID, item.product.name))
+            }
+            byBrand[key] = entry
+        }
+        let all = byBrand.values.map { entry in
+            BrandGroup(name: entry.name, products: entry.products.sorted {
+                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending })
+        }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        let q = typed
         guard !q.isEmpty else { return all }
-        return all.filter { "\($0.brand) \($0.product)".localizedCaseInsensitiveContains(q) }
+        return all.compactMap { group in
+            if group.name.localizedCaseInsensitiveContains(q) { return group }
+            let hits = group.products.filter { $0.name.localizedCaseInsensitiveContains(q) }
+            return hits.isEmpty ? nil : BrandGroup(name: group.name, products: hits)
+        }
+    }
+
+    /// While searching every matching brand is open; otherwise only the ones she tapped.
+    private func isOpen(_ group: BrandGroup) -> Bool { !typed.isEmpty || expanded.contains(group.id) }
+
+    /// Rows on screen (brands + open products + "add product"), for the list height.
+    private var visibleRows: Int {
+        groups.reduce(0) { $0 + 1 + (isOpen($1) ? $1.products.count + 1 : 0) }
     }
 
     private var typed: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -102,12 +132,14 @@ struct PromotingSheet: View {
                         .foregroundStyle(CS.wiInk)
                         .padding(.top, 17)
                     if addingNew { newProductForm } else { searchAndResults }
-                    WIPillButtonGradient(title: "Continue", enabled: selected != nil && !addingNew) {
-                        if let selected { PromotingChoice.remember(selected) }
-                        onContinue(selected)
+                    if !addingNew {
+                        WIPillButtonGradient(title: "Continue", enabled: selected != nil) {
+                            if let selected { PromotingChoice.remember(selected) }
+                            onContinue(selected)
+                        }
+                        .padding(.top, 24)
+                        .accessibilityIdentifier("promotingContinue")
                     }
-                    .padding(.top, 24)
-                    .accessibilityIdentifier("promotingContinue")
                     if purpose.allowsDetect {
                         Button { onContinue(nil) } label: {
                             Text(L10n.tr("Mixed products? Detect for me"))
@@ -152,37 +184,24 @@ struct PromotingSheet: View {
             VStack(spacing: 0) {
                 ScrollView {
                     VStack(spacing: 0) {
-                        ForEach(rows) { row in
-                            let isOn = selected?.productID == row.id
-                            Button { selected = .init(productID: row.id, brand: row.brand, product: row.product) } label: {
-                                HStack(spacing: 0) {
-                                    Text(verbatim: row.brand + " · ").font(CS.inter(15, .medium)).foregroundStyle(CS.wiSecondary)
-                                    Text(verbatim: row.product).font(CS.inter(15, .bold)).foregroundStyle(CS.wiInk)
-                                    Spacer(minLength: 6)
-                                    Image(isOn ? "WICheck" : "WIChevronSmall").renderingMode(.template).resizable()
-                                        .frame(width: 16, height: 16)
-                                        .foregroundStyle(isOn ? CS.accent : CS.wiSecondary)
+                        ForEach(groups) { group in
+                            brandRow(group)
+                            if isOpen(group) {
+                                ForEach(group.products, id: \.id) { product in
+                                    productRow(brand: group.name, id: product.id, name: product.name)
                                 }
-                                .lineLimit(1)
-                                .padding(.horizontal, 16)
-                                .frame(height: 52)
-                                .background(isOn ? CS.accentSoft : .clear)
-                                .overlay(alignment: .bottom) {
-                                    Rectangle().fill(CS.wiBorder).frame(height: 1).padding(.horizontal, 16)
-                                }
-                                .contentShape(Rectangle())
+                                addProductRow(brand: group.name)
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("promotingRow")
                         }
                     }
                 }
-                .frame(height: min(CGFloat(rows.count), 3) * 52)
+                .frame(height: min(CGFloat(visibleRows), 4) * 52)
                 .scrollBounceBehavior(.basedOnSize)
                 // "Add “Cera…” as a new product" (or, with nothing typed, "+ New brand or product").
                 Button {
                     newProduct = typed
                     newBrand = ""
+                    brandLocked = false
                     addingNew = true
                     focus = .brand
                 } label: {
@@ -207,11 +226,91 @@ struct PromotingSheet: View {
         }
     }
 
+    private func brandRow(_ group: BrandGroup) -> some View {
+        let open = isOpen(group)
+        let hasPick = group.products.contains { $0.id == selected?.productID }
+        return Button {
+            withAnimation(.easeOut(duration: 0.18)) {
+                if expanded.contains(group.id) { expanded.remove(group.id) } else { expanded.insert(group.id) }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Text(verbatim: group.name).font(CS.inter(15, .bold)).foregroundStyle(CS.wiInk)
+                Text(verbatim: "\(group.products.count)").font(CS.inter(12, .semibold)).foregroundStyle(CS.wiSecondary)
+                if hasPick && !open {
+                    Text(verbatim: "· " + (selected?.product ?? "")).font(CS.inter(13, .semibold)).foregroundStyle(CS.accent)
+                }
+                Spacer(minLength: 6)
+                Image("WIChevronSmall").renderingMode(.template).resizable()
+                    .frame(width: 16, height: 16)
+                    .rotationEffect(.degrees(open ? 90 : 0))
+                    .foregroundStyle(CS.wiSecondary)
+            }
+            .lineLimit(1)
+            .padding(.horizontal, 16)
+            .frame(height: 52)
+            .overlay(alignment: .bottom) { Rectangle().fill(CS.wiBorder).frame(height: 1).padding(.horizontal, 16) }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("promotingBrand_\(group.name)")
+    }
+
+    private func productRow(brand: String, id: String, name: String) -> some View {
+        let isOn = selected?.productID == id
+        return Button { selected = .init(productID: id, brand: brand, product: name) } label: {
+            HStack(spacing: 0) {
+                Text(verbatim: name).font(CS.inter(15, isOn ? .bold : .medium)).foregroundStyle(CS.wiInk)
+                Spacer(minLength: 6)
+                if isOn {
+                    Image("WICheck").renderingMode(.template).resizable().frame(width: 16, height: 16).foregroundStyle(CS.accent)
+                }
+            }
+            .lineLimit(1)
+            .padding(.leading, 32).padding(.trailing, 16)
+            .frame(height: 52)
+            .background(isOn ? CS.accentSoft : CS.wiPage.opacity(0.6))
+            .overlay(alignment: .bottom) { Rectangle().fill(CS.wiBorder).frame(height: 1).padding(.leading, 32) }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("promotingRow")
+    }
+
+    /// "+ Add product" under an open brand: only the product name is asked.
+    private func addProductRow(brand: String) -> some View {
+        Button {
+            newBrand = brand
+            newProduct = ""
+            brandLocked = true
+            addingNew = true
+            focus = .product
+        } label: {
+            HStack(spacing: 6) {
+                Image("WIPlus").renderingMode(.template).resizable().frame(width: 14, height: 14)
+                Text(L10n.tr("Add product")).font(CS.inter(13, .bold))
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(CS.accent)
+            .padding(.leading, 32).padding(.trailing, 16)
+            .frame(height: 52)
+            .background(CS.wiPage.opacity(0.6))
+            .overlay(alignment: .bottom) { Rectangle().fill(CS.wiBorder).frame(height: 1).padding(.horizontal, 16) }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("promotingAddProduct_\(brand)")
+    }
+
     /// "Add as a new product": asks the brand and the product, saves it in her list and chooses it.
     private var newProductForm: some View {
         VStack(alignment: .leading, spacing: 8) {
-            field("Brand", text: $newBrand, which: .brand)
-                .padding(.top, 16)
+            if brandLocked {
+                Text(verbatim: newBrand).font(CS.inter(15, .bold)).foregroundStyle(CS.wiSecondary).padding(.top, 16)
+            } else {
+                field("Brand", text: $newBrand, which: .brand)
+                    .padding(.top, 16)
+            }
             field("Product", text: $newProduct, which: .product)
             HStack(spacing: 10) {
                 Button { addingNew = false } label: {
@@ -222,7 +321,7 @@ struct PromotingSheet: View {
                 .buttonStyle(.plain)
                 Button { Task { await saveNew() } } label: {
                     Group {
-                        if saving { ProgressView().tint(.white) } else { Text(L10n.tr("Save")).font(CS.inter(14, .bold)) }
+                        if saving { ProgressView().tint(.white) } else { Text(L10n.tr("Save & continue")).font(CS.inter(14, .bold)) }
                     }
                     .foregroundStyle(Color(fixed: 0xFFFFFF))
                     .frame(maxWidth: .infinity).frame(height: 44)
@@ -257,17 +356,35 @@ struct PromotingSheet: View {
 
     @MainActor
     private func saveNew() async {
-        let brand = newBrand.trimmingCharacters(in: .whitespacesAndNewlines)
+        var brand = newBrand.trimmingCharacters(in: .whitespacesAndNewlines)
         let product = newProduct.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A brand she already has goes under that brand (same spelling), never a second "Nivea".
+        if let known = catalog.allProducts.first(where: {
+            $0.brand.name.trimmingCharacters(in: .whitespaces).caseInsensitiveCompare(brand) == .orderedSame }) {
+            brand = known.brand.name
+            // The same product again: choose it instead of making a copy.
+            if let same = catalog.allProducts.first(where: {
+                $0.brand.name == known.brand.name && $0.product.name.caseInsensitiveCompare(product) == .orderedSame }) {
+                let pick = PromotingChoice.Pick(productID: same.product.productID, brand: brand, product: same.product.name)
+                PromotingChoice.remember(pick)
+                addingNew = false
+                onContinue(pick)
+                return
+            }
+        }
         saving = true
         defer { saving = false }
         // Saved in her list now; if the server cannot be reached, the names still travel with the videos.
         let id = try? await catalog.createProduct(brand: brand, product: product, session: appState.session,
                                                   projects: appState.projects)
-        selected = .init(productID: id, brand: brand, product: product)
+        let pick = PromotingChoice.Pick(productID: id, brand: brand, product: product)
+        selected = pick
         query = ""
         addingNew = false
         focus = nil
+        // One step (30 Oct, PO): saving the new brand / product also chooses it and goes on.
+        PromotingChoice.remember(pick)
+        onContinue(pick)
     }
 }
 
