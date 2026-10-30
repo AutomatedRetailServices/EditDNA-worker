@@ -378,10 +378,10 @@ final class SplitVideoCompositor: NSObject, AVVideoCompositing {
             }
             let size = instruction.renderSize
             let canvas = CGRect(origin: .zero, size: size)
-            let image2 = Self.fill(CIImage(cvPixelBuffer: frame2).oriented(instruction.orientation2), into: size)
+            let image2 = Self.fill(CIImage(cvPixelBuffer: frame2, options: [.colorSpace: Self.outputSpace]).oriented(instruction.orientation2), into: size)
             var result = image2
             if let frame1 = request.sourceFrame(byTrackID: instruction.part1) {
-                let upright1 = CIImage(cvPixelBuffer: frame1).oriented(instruction.orientation1)
+                let upright1 = CIImage(cvPixelBuffer: frame1, options: [.colorSpace: Self.outputSpace]).oriented(instruction.orientation1)
                 let move = CGAffineTransform(translationX: CGFloat(instruction.offset.x) * size.width,
                                              y: CGFloat(instruction.offset.y) * size.height)
                 let g = instruction.gains
@@ -417,7 +417,8 @@ final class SplitVideoCompositor: NSObject, AVVideoCompositing {
                     kCIInputBackgroundImageKey: image2, kCIInputMaskImageKey: mask,
                 ])
             }
-            // sRGB (≈ the video's Rec. 709 curve): rendering to device RGB brightened the whole video (120 -> 143).
+            // The frames come in and go out in the SAME colour space (Rec. 709, like the video's tags): reading
+            // them as one curve and writing them with another brightened the whole video (grey 131 -> 143).
             context.render(result.cropped(to: canvas), to: output, bounds: canvas, colorSpace: Self.outputSpace)
             request.finish(withComposedVideoFrame: output)
         }
@@ -425,7 +426,7 @@ final class SplitVideoCompositor: NSObject, AVVideoCompositing {
 
     func cancelAllPendingVideoCompositionRequests() {}
 
-    private static let outputSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+    static let outputSpace = CGColorSpace(name: CGColorSpace.itur_709) ?? CGColorSpaceCreateDeviceRGB()
 
     /// White on the left (part 1), black on the right (part 2), with a soft ~60 px (at 1080) edge.
     static func middleMask(size: CGSize) -> CIImage {
