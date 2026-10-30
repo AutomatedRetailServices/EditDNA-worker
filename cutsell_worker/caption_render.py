@@ -33,6 +33,31 @@ CAPTION_FONTS = {
     "bebas_neue": ("Bebas Neue", 112, 0),
     "inter": ("Inter", 84, -1),
     "bangers": ("Bangers", 124, 0),
+    # 30 Oct (PO): 24 more faces (all SIL OFL / Apache, files + licences in fonts/).
+    "playfair": ("Playfair Display ExtraBold", 101, 0),
+    "pacifico": ("Pacifico", 117, 0),
+    "lobster": ("Lobster", 101, 0),
+    "caveat": ("Caveat", 108, -1),
+    "marker": ("Permanent Marker", 98, 0),
+    "courier": ("Courier Prime", 116, -1),
+    "raleway": ("Raleway ExtraBold", 100, 0),
+    "righteous": ("Righteous", 90, 0),
+    "fredoka": ("Fredoka", 91, -1),
+    "bungee": ("Bungee", 112, 0),
+    "lilita": ("Lilita One", 83, 0),
+    "archivo": ("Archivo Black", 100, 0),
+    "abril": ("Abril Fatface", 98, 0),
+    "shrikhand": ("Shrikhand", 111, 0),
+    "dancing": ("Dancing Script", 99, -1),
+    "satisfy": ("Satisfy", 97, 0),
+    "vibes": ("Great Vibes", 119, 0),
+    "kaushan": ("Kaushan Script", 103, 0),
+    "amatic": ("Amatic SC", 94, -1),
+    "chewy": ("Chewy", 87, 0),
+    "cinzel": ("Cinzel", 98, -1),
+    "monoton": ("Monoton", 98, 0),
+    "nunito": ("Nunito Black", 99, 0),
+    "rubik": ("Rubik ExtraBold", 111, 0),
 }
 DEFAULT_CAPTION_FONT = "montserrat"
 FONTS_DIR = Path(__file__).resolve().parent / "fonts"
@@ -75,6 +100,7 @@ def caption_layout(x: object = None, y: object = None, scale: object = None) -> 
 _CHAR_WIDTH = {
     "montserrat": 0.68, "poppins": 0.64, "roboto": 0.58, "oswald": 0.47, "anton": 0.45,
     "luckiest_guy": 0.66, "bebas_neue": 0.42, "inter": 0.62, "bangers": 0.44,
+    "playfair": 0.6, "pacifico": 0.54, "lobster": 0.49, "caveat": 0.45, "marker": 0.65, "courier": 0.74, "raleway": 0.64, "righteous": 0.62, "fredoka": 0.6, "bungee": 0.77, "lilita": 0.55, "archivo": 0.71, "abril": 0.59, "shrikhand": 0.67, "dancing": 0.47, "satisfy": 0.49, "vibes": 0.37, "kaushan": 0.51, "amatic": 0.37, "chewy": 0.52, "cinzel": 0.74, "monoton": 0.8, "nunito": 0.64, "rubik": 0.67,
 }
 _EDGE_PAD = 36          # px kept free between the caption and the frame edge
 _MIN_COLUMN = 520       # px: narrowest column a caption may be wrapped into

@@ -5,6 +5,7 @@ from dataclasses import asdict, fields
 from enum import Enum
 from typing import Any
 
+from .text_style import validate_text_style
 from .contracts import (
     AudioClip,
     DraftClip,
@@ -235,6 +236,10 @@ def _text_overlay_from_dict(item: dict) -> TextOverlay:
         raise ValueError("text overlay position must be normalized 0 to 1")
     if not 0.5 <= scale <= 3.0:
         raise ValueError("text overlay scale must be between 0.5 and 3.0")
+    # 30 Oct: the text's own typeface and look (Fonts / Style sheet); both optional.
+    if item.get("font") is not None and str(item["font"]) not in CAPTION_FONTS:
+        raise ValueError("text overlay font must be one of: " + ", ".join(sorted(CAPTION_FONTS)))
+    validate_text_style(item.get("style"), "text overlay style")
     return TextOverlay(str(item["overlay_id"]), text, start, end, x, y, scale)
 
 
@@ -367,6 +372,7 @@ def draft_from_dict(payload: dict) -> DraftTimeline:
         raise ValueError("caption_font must be one of: " + ", ".join(sorted(CAPTION_FONTS)))
     caption_x, caption_y, caption_scale = caption_layout(
         payload.get("caption_x"), payload.get("caption_y"), payload.get("caption_scale"))
+    validate_text_style(payload.get("caption_style"), "caption_style")   # 30 Oct: the editor's caption look
     try:
         rotation = int(float(payload.get("rotation") or 0)) % 360
     except (TypeError, ValueError):

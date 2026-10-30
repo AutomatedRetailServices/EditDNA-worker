@@ -411,8 +411,13 @@ def test_caption_font_choice_reaches_the_export_and_every_face_ships_with_its_li
     from cutsell_worker.render import _caption_filter
     from cutsell_worker.render_plan import RenderSegment
 
-    assert set(CAPTION_FONTS) == {"montserrat", "poppins", "roboto", "oswald", "anton", "luckiest_guy",
-                                  "bebas_neue", "inter", "bangers"}
+    assert {"montserrat", "poppins", "roboto", "oswald", "anton", "luckiest_guy",
+            "bebas_neue", "inter", "bangers"} <= set(CAPTION_FONTS) and len(CAPTION_FONTS) == 33   # +24 on 30 Oct
+    # Every family name is the one inside a shipped file (the renderer finds the face by it).
+    ttlib = pytest.importorskip("fontTools.ttLib")
+    families = {ttlib.TTFont(str(path))["name"].getDebugName(1) for path in FONTS_DIR.iterdir()
+                if path.suffix in (".ttf", ".otf")}
+    assert {family for family, _size, _bold in CAPTION_FONTS.values()} <= families
     assert DEFAULT_CAPTION_FONT == "montserrat"
     shipped = {path.name for path in FONTS_DIR.iterdir()}
     assert sum(name.endswith((".ttf", ".otf")) for name in shipped) == len(CAPTION_FONTS)
