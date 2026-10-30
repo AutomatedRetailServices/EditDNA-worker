@@ -99,7 +99,7 @@ struct TextStyleSheet: View {
     private var tabs: some View {
         HStack(spacing: 22) {
             ForEach(Tab.allCases, id: \.self) { item in
-                Button { withAnimation(.easeOut(duration: 0.15)) { tab = item } } label: {
+                Button { typing = false; withAnimation(.easeOut(duration: 0.15)) { tab = item } } label: {
                     VStack(spacing: 5) {
                         Text(L10n.tr(item.rawValue)).font(CS.inter(16, tab == item ? .bold : .semibold))
                             .foregroundStyle(tab == item ? CS.wiInk : CS.wiSecondary)
