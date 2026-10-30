@@ -1,0 +1,36 @@
+name: CutSell diag · why a cut ended short (one-off, PO 30 Oct)
+
+# Read-only: runs ops/diag_cut_ending.py once on Modal (ephemeral, nothing deployed). Prints numbers and
+# engine labels only, never transcript text. Cost: about a cent (one tiny container, no AI calls).
+on:
+  push:
+    branches: [perf/diagnostico]
+    paths: [ops/diag_cut_ending.py, .github/workflows/cutsell-diag-cut-ending.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the diagnosis on Modal
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          pip install -q modal
+          modal run ops/diag_cut_ending.py > "$RUNNER_TEMP/raw.txt" 2>&1 || true
+          grep -E "^queue |^JOB |^  part |^  captions|^  kept clips|^  log:|Error|Traceback" "$RUNNER_TEMP/raw.txt" \
+            | sed -E 's#https?://[^ ]+#<link>#g' > "$RUNNER_TEMP/diag.txt" || true
+          wc -l "$RUNNER_TEMP/raw.txt" "$RUNNER_TEMP/diag.txt"
+      - name: Save
+        run: |
+          dir="$RUNNER_TEMP/out"
+          git clone --quiet --depth 1 --branch perf-results "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$dir"
+          mkdir -p "$dir/diag"; cp "$RUNNER_TEMP/diag.txt" "$dir/diag/cut_ending_$(date -u +%Y%m%dT%H%M%SZ).txt"
+          cd "$dir"; git add -A diag
+          git -c user.name="cutsell-ci" -c user.email="ci@cutsell.invalid" commit --quiet -m "cut-ending diag numbers"
+          git push --quiet origin HEAD:perf-results
