@@ -24,7 +24,7 @@ from typing import Callable, Optional
 
 from . import llm as _llm
 
-VERSION = "1.2.4"
+VERSION = "1.2.5"
 _HERE = Path(__file__).parent
 PASS_PROMPT = (_HERE / "prompts" / "pass_v1.txt").read_text(encoding="utf-8")
 DECISION_PROMPT = (_HERE / "prompts" / "decision_v1.txt").read_text(encoding="utf-8")
@@ -52,6 +52,10 @@ SR, HOP = 16000, 160                        # 10 ms frames
 RF_MAX_PAUSE, RF_KEEP_EACH = 0.30, 0.12
 RF_LOOK_BACK, RF_LOOK_FWD, RF_QUIET_MIN = 0.30, 0.45, 0.05
 RF_MERGE_GAP = 0.10
+# PO 30 Oct ("the message is not finished"): a kept part that ends mid-sentence may run on into a word the ASR
+# missed (up to this long), and may take back the ONE word that finishes its sentence from the cut after it.
+RF_UNHEARD_MAX, FINISH_GAP_MAX = 1.5, 0.30
+_END_PUNCT = (".", ",", "?", "!", "…", ";", ":")
 # visual snap
 VS_WIN, VS_TH, VS_FR = 0.6, 0.20, 1 / 30
 
@@ -645,6 +649,34 @@ def fix_words_and_moments(words, splits, call: LLMCall):
     return shown, fixes, moments, usage
 
 
+def finish_sentences(splits, words):
+    """A kept part must not stop one word before its sentence ends ("todo el mundo la | mira, Mira, mira..."):
+    when its last word has no end punctuation and the very next word -- inside the cut after it, right after
+    it -- is the one that closes the clause, that one word comes back. Returns how many words came back."""
+    back = 0
+    for i, v in enumerate(splits):
+        if not v["visible"] or i + 1 >= len(splits) or splits[i + 1]["visible"]:
+            continue
+        h = splits[i + 1]
+        inside = [k for k, w in enumerate(words) if w["s"] >= v["start"] - 0.05 and w["e"] <= v["end"] + 0.05]
+        if not inside or inside[-1] + 1 >= len(words):
+            continue
+        last, nxt = words[inside[-1]], words[inside[-1] + 1]
+        if (last["w"].rstrip().endswith(_END_PUNCT) or not nxt["w"].rstrip().endswith(_END_PUNCT)
+                or nxt["s"] - last["e"] > FINISH_GAP_MAX or nxt["e"] - nxt["s"] > MAX_WORD
+                or not (h["start"] - 0.05 <= nxt["s"] and nxt["e"] <= h["end"] + 0.05)):
+            continue
+        after = words[inside[-1] + 2]["s"] - 0.02 if inside[-1] + 2 < len(words) else h["end"]
+        end = min(h["end"], after, nxt["e"] + 0.10)
+        if end <= v["end"]:
+            continue
+        v["end"] = round(end, 3)
+        h["start"] = round(end, 3)
+        back += 1
+    splits[:] = [x for x in splits if x["visible"] or x["end"] - x["start"] > 0.03]
+    return back
+
+
 def keep_spoken_words(splits, words):
     """A part hidden as silence (short gap, reason 'silencio') must never contain a spoken word: quiet words such as
     a soft "set de short" would otherwise vanish. Adjacent visible parts are merged back."""
@@ -695,6 +727,12 @@ def refine(splits, audio_path, duration, words):
         lo = max(0.0, words[i0 - 1]["e"] + 0.02 if i0 > 0 else 0.0, words[i0]["s"] - RF_LOOK_BACK)
         hi = min(duration, words[i1 + 1]["s"] - 0.02 if i1 + 1 < len(words) else duration, words[i1]["e"] + RF_LOOK_FWD)
         a, b = snap_start(lo, words[i0]["s"]), snap_end(words[i1]["e"], hi)
+        # The part stops mid-sentence and the sound goes on past the look-ahead: a word the ASR did not hear
+        # ("una cosa [exótica]"). Follow the voice to its first quiet moment, never into the next heard word.
+        nxt = words[i1 + 1]["s"] - 0.02 if i1 + 1 < len(words) else duration
+        if (not words[i1]["w"].rstrip().endswith(_END_PUNCT) and nxt - words[i1]["e"] > RF_LOOK_FWD
+                and b <= words[i1]["e"] + 0.12 + 1e-6):
+            b = max(b, snap_end(words[i1]["e"], min(nxt, words[i1]["e"] + RF_UNHEARD_MAX)))
         cur = a
         for k in range(i0, i1):                       # inner pauses: only between two kept words
             ge, gs = words[k]["e"], words[k + 1]["s"]
@@ -819,6 +857,7 @@ def process(words, duration, audio_path, video_path=None, run: int = 0, scene_cu
     def finish(cut, reviewed, hidden_idx):
         """refine -> spoken words -> shot changes -> breathe -> word fix (+ zoom moments), on one cut."""
         cut = keep_spoken_words(refine(cut, audio_path, float(duration), words), words)
+        finish_sentences(cut, words)
         if reviewed:    # a word the review hid never stays inside a kept part (refine stretched over "No", "Mi")
             cut = keep_hidden_words_out(hidden_idx, cut, words)
         cuts = shot_changes()

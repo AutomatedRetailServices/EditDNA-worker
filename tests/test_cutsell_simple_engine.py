@@ -513,7 +513,7 @@ def test_deepgram_request_sends_brand_keyterms(monkeypatch, tmp_path):
 
 def test_decision_prompt_has_restarted_section_rule():
     from cutsell_worker.simple_engine import engine
-    assert "RESTARTED SECTION" in engine.DECISION_PROMPT and engine.VERSION == "1.2.4"
+    assert "RESTARTED SECTION" in engine.DECISION_PROMPT and engine.VERSION == "1.2.5"
 
 
 def _review_words():
@@ -1103,3 +1103,43 @@ def test_a_few_quiet_words_then_silence_is_cut_where_the_speech_ends(tmp_path):
     assert result.draft.diagnostics["simple_engine"]["sources"][0]["little_speech"] is True
     payload = json.loads(json.dumps(result_to_dict(result)))           # what the app receives
     assert draft_from_dict(payload["draft"]).diagnostics["little_speech"] is True
+
+
+# ------------------------------------------------------------------ PO 30 Oct: "the message is not finished"
+
+def test_a_kept_part_takes_back_the_one_word_that_finishes_its_sentence():
+    words = [{"w": "todo", "s": 17.6, "e": 17.8}, {"w": "el", "s": 17.8, "e": 18.0}, {"w": "mundo", "s": 18.0, "e": 18.4},
+             {"w": "la", "s": 18.62, "e": 18.70}, {"w": "mirando,", "s": 18.70, "e": 19.02},
+             {"w": "Mira,", "s": 19.02, "e": 19.34}, {"w": "mira,", "s": 19.34, "e": 19.66},
+             {"w": "Como", "s": 21.98, "e": 22.46}]
+    splits = [{"start": 17.5, "end": 18.70, "visible": True, "reason": "se queda"},
+              {"start": 18.70, "end": 21.81, "visible": False, "reason": "frase abandonada"},
+              {"start": 21.81, "end": 22.6, "visible": True, "reason": "se queda"}]
+    assert se.finish_sentences(splits, words) == 1
+    assert splits[0]["end"] == pytest.approx(19.0, abs=0.03)          # "... la mirando," -- not "Mira, mira,"
+    assert splits[1]["start"] == splits[0]["end"] and not splits[1]["visible"]
+    # A part that already ends a sentence, or a next word that does not close one, is left alone.
+    done = [dict(s) for s in splits]
+    assert se.finish_sentences(done, words) == 0
+    open_next = [{"start": 0.0, "end": 1.0, "visible": True, "reason": "k"}, {"start": 1.0, "end": 3.0, "visible": False, "reason": "r"}]
+    assert se.finish_sentences(open_next, [{"w": "Este", "s": 0.2, "e": 0.9}, {"w": "producto", "s": 1.0, "e": 1.5}]) == 0
+
+
+def test_a_word_the_asr_missed_after_a_mid_sentence_stop_is_kept(tmp_path):
+    """"una cosa [exótica]": the ASR heard "una cosa" (ending 1.0 s) but not the next word (sound to 1.8 s);
+    the next heard word starts at 3.0 s. The kept part follows the voice to 1.8 s, not 1.12 s."""
+    path = tmp_path / "unheard.wav"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                    "aevalsrc='0.4*sin(2*PI*200*t)*(between(t,0.3,1.8)+between(t,3.0,3.6))':d=4:s=16000",
+                    str(path)], check=True, capture_output=True)
+    words = [{"w": "una", "s": 0.3, "e": 0.6}, {"w": "cosa", "s": 0.6, "e": 1.0}, {"w": "Pero", "s": 3.0, "e": 3.6}]
+    splits = [{"start": 0.2, "end": 1.15, "visible": True, "reason": "se queda"},
+              {"start": 1.15, "end": 2.9, "visible": False, "reason": "silencio"},
+              {"start": 2.9, "end": 3.7, "visible": True, "reason": "se queda"}]
+    out = se.refine(splits, str(path), 4.0, words)
+    first = next(s for s in out if s["visible"])
+    assert first["end"] >= 1.75 and first["end"] < 2.98
+    # With end punctuation ("cosa.") nothing follows past the normal look-ahead.
+    words[1]["w"] = "cosa."
+    first = next(s for s in se.refine(splits, str(path), 4.0, words) if s["visible"])
+    assert first["end"] <= 1.0 + se.RF_LOOK_FWD + 0.01
