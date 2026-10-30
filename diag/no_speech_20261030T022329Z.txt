@@ -1,0 +1,18 @@
+2026-10-30 02:21:39+00:00 JOB f1ba4ad1
+2026-10-30 02:21:40+00:00   status=JobStatus.FAILED language_hint=None sources=1
+2026-10-30 02:21:42+00:00   voice0 file: 198 KB, 24.9s, audio streams [{'index': 0, 'codec_type': 'audio', 'codec_name': 'aac', 'channels': 1, 'sample_rate': '44100', 'default': 1}]
+2026-10-30 02:21:46+00:00   voice0: 25.0s mean=-36.6dB peak=-9.6dB | hint=None lang=es words=9 wpm=22 | hint=es lang=es words=9 wpm=22 | hint=en lang=en words=0 wpm=0
+2026-10-30 02:21:49+00:00   video0 file: 34258 KB, 24.9s, audio streams [{'index': 0, 'codec_type': 'audio', 'codec_name': 'aac', 'channels': 1, 'sample_rate': '44100', 'default': 1}]
+2026-10-30 02:21:53+00:00   video0: 24.9s mean=-36.6dB peak=-9.3dB | hint=None lang=es words=9 wpm=22 | hint=es lang=es words=9 wpm=22 | hint=en lang=en words=0 wpm=0
+2026-10-30 02:21:53+00:00 JOB 40cd667a
+2026-10-30 02:21:53+00:00   status=JobStatus.FAILED language_hint=None sources=1
+2026-10-30 02:21:54+00:00   voice0 file: 198 KB, 24.9s, audio streams [{'index': 0, 'codec_type': 'audio', 'codec_name': 'aac', 'channels': 1, 'sample_rate': '44100', 'default': 1}]
+2026-10-30 02:21:58+00:00   voice0: 25.0s mean=-36.6dB peak=-9.6dB | hint=None lang=es words=9 wpm=22 | hint=es lang=es words=9 wpm=22 | hint=en lang=en words=0 wpm=0
+2026-10-30 02:22:01+00:00   video0 file: 34258 KB, 24.9s, audio streams [{'index': 0, 'codec_type': 'audio', 'codec_name': 'aac', 'channels': 1, 'sample_rate': '44100', 'default': 1}]
+2026-10-30 02:22:05+00:00   video0: 24.9s mean=-36.6dB peak=-9.3dB | hint=None lang=es words=9 wpm=22 | hint=es lang=es words=9 wpm=22 | hint=en lang=en words=0 wpm=0
+2026-10-30 02:22:05+00:00 JOB 63562881
+2026-10-30 02:22:05+00:00   status=JobStatus.FAILED language_hint=None sources=1
+2026-10-30 02:22:06+00:00   voice0 file: 317 KB, 39.2s, audio streams [{'index': 0, 'codec_type': 'audio', 'codec_name': 'aac', 'channels': 1, 'sample_rate': '44100', 'default': 1}]
+2026-10-30 02:22:10+00:00   voice0: 39.2s mean=-22.7dB peak=-8.0dB | hint=None lang=en words=0 wpm=0 | hint=es lang=es words=0 wpm=0 | hint=en lang=en words=0 wpm=0
+2026-10-30 02:22:13+00:00   video0 file: 48716 KB, 39.1s, audio streams [{'index': 1, 'codec_type': 'audio', 'codec_name': 'aac', 'channels': 2, 'sample_rate': '44100', 'default': 1}]
+2026-10-30 02:22:17+00:00   video0: 39.2s mean=-22.6dB peak=-8.1dB | hint=None lang=en words=0 wpm=0 | hint=es lang=es words=0 wpm=0 | hint=en lang=en words=0 wpm=0
