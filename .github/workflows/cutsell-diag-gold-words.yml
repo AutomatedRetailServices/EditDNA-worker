@@ -1,0 +1,33 @@
+name: CutSell Gold candidate words (one-off, PO 30 Oct)
+
+# Read-only: copies the ASR words of one finished cut into perf-results/gold/ (like every Gold video's words).
+on:
+  push:
+    branches: [perf/diagnostico]
+    paths: [ops/diag_gold_words.py, .github/workflows/cutsell-diag-gold-words.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  words:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read the words on Modal
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          pip install -q modal
+          modal run ops/diag_gold_words.py 2>&1 | grep -E "^words |not found|Error" || true
+          test -s gold_words.json
+      - name: Save
+        run: |
+          dir="$RUNNER_TEMP/out"
+          git clone --quiet --depth 1 --branch perf-results "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$dir"
+          mkdir -p "$dir/gold"; cp gold_words.json "$dir/gold/g02_words.json"
+          cd "$dir"; git add -A gold
+          git -c user.name="cutsell-ci" -c user.email="ci@cutsell.invalid" commit --quiet -m "gold candidate words (job 92d11b5b)"
+          git push --quiet origin HEAD:perf-results
