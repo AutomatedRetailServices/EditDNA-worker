@@ -1,0 +1,36 @@
+name: CutSell diag · read the no-speech diagnosis output (free)
+
+# Reads the Modal logs of the one-off diagnosis app (no compute, no spend) and keeps only its NUMBER lines.
+on:
+  push:
+    branches: [perf/diagnostico]
+    paths: [.github/workflows/cutsell-diag-logs.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          pip install -q modal
+          modal app list --json > "$RUNNER_TEMP/apps.json" 2>/dev/null || true
+          id=$(python3 -c "import json,sys;a=json.load(open('$RUNNER_TEMP/apps.json'));print(next((x.get('App ID') or x.get('app_id') for x in a if 'diag-no-speech' in (x.get('Description') or x.get('description') or x.get('Name') or '')),''))")
+          echo "app=$id"
+          modal app logs "$id" --timestamps > "$RUNNER_TEMP/raw.txt" 2>&1 || true
+          grep -E "JOB |status=|file:|hint=|not in|none|not downloadable|Error|Traceback" "$RUNNER_TEMP/raw.txt" | sed -E 's#https?://[^ ]+#<link>#g' > "$RUNNER_TEMP/diag.txt" || true
+          wc -l "$RUNNER_TEMP/raw.txt" "$RUNNER_TEMP/diag.txt"
+      - name: Save
+        run: |
+          dir="$RUNNER_TEMP/out"
+          git clone --quiet --depth 1 --branch perf-results "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$dir"
+          mkdir -p "$dir/diag"; cp "$RUNNER_TEMP/diag.txt" "$dir/diag/no_speech_$(date -u +%Y%m%dT%H%M%SZ).txt"
+          cd "$dir"; git add -A diag
+          git -c user.name="cutsell-ci" -c user.email="ci@cutsell.invalid" commit --quiet -m "no-speech diag numbers"
+          git push --quiet origin HEAD:perf-results
