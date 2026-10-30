@@ -1,0 +1,81 @@
+since=7d raw_lines=750 facts=38
+== format sample ==
+2026-10-29 01:23:26+00:00 /pkg/modal/client.py:321: UserWarning: The following credential settings are ignored inside containers: MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
+2026-10-29 01:23:26+00:00   warnings.warn(
+2026-10-29 01:28:27+00:00 /pkg/modal/client.py:321: UserWarning: The following credential settings are ignored inside containers: MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
+2026-10-29 01:28:27+00:00   warnings.warn(
+2026-10-29 01:33:27+00:00 /pkg/modal/client.py:321: UserWarning: The following credential settings are ignored inside containers: MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
+2026-10-29 01:33:27+00:00   warnings.warn(
+2026-10-29 01:38:27+00:00 /pkg/modal/client.py:321: UserWarning: The following credential settings are ignored inside containers: MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
+2026-10-29 01:38:27+00:00   warnings.warn(
+2026-10-29 01:43:27+00:00 /pkg/modal/client.py:321: UserWarning: The following credential settings are ignored inside containers: MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
+2026-10-29 01:43:27+00:00   warnings.warn(
+2026-10-29 01:48:28+00:00 /pkg/modal/client.py:321: UserWarning: The following credential settings are ignored inside containers: MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
+2026-10-29 01:48:28+00:00   warnings.warn(
+2026-10-29 01:53:28+00:00 /pkg/modal/client.py:321: UserWarning: The following credential settings are ignored inside containers: MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
+2026-10-29 01:53:28+00:00   warnings.warn(
+2026-10-29 01:58:27+00:00 /pkg/modal/client.py:321: UserWarning: The following credential settings are ignored inside containers: MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
+2026-10-29 01:58:27+00:00   warnings.warn(
+2026-10-29 02:03:27+00:00 /pkg/modal/client.py:321: UserWarning: The following credential settings are ignored inside containers: MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
+2026-10-29 02:03:27+00:00   warnings.warn(
+2026-10-29 02:08:27+00:00 /pkg/modal/client.py:321: UserWarning: The following credential settings are ignored inside containers: MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
+2026-10-29 02:08:27+00:00   warnings.warn(
+2026-10-29 02:13:27+00:00 /pkg/modal/client.py:321: UserWarning: The following credential settings are ignored inside containers: MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
+2026-10-29 02:13:27+00:00   warnings.warn(
+2026-10-29 02:18:27+00:00 /pkg/modal/client.py:321: UserWarning: The following credential settings are ignored inside containers: MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
+2026-10-29 02:18:27+00:00   warnings.warn(
+2026-10-29 02:23:27+00:00 /pkg/modal/client.py:321: UserWarning: The following credential settings are ignored inside containers: MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
+2026-10-29 02:23:27+00:00   warnings.warn(
+2026-10-29 02:28:40+00:00 /pkg/modal/client.py:321: UserWarning: The following credential settings are ignored inside containers: MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
+2026-10-29 02:28:40+00:00   warnings.warn(
+2026-10-29 02:33:27+00:00 /pkg/modal/client.py:321: UserWarning: The following credential settings are ignored inside containers: MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
+2026-10-29 02:33:27+00:00   warnings.warn(
+2026-10-29 02:38:27+00:00 /pkg/modal/client.py:321: UserWarning: The following credential settings are ignored inside containers: MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
+2026-10-29 02:38:27+00:00   warnings.warn(
+2026-10-29 02:43:27+00:00 /pkg/modal/client.py:321: UserWarning: The following credential settings are ignored inside containers: MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
+2026-10-29 02:43:27+00:00   warnings.warn(
+2026-10-29 02:48:27+00:00 /pkg/modal/client.py:321: UserWarning: The following credential settings are ignored inside containers: MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
+2026-10-29 02:48:27+00:00   warnings.warn(
+2026-10-29 02:53:27+00:00 /pkg/modal/client.py:321: UserWarning: The following credential settings are ignored inside containers: MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
+2026-10-29 02:53:27+00:00   warnings.warn(
+2026-10-29 02:58:27+00:00 /pkg/modal/client.py:321: UserWarning: The following credential settings are ignored inside containers: MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
+2026-10-29 02:58:27+00:00   warnings.warn(
+== facts ==
+2026-10-29 13:26:43+00:00	-	7f9dc893-aafe-440f-a919-eb7075b8df16	JOB_START cutsell_worker.worker_job.run_flow_b_job
+2026-10-29 13:26:57+00:00	-	27cbd912-f1b1-4f4c-ab48-f257a99ac675	JOB_START cutsell_worker.worker_job.run_flow_b_job
+2026-10-29 13:27:09+00:00	-	8cc9e05b-10dc-4a04-bca2-d4bf839a7660	JOB_START cutsell_worker.worker_job.run_video_followup_job
+2026-10-29 13:27:11+00:00	-	-	JOB_OK 0:00:01.969134
+2026-10-29 13:27:11+00:00	-	8cc9e05b-10dc-4a04-bca2-d4bf839a7660	JOB_OK 
+2026-10-29 13:27:14+00:00	-	921dc64b-e573-4783-bccb-cce4f1f974ac	JOB_START cutsell_worker.worker_job.run_flow_b_job
+2026-10-29 13:27:22+00:00	-	2708cd4a-2076-46f7-ac44-c2d58fdbdc68	JOB_START cutsell_worker.worker_job.run_video_followup_job
+2026-10-29 13:27:24+00:00	-	-	JOB_OK 0:00:01.962672
+2026-10-29 13:27:24+00:00	-	2708cd4a-2076-46f7-ac44-c2d58fdbdc68	JOB_OK 
+2026-10-29 13:27:37+00:00	-	10d063fd-be6a-42cc-bbb2-b6f23790b99d	JOB_START cutsell_worker.worker_job.run_flow_b_job
+2026-10-29 13:28:09+00:00	-	388d59fe-d878-4235-9692-d42815406214	JOB_START cutsell_worker.worker_job.run_flow_b_job
+2026-10-29 13:28:50+00:00	-	767a3806-1c3c-4cbc-baa9-f82b2dd1afb1	JOB_START cutsell_worker.worker_job.run_video_followup_job
+2026-10-29 13:28:52+00:00	-	-	JOB_OK 0:00:02.284914
+2026-10-29 13:28:52+00:00	-	767a3806-1c3c-4cbc-baa9-f82b2dd1afb1	JOB_OK 
+2026-10-29 13:29:28+00:00	-	2224670e-5fef-43cf-b972-51a7a31ed3d2	JOB_START cutsell_worker.worker_job.run_video_followup_job
+2026-10-29 13:29:30+00:00	-	-	JOB_OK 0:00:01.999931
+2026-10-29 13:29:30+00:00	-	2224670e-5fef-43cf-b972-51a7a31ed3d2	JOB_OK 
+2026-10-29 13:29:59+00:00	-	79eaefd2-7640-435b-8886-cf871271963c	JOB_START cutsell_worker.worker_job.run_video_followup_job
+2026-10-29 13:30:01+00:00	-	-	JOB_OK 0:00:01.697797
+2026-10-29 13:30:01+00:00	-	79eaefd2-7640-435b-8886-cf871271963c	JOB_OK 
+2026-10-29 13:30:54+00:00	-	-	JOB_OK 0:04:10.554638
+2026-10-29 13:30:54+00:00	-	7f9dc893-aafe-440f-a919-eb7075b8df16	JOB_OK 
+2026-10-29 13:32:16+00:00	-	-	JOB_OK 0:05:17.193578
+2026-10-29 13:32:16+00:00	-	27cbd912-f1b1-4f4c-ab48-f257a99ac675	JOB_OK 
+2026-10-29 13:32:57+00:00	-	-	JOB_OK 0:05:20.143415
+2026-10-29 13:32:57+00:00	-	10d063fd-be6a-42cc-bbb2-b6f23790b99d	JOB_OK 
+2026-10-29 13:33:06+00:00	-	-	JOB_OK 0:05:51.639792
+2026-10-29 13:33:06+00:00	-	921dc64b-e573-4783-bccb-cce4f1f974ac	JOB_OK 
+2026-10-29 13:34:31+00:00	-	-	JOB_OK 0:06:19.403268
+2026-10-29 13:34:31+00:00	-	388d59fe-d878-4235-9692-d42815406214	JOB_OK 
+2026-10-30 01:21:09+00:00	-	63562881-ef52-4274-970f-925017adeabf	JOB_START cutsell_worker.worker_job.run_flow_b_job
+2026-10-30 01:21:12+00:00	-	63562881-ef52-4274-970f-925017adeabf	ERROR  01:21:12 Worker 3dd1e64b99154e43b34f150ba986a76c: job 63562881-ef52-4274-970f-925017adeabf: exception raised while executing (cutsell_worke
+2026-10-30 01:21:12+00:00	-	-	ERROR  Traceback (most recent call last):
+2026-10-30 01:21:12+00:00	-	-	ERROR      raise NoSpeechError(f"no speech found in source {source.source_asset_id}")
+2026-10-30 01:21:12+00:00	-	-	ERROR  cutsell_worker.simple_engine_adapter.NoSpeechError: no speech found in source src_12efb3950a3305f1f9e3
+2026-10-30 01:21:39+00:00	-	0c28d963-dd66-4847-a333-df65107d791d	JOB_START cutsell_worker.worker_job.run_video_followup_job
+2026-10-30 01:21:41+00:00	-	-	JOB_OK 0:00:01.931024
+2026-10-30 01:21:41+00:00	-	0c28d963-dd66-4847-a333-df65107d791d	JOB_OK 
