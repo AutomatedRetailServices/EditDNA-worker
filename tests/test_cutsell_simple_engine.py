@@ -1075,3 +1075,28 @@ def test_the_speculative_finish_hides_loose_pieces_like_the_normal_path(monkeypa
     late = se.process(words, 7.0, None, scene_cut_list=[], llm=call)
     assert _strip(early) == _strip(late)
     assert "Mira." not in [c["w"] for c in early["captions"]]          # the loose piece stays hidden
+
+
+def test_a_few_quiet_words_then_silence_is_cut_where_the_speech_ends(tmp_path):
+    """PO 2026-10-29: 9 words in the first 3 s of a 25 s quiet clip used to fail as "no speech". Now the cut keeps
+    the words and drops the silent rest; only a video with no words at all is refused."""
+    path = tmp_path / "short_talk.mp4"
+    subprocess.run([
+        "ffmpeg", "-v", "error", "-y",
+        "-f", "lavfi", "-i", "color=c=blue:s=320x240:d=25:r=30",
+        "-f", "lavfi", "-i", "aevalsrc='0.02*sin(2*PI*220*t)*between(t,1.3,3.1)':d=25:s=44100",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(path),
+    ], check=True, capture_output=True)
+    tokens = ["Hola", "mira", "lo", "que", "me", "llegó", "hoy", "para", "ti."]
+    words = [{"w": t, "s": round(1.3 + i * 0.2, 3), "e": round(1.3 + i * 0.2 + 0.18, 3)} for i, t in enumerate(tokens)]
+    assert simple_engine_adapter._only_background_voice(words, "x", mean_db=-36.1)   # the old rule refused it
+
+    result = simple_engine_adapter.process_with_simple_engine(
+        _request({"s1": str(path)}), {"s1": str(path)},
+        transcribe=lambda p, *, language_hint=None: {"language": "es", "duration": 25.0, "words": words},
+        llm=FakeLLM(decisions=[{"hide": [], "trim": []}]),
+    )
+    selected = result.draft.selected
+    assert selected and " ".join(c.text for c in selected).startswith("Hola")
+    assert max(c.end for c in selected) < 4.0                          # the silent 3 s – 25 s is cut away
+    assert result.draft.diagnostics["simple_engine"]["sources"][0]["little_speech"] is True

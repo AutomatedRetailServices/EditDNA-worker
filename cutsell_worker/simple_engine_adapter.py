@@ -247,8 +247,12 @@ def process_with_simple_engine(
             heard = transcribe(audio_path, language_hint=request.language_hint)
             heard = _heard_in_her_language(heard, audio_path, transcribe, request.language_hint)
             words = [w for w in heard.get("words", []) if float(w["e"]) > float(w["s"])]
-            if not words or _nobody_talking(words, duration) or _only_background_voice(words, audio_path):
+            if not words:
                 raise NoSpeechError(f"no speech found in source {source.source_asset_id}")
+            # PO 2026-10-29: a video with only a little speech (a few words, quiet, or the rest silent) is no longer
+            # refused: the cut keeps the words that were said and drops the rest. Only a video with no words at all
+            # is "no speech". The two old checks are kept as a note in the diagnostics.
+            little_speech = _nobody_talking(words, duration) or _only_background_voice(words, audio_path)
 
             notify("analyzing", base + int(30 / total))
             # The silence refine reads the audio decoded from the source file itself (what it was calibrated on).
@@ -296,6 +300,7 @@ def process_with_simple_engine(
                 "cut_duration_sec": out["cut_duration"],
                 "passes": out["passes"],
                 "word_count": len(words),
+                "little_speech": bool(little_speech),
                 "splits": out["splits"],
                 "log": out["log"],
                 "usage": out["usage"],
