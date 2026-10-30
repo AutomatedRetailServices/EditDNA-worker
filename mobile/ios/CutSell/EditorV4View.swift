@@ -45,6 +45,8 @@ struct EditorV4View: View {
     @State private var recordAgainID: String?
     @State private var musicPicker = false
     @State private var musicNotice = false
+    /// "Almost no voice" is shown once each time this editor opens on such a cut.
+    @State private var littleSpeechShown = false
     @AppStorage("cutsell.musicRightsNoticeShown") private var musicNoticeShown = false
     /// Build 17: the preview rebuilds when a sound finishes downloading or a clean copy is ready.
     @ObservedObject private var sounds = SfxLibrary.shared
@@ -286,6 +288,15 @@ struct EditorV4View: View {
         view
             .toolbar(.hidden, for: .navigationBar)
             .task(id: previewKey) { await playback.rebuild(from: model) }
+            .task(id: model.littleSpeech) {
+                guard model.littleSpeech, !littleSpeechShown else { return }
+                littleSpeechShown = true
+                CutSellDiagnostics.log("little_speech_notice", [:])
+                let notice = EditorToast.message("Almost no voice in this video. Check the cut.")
+                toast = notice
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                if toast == notice { toast = nil }
+            }
             .onChange(of: playback.currentTime) { _, time in
                 if abs(model.playheadTime - time) >= 0.1 || time == 0 { model.playheadTime = time }
             }

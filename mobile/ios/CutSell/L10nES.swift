@@ -972,6 +972,7 @@ enum L10nES {
         "Select a clip": "Elige un clip",
         "Select a clip or an overlay, then tap ◇.": "Elige un clip o una superposición y toca ◇.",
         "Select a clip, voice-over, overlay or caption first.": "Primero elige un clip, voz en off, superposición o subtítulo.",
+        "Almost no voice in this video. Check the cut.": "Casi no se oye voz en este video. Revisa el corte.",
         "Select all": "Seleccionar todo",
         "Select more photos": "Elegir más fotos",
         "Select the video or an overlay and move the white line to where the movement starts.": "Selecciona el video o una superposición y lleva la línea blanca a donde empieza el movimiento.",

@@ -808,6 +808,11 @@ final class DraftEditorViewModel: ObservableObject {
         captionValue("caption_scale")?.doubleValue ?? CaptionLayout.defaultScale
     }
 
+    /// The server heard only a little speech (a few words, quiet, or mostly silence) and cut to it (30 Oct).
+    var littleSpeech: Bool {
+        displayDraft?["diagnostics"]?["little_speech"]?.boolValue ?? false
+    }
+
     /// Which engine produced this draft; short timed captions exist only for "simple".
     var draftEngine: String? {
         displayDraft?["diagnostics"]?["engine"]?.stringValue
