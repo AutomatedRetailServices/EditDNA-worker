@@ -55,6 +55,7 @@ RF_MERGE_GAP = 0.10
 # PO 30 Oct ("the message is not finished"): a kept part that ends mid-sentence may run on into a word the ASR
 # missed (up to this long), and may take back the ONE word that finishes its sentence from the cut after it.
 RF_UNHEARD_MAX, FINISH_GAP_MAX = 1.5, 0.30
+UNHEARD_DB, UNHEARD_FRAMES = 3.0, 10          # >= 100 ms of sound 3 dB over the floor = an unheard word
 _END_PUNCT = (".", ",", "?", "!", "…", ";", ":")
 # visual snap
 VS_WIN, VS_TH, VS_FR = 0.6, 0.20, 1 / 30
@@ -727,12 +728,13 @@ def refine(splits, audio_path, duration, words):
         lo = max(0.0, words[i0 - 1]["e"] + 0.02 if i0 > 0 else 0.0, words[i0]["s"] - RF_LOOK_BACK)
         hi = min(duration, words[i1 + 1]["s"] - 0.02 if i1 + 1 < len(words) else duration, words[i1]["e"] + RF_LOOK_FWD)
         a, b = snap_start(lo, words[i0]["s"]), snap_end(words[i1]["e"], hi)
-        # The part stops mid-sentence and the sound goes on past the look-ahead: a word the ASR did not hear
-        # ("una cosa [exótica]"). Follow the voice to its first quiet moment, never into the next heard word.
+        # The part stops mid-sentence and, before the next heard word (at most RF_UNHEARD_MAX later), there is
+        # voice the ASR did not turn into a word ("una cosa [exótica]"): keep up to the next heard word instead
+        # of cutting the unheard one. A quiet pause (no sound above the floor) is still trimmed as before.
         nxt = words[i1 + 1]["s"] - 0.02 if i1 + 1 < len(words) else duration
-        if (not words[i1]["w"].rstrip().endswith(_END_PUNCT) and nxt - words[i1]["e"] > RF_LOOK_FWD
-                and b <= words[i1]["e"] + 0.12 + 1e-6):
-            b = max(b, snap_end(words[i1]["e"], min(nxt, words[i1]["e"] + RF_UNHEARD_MAX)))
+        if (not words[i1]["w"].rstrip().endswith(_END_PUNCT) and RF_LOOK_FWD < nxt - words[i1]["e"] <= RF_UNHEARD_MAX
+                and int((db[f(b):f(nxt)] > _threshold(db) + UNHEARD_DB).sum()) >= UNHEARD_FRAMES):
+            b = max(b, nxt)
         cur = a
         for k in range(i0, i1):                       # inner pauses: only between two kept words
             ge, gs = words[k]["e"], words[k + 1]["s"]

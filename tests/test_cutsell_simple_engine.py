@@ -1126,19 +1126,26 @@ def test_a_kept_part_takes_back_the_one_word_that_finishes_its_sentence():
 
 
 def test_a_word_the_asr_missed_after_a_mid_sentence_stop_is_kept(tmp_path):
-    """"una cosa [exótica]": the ASR heard "una cosa" (ending 1.0 s) but not the next word (sound to 1.8 s);
-    the next heard word starts at 3.0 s. The kept part follows the voice to 1.8 s, not 1.12 s."""
+    """"una cosa [exótica]": the ASR heard "una cosa" (ending 1.0 s) but not the next word (sound to 1.8 s,
+    after a short breath); the next heard word starts at 2.4 s. The kept part runs on to it, not to 1.12 s."""
     path = tmp_path / "unheard.wav"
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
-                    "aevalsrc='0.4*sin(2*PI*200*t)*(between(t,0.3,1.8)+between(t,3.0,3.6))':d=4:s=16000",
+                    "aevalsrc='0.4*sin(2*PI*200*t)*(between(t,0.3,1.0)+between(t,1.2,1.8)+between(t,2.4,3.6))':d=4:s=16000",
                     str(path)], check=True, capture_output=True)
-    words = [{"w": "una", "s": 0.3, "e": 0.6}, {"w": "cosa", "s": 0.6, "e": 1.0}, {"w": "Pero", "s": 3.0, "e": 3.6}]
+    words = [{"w": "una", "s": 0.3, "e": 0.6}, {"w": "cosa", "s": 0.6, "e": 1.0}, {"w": "Pero", "s": 2.4, "e": 3.6}]
     splits = [{"start": 0.2, "end": 1.15, "visible": True, "reason": "se queda"},
-              {"start": 1.15, "end": 2.9, "visible": False, "reason": "silencio"},
-              {"start": 2.9, "end": 3.7, "visible": True, "reason": "se queda"}]
+              {"start": 1.15, "end": 2.3, "visible": False, "reason": "silencio"},
+              {"start": 2.3, "end": 3.7, "visible": True, "reason": "se queda"}]
     out = se.refine(splits, str(path), 4.0, words)
     first = next(s for s in out if s["visible"])
-    assert first["end"] >= 1.75 and first["end"] < 2.98
+    assert first["end"] >= 2.3                                          # "exótica" and the breath stay
+    # A quiet pause (no sound) after "cosa" is still trimmed.
+    quiet = tmp_path / "quiet.wav"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                    "aevalsrc='0.4*sin(2*PI*200*t)*(between(t,0.3,1.0)+between(t,2.4,3.6))':d=4:s=16000",
+                    str(quiet)], check=True, capture_output=True)
+    first = next(s for s in se.refine(splits, str(quiet), 4.0, words) if s["visible"])
+    assert first["end"] <= 1.0 + se.RF_LOOK_FWD + 0.01
     # With end punctuation ("cosa.") nothing follows past the normal look-ahead.
     words[1]["w"] = "cosa."
     first = next(s for s in se.refine(splits, str(path), 4.0, words) if s["visible"])
