@@ -10,3 +10,5 @@ SQLAlchemy>=2.0
 psycopg[binary]>=3.1
 sentry-sdk>=2.0
 fastapi[standard]>=0.115
+# Clean up voice v2 (30 Oct): the AI voice isolation model runs with onnxruntime on the CPU.
+onnxruntime>=1.18
