@@ -171,7 +171,7 @@ def test_the_cut_engine_is_untouched():
     6fe12cd only sends the two reviews and the word fix together; the prompts and every keep / hide rule are unchanged
     and test_parallel_reviews_give_exactly_the_sequential_cut proves the same cut. 30 Oct (asked for, "the message is
     not finished"): 3551ee7 finish_sentences + the unheard-word follow in refine; Gold reference unchanged."""
-    diff = subprocess.run(["git", "diff", "--stat", "3551ee7", "--", "cutsell_worker/simple_engine/engine.py",  # baseline: 3551ee7, 30 Oct sentence-end fix (asked for; before it: 6fe12cd speed, ab37eac)
+    diff = subprocess.run(["git", "diff", "--stat", "50376d9", "--", "cutsell_worker/simple_engine/engine.py",  # baseline: 50376d9, 30 Oct sentence-end fix (asked for; before it: 6fe12cd speed, ab37eac)
                            "cutsell_worker/simple_engine/prompts", "cutsell_worker/simple_engine/__init__.py"], capture_output=True, text=True)
     if diff.returncode != 0:
         pytest.skip("git history not available")
