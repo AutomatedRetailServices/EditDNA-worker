@@ -1,0 +1,7 @@
+B24UI   135.7 FAIL editor open on a real cut
+B24UI   229.0 FAIL main row: Edit, Audio, Text
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:950: error: -[CutSellUITests.Build24UITests testTextAndCaptionStyles] : Failed to tap "tool_edit" Any: No matches found for first query match sequence: `Descendants matching type Any` -> `Elements matching predicate '"tool_edit" IN identifiers'`, given input App element pid: 20974
+Test Case '-[CutSellUITests.Build24UITests testTextAndCaptionStyles]' failed (233.455 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-30 22:21:08.258.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-30 22:21:08.259.
+Test Suite 'Selected tests' failed at 2026-10-30 22:21:08.259.
