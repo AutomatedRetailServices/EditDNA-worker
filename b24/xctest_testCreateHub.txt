@@ -1,0 +1,51 @@
+B24UI    21.5 PASS no avatar on Create
+B24UI    23.8 PASS no plan meter on Create
+B24UI    24.2 PASS no 'Create more' title
+B24UI    25.8 PASS hubRecord shown
+B24UI    27.7 PASS hubFaceless shown
+B24UI    29.3 PASS hubMix shown
+B24UI    30.6 PASS hubPlanWeek shown
+B24UI    31.0 PASS hubMode_single shown
+B24UI    32.2 PASS hubMode_bulk shown
+B24UI    33.9 PASS hubMode_combine shown
+B24UI    37.1 PASS Record: 'What are you promoting?' first
+B24UI    38.5 PASS Record: no Detect for me
+B24UI    39.0 PASS Record: Continue off without a product
+B24UI    40.5 PASS Record: her brands listed
+B24UI    44.2 PASS Record: the brand's products open under it
+B24UI    69.9 PASS Record opens the camera
+B24UI    81.9 PASS Faceless: 'What are you promoting?' first
+B24UI    82.7 PASS Faceless: no Detect for me
+B24UI    83.1 PASS Faceless: Continue off without a product
+B24UI    84.5 PASS Faceless: her brands listed
+B24UI    89.0 PASS Faceless: the brand's products open under it
+B24UI    95.1 PASS Faceless shows Coming soon
+B24UI   104.6 PASS Sales Mix: 'What are you promoting?' first
+B24UI   104.9 PASS Sales Mix: no Detect for me
+B24UI   105.0 PASS Sales Mix: Continue off without a product
+B24UI   106.3 PASS Sales Mix: her brands listed
+B24UI   110.7 PASS Sales Mix: the brand's products open under it
+B24UI   114.0 PASS Sales Mix opens Sales Mix · Setup
+B24UI   144.4 FAIL Plan my week opens Plan my week
+B24UI   155.7 PASS single: 'What are you promoting?' first
+B24UI   156.1 PASS single: no Detect for me
+B24UI   156.2 PASS single: Continue off without a product
+B24UI   157.5 PASS single: her brands listed
+B24UI   160.3 PASS single: the brand's products open under it
+B24UI   177.1 Photos access allowed
+B24UI   179.3 PASS single opens the gallery in single
+B24UI   191.4 PASS bulk: 'What are you promoting?' first
+B24UI   192.0 PASS bulk: Detect for me (Bulk only)
+B24UI   198.4 PASS bulk opens the gallery in bulk
+B24UI   208.8 PASS combine: 'What are you promoting?' first
+B24UI   209.9 PASS combine: no Detect for me
+B24UI   210.1 PASS combine: Continue off without a product
+B24UI   211.2 PASS combine: her brands listed
+B24UI   213.9 PASS combine: the brand's products open under it
+B24UI   220.9 PASS combine opens the gallery in combine
+B24UI   221.1 FAILURES: Plan my week opens Plan my week
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:1366: error: -[CutSellUITests.Build24UITests testCreateHub] : XCTAssertTrue failed - Plan my week opens Plan my week
+Test Case '-[CutSellUITests.Build24UITests testCreateHub]' failed (223.725 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-30 16:43:35.570.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-30 16:43:35.571.
+Test Suite 'Selected tests' failed at 2026-10-30 16:43:35.572.
