@@ -383,9 +383,26 @@ extension CutSubmitter {
         for (index, video) in videos.enumerated() {
             stage(clip(index, "Preparing…"), 0)
             do {
-                voices.append(try await AudioExtractor.extract(from: video.previewURL ?? video.url) { [weak self] fraction in
+                var voice = try await AudioExtractor.extractWithPeak(from: video.previewURL ?? video.url) { [weak self] fraction in
                     Task { @MainActor in self?.stage(clip(index, "Preparing…"), fraction) }
-                })
+                }
+                // 30 Oct (production): a gallery video's voice came out silent and the server found "no speech".
+                // Silent from the small copy -> try the original; still silent -> the whole-video flow (the
+                // server takes the sound from the video itself).
+                if voice.peak < AudioExtractor.quietPeak, let preview = video.previewURL, preview != video.url,
+                   FileManager.default.fileExists(atPath: video.url.path),
+                   let original = try? await AudioExtractor.extractWithPeak(from: video.url) {
+                    try? FileManager.default.removeItem(at: voice.url)
+                    voice = original
+                }
+                if voice.peak < AudioExtractor.quietPeak {
+                    try? FileManager.default.removeItem(at: voice.url)
+                    for url in voices { try? FileManager.default.removeItem(at: url) }
+                    CutSellDiagnostics.log("audio_first_skipped", ["reason": "quiet", "peak": String(format: "%.4f", voice.peak),
+                                                                   "source_order": String(index)])
+                    return nil
+                }
+                voices.append(voice.url)
             } catch AudioExtractor.Failure.noAudioTrack {
                 CutSellDiagnostics.log("audio_first_skipped", ["reason": "no_audio_track", "source_order": String(index)])
                 return nil

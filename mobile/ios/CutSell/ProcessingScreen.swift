@@ -35,6 +35,7 @@ struct CutProgressView: View {
                     fileName: CutName.display(cut?.title),
                     thumbnail: uploading ? thumbnail : (cut?.thumbnail ?? thumbnail),
                     failed: !uploading && cut?.isFailed == true,
+                    noSpeech: ProcessingContent.isNoSpeech(cut?.error),
                     queued: !uploading && cut?.isFailed != true && cut?.jobState == "queued",
                     uploading: uploading,
                     stalled: uploading ? submitter?.stalled : nil,
@@ -113,6 +114,8 @@ struct ProcessingContent: View {
     let fileName: String
     let thumbnail: UIImage?
     var failed = false
+    /// 30 Oct (production): the server heard no voice in the video ("no speech found"): say so plainly.
+    var noSpeech = false
     /// The server has the cut but has not started it yet (Figma 1233:3155 "Processing/Queued").
     var queued = false
     /// While the video uploads from this iPhone CutSell must stay open, so there is no way out.
@@ -167,10 +170,20 @@ struct ProcessingContent: View {
                     }
                     .padding(.top, 8)
                 VStack(spacing: 4) {
-                    Text(L10n.tr("Processing stopped")).font(CS.inter(15, .semibold)).foregroundStyle(Self.errorRed)
-                    Text(L10n.tr("Error")).font(CS.inter(22, .heavy)).foregroundStyle(Self.errorRed)
-                        .accessibilityIdentifier("processingStage")
-                    Text(L10n.tr("Your original recording is safe")).font(CS.inter(12, .medium)).foregroundStyle(CS.wiSecondary)
+                    if noSpeech {
+                        Text(L10n.tr("We couldn’t hear anyone talking")).font(CS.inter(19, .heavy)).foregroundStyle(Self.errorRed)
+                            .multilineTextAlignment(.center)
+                            .accessibilityIdentifier("processingStage")
+                        Text(L10n.tr("CutSell edits videos where someone speaks. Try a video with your voice."))
+                            .font(CS.inter(13, .medium)).foregroundStyle(CS.wiSecondary)
+                            .multilineTextAlignment(.center).padding(.horizontal, 24)
+                            .accessibilityIdentifier("noSpeechNote")
+                    } else {
+                        Text(L10n.tr("Processing stopped")).font(CS.inter(15, .semibold)).foregroundStyle(Self.errorRed)
+                        Text(L10n.tr("Error")).font(CS.inter(22, .heavy)).foregroundStyle(Self.errorRed)
+                            .accessibilityIdentifier("processingStage")
+                        Text(L10n.tr("Your original recording is safe")).font(CS.inter(12, .medium)).foregroundStyle(CS.wiSecondary)
+                    }
                 }
                 .padding(.top, 6)
             } else {
@@ -296,6 +309,12 @@ struct ProcessingContent: View {
             }
         }
         .padding(.horizontal, 20)
+    }
+
+    /// The server's reason says it found no voice (the engine's NoSpeechError: "no speech found in source …").
+    static func isNoSpeech(_ error: String?) -> Bool {
+        guard let error = error?.lowercased() else { return false }
+        return error.contains("no speech") || error.contains("no_speech") || error.contains("nospeech")
     }
 
     /// Figma 1233:3123: the "nothing was lost" note, the blue "Retry processing" (PO 24 Oct) and its line.

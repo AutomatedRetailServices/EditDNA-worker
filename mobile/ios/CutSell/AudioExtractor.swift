@@ -25,9 +25,24 @@ enum AudioExtractor {
 
     /// Writes `<name>.m4a` next to the other prepared uploads and returns its URL.
     static func extract(from videoURL: URL, progress: (@Sendable (Double) -> Void)? = nil) async throws -> URL {
+        try await extractWithPeak(from: videoURL, progress: progress).url
+    }
+
+    /// Below this peak (about -44 dBFS) the extracted sound is silence: no voice the server could hear.
+    static let quietPeak: Float = 0.006
+
+    /// 30 Oct (production: a gallery video failed with "no speech found"): the voice AND its loudest sample
+    /// (0...1), so the caller can tell a silent extraction (wrong track, a copy without sound) from a real voice.
+    static func extractWithPeak(from videoURL: URL, progress: (@Sendable (Double) -> Void)? = nil) async throws -> (url: URL, peak: Float) {
         let started = Date()
         let asset = AVURLAsset(url: videoURL)
-        guard let track = try await asset.loadTracks(withMediaType: .audio).first else { throw Failure.noAudioTrack }
+        let tracks = try await asset.loadTracks(withMediaType: .audio)
+        // The first ENABLED sound track (a video can carry a disabled or extra track, e.g. spatial audio).
+        var chosen: AVAssetTrack?
+        for candidate in tracks where chosen == nil {
+            if (try? await candidate.load(.isEnabled)) ?? true { chosen = candidate }
+        }
+        guard let track = chosen ?? tracks.first else { throw Failure.noAudioTrack }
         let duration = max(0.1, CMTimeGetSeconds(try await asset.load(.duration)))
         let destination = try folder().appendingPathComponent("\(UUID().uuidString).m4a")
         try? FileManager.default.removeItem(at: destination)
@@ -66,6 +81,7 @@ enum AudioExtractor {
         writer.startSession(atSourceTime: .zero)
 
         let queue = DispatchQueue(label: "ai.cutsell.audio-extract")
+        let loudest = PeakBox()
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let once = StallWatch.Once(continuation)
             input.requestMediaDataWhenReady(on: queue) {
@@ -81,6 +97,7 @@ enum AudioExtractor {
                         }
                         return
                     }
+                    loudest.add(buffer)
                     let time = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(buffer))
                     progress?(min(1, max(0, time / duration)))
                     if !input.append(buffer) {
@@ -95,9 +112,29 @@ enum AudioExtractor {
         let bytes = ((try? FileManager.default.attributesOfItem(atPath: destination.path))?[.size] as? NSNumber)?.int64Value ?? 0
         CutSellDiagnostics.log("audio_extracted", ["seconds": String(format: "%.1f", Date().timeIntervalSince(started)),
                                                    "kb": String(bytes / 1024),
-                                                   "video_seconds": String(format: "%.0f", duration)])
+                                                   "video_seconds": String(format: "%.0f", duration),
+                                                   "peak": String(format: "%.4f", loudest.peak),
+                                                   "tracks": String(tracks.count)])
         progress?(1)
-        return destination
+        return (destination, loudest.peak)
+    }
+
+    /// The loudest 16-bit sample seen so far (used on the extraction queue only).
+    private final class PeakBox: @unchecked Sendable {
+        private(set) var peak: Float = 0
+        func add(_ buffer: CMSampleBuffer) {
+            guard let block = CMSampleBufferGetDataBuffer(buffer) else { return }
+            let length = CMBlockBufferGetDataLength(block)
+            guard length >= 2 else { return }
+            var samples = [Int16](repeating: 0, count: length / 2)
+            let status = samples.withUnsafeMutableBytes {
+                CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: length, destination: $0.baseAddress!)
+            }
+            guard status == kCMBlockBufferNoErr else { return }
+            var loudest: Int32 = 0
+            for v in samples { loudest = max(loudest, abs(Int32(v))) }
+            peak = max(peak, Float(loudest) / 32_768)
+        }
     }
 
     private static func folder() throws -> URL {
