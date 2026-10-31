@@ -784,6 +784,7 @@ struct EditorV4View: View {
             if model.captionsEnabled {
                 captionLayer(frame: size)
             }
+            textsOnVideo(frame: size)
             if let broll = model.pendingBroll {
                 brollPill(broll).frame(maxHeight: .infinity, alignment: .bottom).padding(.bottom, 14)
             }
@@ -1031,8 +1032,9 @@ struct EditorV4View: View {
         .allowsHitTesting(false)
     }
 
-    /// Text overlays and photo/video overlays drawn where the export puts them.
-    private func overlaysOnVideo(frame: CGSize) -> some View {
+    /// 31 Oct (PO): the texts sit on top of everything on the video (photos, captions) so the fingers always reach
+    /// the selected one: drag to move, pinch to resize.
+    private func textsOnVideo(frame: CGSize) -> some View {
         ZStack {
             ForEach(Array(model.textOverlays.enumerated()), id: \.offset) { _, item in
                 let start = item["start"]?.doubleValue ?? 0
@@ -1054,6 +1056,13 @@ struct EditorV4View: View {
                     )
                 }
             }
+        }
+        .frame(width: frame.width, height: frame.height)
+    }
+
+    /// Text overlays and photo/video overlays drawn where the export puts them.
+    private func overlaysOnVideo(frame: CGSize) -> some View {
+        ZStack {
             // Higher layer on top (the export draws them in the same order).
             ForEach(model.overlaysOnScreen.sorted { $0.style.layer < $1.style.layer }) { overlay in
                 MediaOverlayOnVideo(

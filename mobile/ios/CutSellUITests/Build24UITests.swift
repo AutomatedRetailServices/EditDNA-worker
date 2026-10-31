@@ -1000,6 +1000,7 @@ final class Build24UITests: XCTestCase {
         pause(2)
         let text = element("textOverlay_t1")
         check(text.waitForExistence(timeout: 10), "the text is on the video")
+        text.tap(); pause(0.6)                         // select it (dashed box)
         shot("text_selected")
         let before = text.frame
         log("frame before: \(before)")
@@ -1007,10 +1008,12 @@ final class Build24UITests: XCTestCase {
         start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 120)))
         pause(0.3)
         log("frame after drag: \(text.frame)")
+        check(text.frame.minY - before.minY > 60, "the text follows the finger down", "\(before.minY) -> \(text.frame.minY)")
         shot("text_dragged")
         text.pinch(withScale: 1.8, velocity: 1.5)
         pause(0.3)
         log("frame after pinch: \(text.frame)")
+        check(text.frame.width > before.width * 1.3, "pinching makes the text bigger", "\(before.width) -> \(text.frame.width)")
         shot("text_pinched")
         done()
     }

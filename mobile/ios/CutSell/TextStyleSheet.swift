@@ -551,7 +551,7 @@ struct TextOverlayOnVideo: View {
             }
             .contentShape(Rectangle())
             .onTapGesture(perform: onTap)
-            .gesture(DragGesture(minimumDistance: 4).simultaneously(with: MagnifyGesture())
+            .highPriorityGesture(DragGesture(minimumDistance: 4).simultaneously(with: MagnifyGesture())
                 .onChanged { value in
                     if let d = value.first { drag = d.translation }
                     if let m = value.second { pinch = Double(m.magnification) }
