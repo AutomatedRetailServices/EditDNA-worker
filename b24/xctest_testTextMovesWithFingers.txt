@@ -1,10 +1,13 @@
-B24UI    20.9 PASS editor open (sample cut with a text)
-B24UI    24.6 PASS the text is on the video
-B24UI    25.3 frame before: (156.0, 207.0, 108.0, 23.0)
-B24UI    28.5 frame after drag: (156.0, 165.0, 108.0, 23.0)
-B24UI    31.4 frame after pinch: (156.0, 165.0, 108.0, 23.0)
-B24UI    31.7 FAILURES: none
-Test Case '-[CutSellUITests.Build24UITests testTextMovesWithFingers]' passed (32.105 seconds).
-Test Suite 'Build24UITests' passed at 2026-10-31 21:31:32.526.
-Test Suite 'CutSellUITests.xctest' passed at 2026-10-31 21:31:32.527.
-Test Suite 'Selected tests' passed at 2026-10-31 21:31:32.528.
+B24UI    11.1 PASS editor open (sample cut with a text)
+B24UI    14.3 PASS the text is on the video
+B24UI    16.0 frame before: (156.0, 174.66666666666666, 108.0, 23.0)
+B24UI    19.3 frame after drag: (156.0, 174.66666666666666, 108.0, 23.0)
+B24UI    19.7 FAIL the text follows the finger down · 174.66666666666666 -> 174.66666666666666
+B24UI    24.9 frame after pinch: (156.0, 174.66666666666666, 108.0, 23.0)
+B24UI    25.1 FAIL pinching makes the text bigger · 108.0 -> 108.0
+B24UI    25.4 FAILURES: the text follows the finger down | pinching makes the text bigger
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:1461: error: -[CutSellUITests.Build24UITests testTextMovesWithFingers] : XCTAssertTrue failed - the text follows the finger down | pinching makes the text bigger
+Test Case '-[CutSellUITests.Build24UITests testTextMovesWithFingers]' failed (27.791 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-31 21:41:48.376.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-31 21:41:48.377.
+Test Suite 'Selected tests' failed at 2026-10-31 21:41:48.377.
