@@ -1,12 +1,14 @@
-B24UI    17.0 PASS editor open (sample cut)
-B24UI    20.1 PASS main row: Edit, Audio, Text
-B24UI    24.0 PASS Edit row: back, Split, Delete, Duplicate, Mirror, Rotate
-B24UI    27.2 PASS Audio row
-B24UI    31.5 PASS captions: Fonts / Style sheet
-B24UI    37.0 PASS the new fonts are offered
-B24UI    46.5 PASS text: field to write
-B24UI    63.5 FAILURES: none
-Test Case '-[CutSellUITests.Build24UITests testTextAndCaptionStyles]' passed (64.034 seconds).
-Test Suite 'Build24UITests' passed at 2026-10-30 22:52:58.063.
-Test Suite 'CutSellUITests.xctest' passed at 2026-10-30 22:52:58.063.
-Test Suite 'Selected tests' passed at 2026-10-30 22:52:58.064.
+B24UI    18.9 PASS editor open (sample cut)
+B24UI    22.1 PASS main row: Edit, Audio, Text
+B24UI    24.9 PASS Edit row: back, Split, Delete, Duplicate, Mirror, Rotate
+B24UI    28.2 PASS Audio row
+B24UI    33.3 PASS captions: Fonts / Style sheet
+B24UI    39.3 PASS the new fonts are offered
+B24UI    51.8 PASS text: field to write
+B24UI    56.0 PASS while typing the text field sits above the keyboard
+B24UI    61.2 FAIL Done on the keyboard brings Fonts / Style back
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:977: error: -[CutSellUITests.Build24UITests testTextAndCaptionStyles] : Failed to get matching snapshot: No matches found for first query match sequence: `Descendants matching type Any` -> `Elements matching predicate '"textStyleTab_Fonts" IN identifiers'`, given input App element pid: 33786
+Test Case '-[CutSellUITests.Build24UITests testTextAndCaptionStyles]' failed (66.860 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-31 01:17:21.579.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-31 01:17:21.579.
+Test Suite 'Selected tests' failed at 2026-10-31 01:17:21.579.
