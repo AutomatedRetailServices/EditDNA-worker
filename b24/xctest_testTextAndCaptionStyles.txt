@@ -1,14 +1,14 @@
-B24UI    18.9 PASS editor open (sample cut)
-B24UI    22.1 PASS main row: Edit, Audio, Text
-B24UI    24.9 PASS Edit row: back, Split, Delete, Duplicate, Mirror, Rotate
-B24UI    28.2 PASS Audio row
-B24UI    33.3 PASS captions: Fonts / Style sheet
-B24UI    39.3 PASS the new fonts are offered
-B24UI    51.8 PASS text: field to write
-B24UI    56.0 PASS while typing the text field sits above the keyboard
-B24UI    61.2 FAIL Done on the keyboard brings Fonts / Style back
-/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:977: error: -[CutSellUITests.Build24UITests testTextAndCaptionStyles] : Failed to get matching snapshot: No matches found for first query match sequence: `Descendants matching type Any` -> `Elements matching predicate '"textStyleTab_Fonts" IN identifiers'`, given input App element pid: 33786
-Test Case '-[CutSellUITests.Build24UITests testTextAndCaptionStyles]' failed (66.860 seconds).
-Test Suite 'Build24UITests' failed at 2026-10-31 01:17:21.579.
-Test Suite 'CutSellUITests.xctest' failed at 2026-10-31 01:17:21.579.
-Test Suite 'Selected tests' failed at 2026-10-31 01:17:21.579.
+B24UI    18.0 PASS editor open (sample cut)
+B24UI    21.2 PASS main row: Edit, Audio, Text
+B24UI    25.3 PASS Edit row: back, Split, Delete, Duplicate, Mirror, Rotate
+B24UI    29.2 PASS Audio row
+B24UI    35.2 PASS captions: Fonts / Style sheet
+B24UI    43.1 PASS the new fonts are offered
+B24UI    53.1 PASS text: field to write
+B24UI    56.3 PASS while typing the text field sits above the keyboard
+B24UI    63.1 FAIL Done on the keyboard brings Fonts / Style back
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:977: error: -[CutSellUITests.Build24UITests testTextAndCaptionStyles] : Failed to get matching snapshot: No matches found for first query match sequence: `Descendants matching type Any` -> `Elements matching predicate '"textStyleTab_Fonts" IN identifiers'`, given input App element pid: 28109
+Test Case '-[CutSellUITests.Build24UITests testTextAndCaptionStyles]' failed (68.053 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-31 01:34:18.652.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-31 01:34:18.653.
+Test Suite 'Selected tests' failed at 2026-10-31 01:34:18.653.
