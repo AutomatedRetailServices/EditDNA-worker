@@ -1003,7 +1003,8 @@ final class Build24UITests: XCTestCase {
         shot("text_selected")
         let before = text.frame
         log("frame before: \(before)")
-        text.press(forDuration: 0.1, thenDragTo: text.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).withOffset(CGVector(dx: 0, dy: 120)))
+        let start = text.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 120)))
         pause(0.3)
         log("frame after drag: \(text.frame)")
         shot("text_dragged")

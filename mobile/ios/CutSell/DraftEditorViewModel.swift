@@ -1639,7 +1639,7 @@ final class DraftEditorViewModel: ObservableObject {
         // 31 Oct: the text stays where the fingers left it while the save runs (no jump back).
         let predict: (inout [String: JSONValue]) -> Void = { object in
             let items = object["text_overlays"]?.arrayValue?.compactMap(\.objectValue) ?? []
-            object["text_overlays"] = .array(items.map { item in
+            object["text_overlays"] = .array(items.map { item -> JSONValue in
                 guard item["overlay_id"]?.stringValue == id else { return .object(item) }
                 var next = item
                 if let text { next["text"] = .string(text) }
