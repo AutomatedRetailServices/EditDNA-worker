@@ -534,6 +534,8 @@ struct TextOverlayOnVideo: View {
 
     @State private var drag: CGSize = .zero
     @State private var pinch: Double = 1
+    /// How many moves / resizes the fingers made (read by the UI test as the element's value).
+    @State private var moves = 0
 
     var body: some View {
         let x = item["x"]?.doubleValue ?? 0.5
@@ -563,10 +565,11 @@ struct TextOverlayOnVideo: View {
                     CutSellDiagnostics.log("text_overlay_moved", ["dx": String(format: "%.0f", drag.width),
                                                                   "dy": String(format: "%.0f", drag.height),
                                                                   "scale": String(format: "%.2f", ns)])
-                    drag = .zero; pinch = 1
+                    drag = .zero; pinch = 1; moves += 1
                     onMoved(nx, ny, ns)
                 }, including: isSelected ? .all : .subviews)
             .position(x: frame.width * CGFloat(x) + drag.width, y: frame.height * CGFloat(y) + drag.height)
             .accessibilityIdentifier("textOverlay_\(item["overlay_id"]?.stringValue ?? "")")
+            .accessibilityValue("\(isSelected ? "selected" : "not selected") · moves \(moves)")
     }
 }
