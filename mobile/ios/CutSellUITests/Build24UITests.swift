@@ -992,6 +992,28 @@ final class Build24UITests: XCTestCase {
         done()
     }
 
+    func testTextMovesWithFingers() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["-CutSellScreen", "editor_v4_text_selected", "-cutsell.pref.appearance", "light"]
+        app.launch()
+        check(element("timelineV4").waitForExistence(timeout: 60), "editor open (sample cut with a text)")
+        pause(2)
+        let text = element("textOverlay_t1")
+        check(text.waitForExistence(timeout: 10), "the text is on the video")
+        shot("text_selected")
+        let before = text.frame
+        log("frame before: \(before)")
+        text.press(forDuration: 0.1, thenDragTo: text.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).withOffset(CGVector(dx: 0, dy: 120)))
+        pause(0.3)
+        log("frame after drag: \(text.frame)")
+        shot("text_dragged")
+        text.pinch(withScale: 1.8, velocity: 1.5)
+        pause(0.3)
+        log("frame after pinch: \(text.frame)")
+        shot("text_pinched")
+        done()
+    }
+
     // MARK: Voice-over on a real cut (editor probe): record in 2 steps, timeline, panel, export
 
     private func editorState() -> String { let e = element("b17State"); return e.exists ? e.label : "no-state" }

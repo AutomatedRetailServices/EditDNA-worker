@@ -203,6 +203,8 @@ struct DesignScreenshotRoot: View {
             SampleEditor(state: EditorPreviewState(sheet: .overlay))
         case "editor_v4_overlay_selected":
             SampleEditor(state: EditorPreviewState(selection: .overlay("m1", isText: false)), overlays: true)
+        case "editor_v4_text_selected":
+            SampleEditor(state: EditorPreviewState(selection: .overlay("t1", isText: true)), overlays: true)
         case "editor_v4_mic":
             SampleEditor(state: EditorPreviewState(panel: .micPermission), overlays: true)
         case "editor_v4_style":

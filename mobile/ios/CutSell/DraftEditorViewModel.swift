@@ -1636,7 +1636,20 @@ final class DraftEditorViewModel: ObservableObject {
         body["y"] = y.map(JSONValue.number) ?? .null
         body["scale"] = scale.map(JSONValue.number) ?? .null
         let fields = body
-        await perform(predict: nil) { [weak self] in _ = await self?.editAndSave("/v1/draft-edits/text/update", fields) }.value
+        // 31 Oct: the text stays where the fingers left it while the save runs (no jump back).
+        let predict: (inout [String: JSONValue]) -> Void = { object in
+            let items = object["text_overlays"]?.arrayValue?.compactMap(\.objectValue) ?? []
+            object["text_overlays"] = .array(items.map { item in
+                guard item["overlay_id"]?.stringValue == id else { return .object(item) }
+                var next = item
+                if let text { next["text"] = .string(text) }
+                if let x { next["x"] = .number(x) }
+                if let y { next["y"] = .number(y) }
+                if let scale { next["scale"] = .number(scale) }
+                return .object(next)
+            })
+        }
+        await perform(predict: predict) { [weak self] in _ = await self?.editAndSave("/v1/draft-edits/text/update", fields) }.value
     }
 
     func removeTextOverlay(id: String) async {

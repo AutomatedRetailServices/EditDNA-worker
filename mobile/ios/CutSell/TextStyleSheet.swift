@@ -560,6 +560,9 @@ struct TextOverlayOnVideo: View {
                     let nx = min(1, max(0, x + Double(drag.width / max(1, frame.width))))
                     let ny = min(1, max(0, y + Double(drag.height / max(1, frame.height))))
                     let ns = min(3, max(0.5, scale * pinch))
+                    CutSellDiagnostics.log("text_overlay_moved", ["dx": String(format: "%.0f", drag.width),
+                                                                  "dy": String(format: "%.0f", drag.height),
+                                                                  "scale": String(format: "%.2f", ns)])
                     drag = .zero; pinch = 1
                     onMoved(nx, ny, ns)
                 }, including: isSelected ? .all : .subviews)
