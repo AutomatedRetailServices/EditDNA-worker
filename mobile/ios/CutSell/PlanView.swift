@@ -76,52 +76,15 @@ struct PlanView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     // White Indigo (Figma 1166:107): no Sales Mix / Bulk cards here (they are on Create).
                     WIHeader { EmptyView() }
-                    WIScreenTitle(title: "Plan", subtitle: attention == nil ? "What’s in progress and what to post." : "Plan needs attention")
+                    WIScreenTitle(title: "Plan", subtitle: attention == nil ? "What to post this week." : "Plan needs attention")
                         .padding(.top, 2)
                     if let attention {
                         NeedsAttentionSection(summary: attention.summary, rows: attention.rows, onRetry: retry)
                             .padding(.top, 16)
                     }
 
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(L10n.tr("In progress")).font(CS.sectionTitle).foregroundStyle(CS.wiInk)
-                        Spacer()
-                        Button(L10n.tr("See all in Edits ›")) { openEdits(focus: nil) }
-                            .font(CS.inter(13, .semibold)).foregroundStyle(CS.accent)
-                            .accessibilityIdentifier("planSeeAll")
-                    }
-                    .padding(.top, 22)
-                    VStack(spacing: 8) {
-                        ForEach(mixes.active) { mix in
-                            Button { openEdits(focus: mix.mixID) } label: {
-                                progressCard(tag: .mix, title: mix.product ?? "Sales Mix",
-                                             detail: [mix.brand, "\(mix.ready) of \(mix.total) ready"].compactMap { $0 }.joined(separator: " · "),
-                                             ready: mix.ready, total: mix.total,
-                                             image: mix.videos.lazy.compactMap { thumbnails.image(for: $0.projectID) }.first)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("planProgressMix")
-                        }
-                        ForEach(queue.activeBulks, id: \.group.id) { bulk in
-                            Button { openEdits(focus: bulk.group.id) } label: {
-                                progressCard(tag: .bulk, title: "\(bulk.group.total) videos",
-                                             detail: "\(bulk.ready) of \(bulk.group.total) ready",
-                                             ready: bulk.ready, total: bulk.group.total, image: bulk.thumbnail)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("planProgressBulk")
-                        }
-                        if mixes.active.isEmpty && queue.activeBulks.isEmpty {
-                            Text(L10n.tr("Nothing in progress. Start a Sales Mix or a Bulk."))
-                                .font(CS.inter(13, .medium)).foregroundStyle(CS.wiSecondary)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 14)
-                                .frame(maxWidth: .infinity, minHeight: 64)
-                                .wiCard()
-                                .accessibilityIdentifier("planNothingInProgress")
-                        }
-                    }
-                    .padding(.top, 9)
+                    // PO 31 Oct: no "In progress" here (Edits shows it); Plan my week first, big and floating.
+                    planMyWeekButton.padding(.top, 18)
 
                     thisWeek.padding(.top, 22)
                 }
@@ -217,6 +180,28 @@ struct PlanView: View {
         .wiCard()
     }
 
+    /// PO 31 Oct: the main action of Plan, a big 3D blue pill at the top.
+    private var planMyWeekButton: some View {
+        Button { path = [.goal] } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "calendar.badge.plus").font(.system(size: 22, weight: .semibold))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(L10n.tr("Plan my week")).font(CS.inter(17, .bold))
+                    Text(L10n.tr(week.hasWeek ? "Change what and when you post" : "Pick your videos, we set the times"))
+                        .font(CS.inter(12, .medium)).opacity(0.85)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.system(size: 15, weight: .bold))
+            }
+            .foregroundStyle(Color(fixed: 0xFFFFFF))
+            .padding(.horizontal, 20)
+            .frame(maxWidth: .infinity).frame(height: 68)
+            .puff3D(.blue, in: RoundedRectangle(cornerRadius: 24, style: .continuous), depth: 6)
+        }
+        .buttonStyle(BubblePress())
+        .accessibilityIdentifier("planMyWeek")
+    }
+
     /// PO 25 Oct: a living Plan. The 7 days (tap one to see it), the chosen day's videos with their picture, brand,
     /// product and time (tap → that day), then the whole week as a strip of large pictures (tap → This week).
     private var thisWeek: some View {
@@ -261,12 +246,12 @@ struct PlanView: View {
                             }
                             .frame(height: 6)
                         }
-                        .frame(maxWidth: .infinity).frame(height: 62)
-                        .background(isToday ? CS.accent : CS.wiPage, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(picked && !isToday ? CS.accent : isToday ? .clear : CS.wiBorder, lineWidth: picked && !isToday ? 2 : 1))
+                        .frame(maxWidth: .infinity).frame(height: 64)
+                        .puff3D(isToday ? .blue : .white, in: RoundedRectangle(cornerRadius: 16, style: .continuous), depth: 4)
+                        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(picked && !isToday ? CS.accent : .clear, lineWidth: 2.5))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(BubblePress())
                     .accessibilityIdentifier("planDay_\(key)")
                 }
             }
@@ -274,14 +259,11 @@ struct PlanView: View {
 
             dayCard(chosen, slots: daySlots, isToday: chosen == todayKey).padding(.top, 12)
 
-            // PO 26 Oct (A): Coming up starts AFTER the day in the card, so nothing shows twice.
-            let after = upcoming.filter { $0.date > chosen }
-            if week.hasWeek && !after.isEmpty {
-                weekStrip(after).padding(.top, 22)
-            } else if week.hasWeek {
-                Button(L10n.tr("See this week ›")) { path = [.week] }
-                    .font(CS.inter(13, .semibold)).foregroundStyle(CS.accent)
-                    .padding(.top, 12)
+            // PO 31 Oct: simpler -- the chosen day only; the whole week is one tap away.
+            if week.hasWeek {
+                Button(L10n.tr("See the whole week ›")) { path = [.week] }
+                    .font(CS.inter(14, .semibold)).foregroundStyle(CS.accent)
+                    .padding(.top, 14)
                     .accessibilityIdentifier("planSeeWeek")
             }
         }
@@ -295,11 +277,16 @@ struct PlanView: View {
         let left = slots.filter { $0.postedAt == nil }.count
         return VStack(alignment: .leading, spacing: 10) {
             if slots.isEmpty {
-                Text(L10n.tr(week.hasWeek ? "Nothing planned for \(isToday ? "today" : PlanDay.short(day))" : "Plan your week"))
-                    .font(CS.inter(15, .bold)).foregroundStyle(CS.wiInk)
-                    .accessibilityIdentifier("planWeekCardTitle")
-                Text(L10n.tr(cardBody(slots: week.state?.week?.slots ?? [])))
-                    .font(CS.inter(12)).foregroundStyle(CS.wiSecondary).fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L10n.tr(week.hasWeek ? "Nothing planned for \(isToday ? "today" : PlanDay.short(day))" : "Plan your week"))
+                        .font(CS.inter(15, .bold)).foregroundStyle(CS.wiInk)
+                        .accessibilityIdentifier("planWeekCardTitle")
+                    Text(L10n.tr(cardBody(slots: week.state?.week?.slots ?? [])))
+                        .font(CS.inter(12)).foregroundStyle(CS.wiSecondary).fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .puff3D(.white, in: RoundedRectangle(cornerRadius: 20, style: .continuous), depth: 4)
             } else {
                 HStack(alignment: .firstTextBaseline) {
                     Text(L10n.tr(isToday ? "Today · \(PlanDay.short(day))" : PlanDay.short(day)))
@@ -311,27 +298,19 @@ struct PlanView: View {
                 }
                 ForEach(slots) { slot in
                     Button { path = [.week, .day(day)] } label: { videoRow(slot) }
-                        .buttonStyle(.plain)
+                        .buttonStyle(BubblePress())
                         .accessibilityIdentifier("planDayVideo")
                 }
             }
-            Button { path = [.goal] } label: {
-                Text(L10n.tr("Plan my week ›")).font(CS.inter(13, .semibold)).foregroundStyle(CS.accent)
-            }
-            .buttonStyle(.plain)
-            .padding(.top, 2)
-            .accessibilityIdentifier("planMyWeek")
         }
-        .padding(15)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .wiCard()
         .animation(.easeOut(duration: 0.2), value: day)
     }
 
     /// One video of the day: picture, brand dot + brand, product, time; posted ones fade with a check.
     private func videoRow(_ slot: PlanSlot) -> some View {
         HStack(spacing: 12) {
-            thumb(slot, width: 44, height: 60, radius: 9)
+            thumb(slot, width: 50, height: 66, radius: 12)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
                     Image(week.dot(for: slot)).resizable().frame(width: 7, height: 7)
@@ -344,11 +323,12 @@ struct PlanView: View {
                 Label(L10n.tr("Posted"), systemImage: "checkmark").font(CS.inter(12, .semibold)).foregroundStyle(CS.wiSuccess)
             } else {
                 Text(PlanDay.clock(slot.time)).font(CS.inter(13, .bold)).foregroundStyle(CS.accent)
+                    .padding(.horizontal, 10).frame(height: 30)
+                    .background(CS.accentSoft, in: Capsule())
             }
         }
-        .padding(8)
-        .background(CS.wiPage, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
+        .padding(10)
+        .puff3D(.white, in: RoundedRectangle(cornerRadius: 20, style: .continuous), depth: 4)
         .opacity(slot.postedAt == nil ? 1 : 0.6)
     }
 

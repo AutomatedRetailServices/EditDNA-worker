@@ -1698,6 +1698,29 @@ final class Build24UITests: XCTestCase {
     }
 
     /// Build 47 (Figma 1258:3101 / 1257:3329): Plan my week in one screen, This week's video sheet, the reminder.
+    /// PO 31 Oct: Plan redesigned -- no In progress, Plan my week on top (3D), the days and the day's videos as 3D cards.
+    func testPlanHome() throws {
+        launchApp(fresh: true, extra: ["-CutSellPlanMock", "-CutSellProjectsMock", "-CutSellCatalogMock", "-CutSellPlanTestReminder"])
+        element("tab_plan").tap()
+        check(element("planMyWeek").waitForExistence(timeout: 20), "Plan my week on top")
+        check(!element("planNothingInProgress").exists && !app.staticTexts["In progress"].exists, "no In progress")
+        pause(1); shot("plan_home_empty")
+        element("planMyWeek").tap()
+        check(element("planMyWeekSimple").waitForExistence(timeout: 10), "Plan my week opens")
+        let tiles = app.descendants(matching: .any).matching(identifier: "pmwVideo")
+        _ = wait(10) { tiles.count >= 6 }
+        for index in 0..<min(6, tiles.count) { tiles.element(boundBy: index).tap(); pause(0.3) }
+        element("pmwBuild").tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        if springboard.buttons["Allow"].waitForExistence(timeout: 5) { springboard.buttons["Allow"].tap() }
+        _ = element("weekSubtitle").waitForExistence(timeout: 15)
+        element("tab_plan").tap(); pause(1); element("tab_plan").tap(); pause(1.5)
+        shot("plan_home_week")
+        app.swipeUp(); pause(0.8)
+        shot("plan_home_week_scrolled")
+        done()
+    }
+
     func testWIPlanSimple() throws {
         launchApp(fresh: true, extra: ["-CutSellPlanMock", "-CutSellProjectsMock", "-CutSellCatalogMock", "-CutSellPlanTestReminder"])
         element("tab_plan").tap()
