@@ -1,0 +1,6 @@
+B24UI    20.9 PASS editor open (sample cut with a text)
+B24UI    24.6 PASS the text is on the video
+B24UI    25.3 frame before: (156.0, 207.0, 108.0, 23.0)
+B24UI    28.5 frame after drag: (156.0, 165.0, 108.0, 23.0)
+B24UI    31.4 frame after pinch: (156.0, 165.0, 108.0, 23.0)
+B24UI    31.7 FAILURES: none

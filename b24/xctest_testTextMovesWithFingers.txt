@@ -1,0 +1,10 @@
+B24UI    20.9 PASS editor open (sample cut with a text)
+B24UI    24.6 PASS the text is on the video
+B24UI    25.3 frame before: (156.0, 207.0, 108.0, 23.0)
+B24UI    28.5 frame after drag: (156.0, 165.0, 108.0, 23.0)
+B24UI    31.4 frame after pinch: (156.0, 165.0, 108.0, 23.0)
+B24UI    31.7 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testTextMovesWithFingers]' passed (32.105 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-31 21:31:32.526.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-31 21:31:32.527.
+Test Suite 'Selected tests' passed at 2026-10-31 21:31:32.528.
