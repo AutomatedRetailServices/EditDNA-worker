@@ -43,6 +43,8 @@ struct TextStyleSheet: View {
     let target: TextStyleTarget
     let playhead: Double
     @ObservedObject var layout: TextSheetLayout
+    /// A new text was put on the video (when the keyboard's Done is pressed): select it there.
+    var onCreated: (String) -> Void = { _ in }
     /// Closed with ✓ (the id of a text that was just added, if any).
     let onDone: (String?) -> Void
 
@@ -60,6 +62,10 @@ struct TextStyleSheet: View {
     @State private var loaded = false
     @State private var saving = false
     @FocusState private var typing: Bool
+    /// 30 Oct (PO): a new text goes on the video as soon as she finishes typing (keyboard Done), so it can be
+    /// moved and styled with the sheet open; from then on the sheet edits that text.
+    @State private var createdID: String?
+    private var current: TextStyleTarget { createdID.map { .text($0) } ?? target }
 
     private var isCaptions: Bool { target == .captions }
     private var parts: [Part] { isCaptions ? Part.allCases : Part.allCases.filter { $0 != .highlight } }
@@ -141,7 +147,7 @@ struct TextStyleSheet: View {
                     .foregroundStyle(CS.wiInk)
                     .tint(CS.accent)
                     .submitLabel(.done)
-                    .onSubmit { typing = false }       // "Done" on the keyboard: back to Fonts / Style
+                    .onSubmit { Task { await finishTyping() } }   // keyboard Done: the text goes on the video
                     .focused($typing)
                     .padding(.horizontal, 16).padding(.vertical, 12)
                     .frame(minHeight: 50)
@@ -359,7 +365,7 @@ struct TextStyleSheet: View {
     @State private var liveScale: Double?
     private var currentScale: Double {
         if let liveScale { return liveScale }
-        switch target {
+        switch current {
         case .captions: return model.captionScale
         case .text(let id): return model.textOverlay(id)?["scale"]?.doubleValue ?? 1
         case .newText: return newScale
@@ -370,7 +376,7 @@ struct TextStyleSheet: View {
     private func commitSize() {
         guard let value = liveScale else { return }
         liveScale = nil
-        switch target {
+        switch current {
         case .captions: model.applyCaptionSettings(scale: min(2, max(0.5, value)))
         case .text(let id): Task { await model.updateTextOverlay(id: id, scale: min(3, max(0.5, value))) }
         case .newText: newScale = value
@@ -385,7 +391,7 @@ struct TextStyleSheet: View {
     private func commit() { push(commit: true) }
 
     private func push(commit: Bool) {
-        switch target {
+        switch current {
         case .captions: model.setCaptionLook(look, commit: commit)
         case .text(let id): model.setTextLook(id: id, look, commit: commit)
         case .newText: break     // saved with the text on ✓
@@ -394,17 +400,47 @@ struct TextStyleSheet: View {
 
     private func pickFont(_ key: String) {
         font = key
-        switch target {
+        switch current {
         case .captions: model.applyCaptionSettings(font: key)
         case .text(let id): model.setTextFont(id: id, key)
         case .newText: break
         }
     }
 
+    /// Keyboard Done: a new text is created now (on the video, selected); an existing one gets its words.
+    @MainActor
+    private func finishTyping() async {
+        typing = false
+        let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !typed.isEmpty else { return }
+        switch current {
+        case .newText:
+            if let id = await createText(typed) { createdID = id; onCreated(id) }
+        case .text(let id):
+            if typed != model.textOverlay(id)?["text"]?.stringValue { await model.updateTextOverlay(id: id, text: typed) }
+        case .captions: break
+        }
+    }
+
+    @MainActor
+    private func createText(_ typed: String) async -> String? {
+        saving = true
+        defer { saving = false }
+        let before = Set(model.textOverlays.compactMap { $0["overlay_id"]?.stringValue })
+        let end = min(max(1, model.timelineDuration), playhead + 3)
+        await model.addTextOverlay(text: typed, start: max(0, min(playhead, end - 0.2)), end: end)
+        guard let added = model.textOverlays.compactMap({ $0["overlay_id"]?.stringValue }).first(where: { !before.contains($0) })
+        else { return nil }
+        var fields: [String: JSONValue] = ["font": .string(font), "style": look.json]
+        if abs(newScale - 1) > 0.01 { fields["scale"] = .number(min(3, max(0.5, newScale))) }
+        await model.setTextOverlayFields(id: added, fields)
+        return added
+    }
+
     @MainActor
     private func done() async {
         typing = false
-        switch target {
+        switch current {
         case .captions:
             onDone(nil)
         case .text(let id):
@@ -416,18 +452,7 @@ struct TextStyleSheet: View {
         case .newText:
             let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !typed.isEmpty else { onDone(nil); return }
-            saving = true
-            let before = Set(model.textOverlays.compactMap { $0["overlay_id"]?.stringValue })
-            let end = min(max(1, model.timelineDuration), playhead + 3)
-            await model.addTextOverlay(text: typed, start: max(0, min(playhead, end - 0.2)), end: end)
-            let added = model.textOverlays.compactMap { $0["overlay_id"]?.stringValue }.first { !before.contains($0) }
-            if let added {
-                var fields: [String: JSONValue] = ["font": .string(font), "style": look.json]
-                if abs(newScale - 1) > 0.01 { fields["scale"] = .number(min(3, max(0.5, newScale))) }
-                await model.setTextOverlayFields(id: added, fields)
-            }
-            saving = false
-            onDone(added)
+            onDone(await createText(typed))
         }
     }
 }

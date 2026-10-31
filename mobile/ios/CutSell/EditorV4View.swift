@@ -1407,7 +1407,8 @@ struct EditorV4View: View {
     private var bottomArea: some View {
         switch panel {
         case .textStyle(let target):
-            TextStyleSheet(model: model, target: target, playhead: playback.currentTime, layout: textSheet) { addedID in
+            TextStyleSheet(model: model, target: target, playhead: playback.currentTime, layout: textSheet,
+                           onCreated: { id in selection = .overlay(id, isText: true) }) { addedID in
                 if case .newText = target, let addedID { selection = .overlay(addedID, isText: true) }
                 if case .captions = target { finishCaptionEditing() }
                 panel = .none
