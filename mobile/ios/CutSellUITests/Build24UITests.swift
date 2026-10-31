@@ -970,7 +970,9 @@ final class Build24UITests: XCTestCase {
         element("textStyleField").typeText("SALE 50%")
         shot("text_typing")
         check(element("textStyleField").isHittable, "while typing the text field sits above the keyboard")
-        app.keyboards.buttons["Done"].firstMatch.tap(); pause(0.8)
+        // The simulator's first-time keyboard tip ("Continue") can cover the keys.
+        if app.buttons["Continue"].exists { app.buttons["Continue"].tap(); pause(0.6) }
+        element("textStyleField").typeText("\n"); pause(0.8)
         check(element("textStyleTab_Fonts").isHittable, "Done on the keyboard brings Fonts / Style back")
         // Drag the sheet up: taller.
         let handleTop = element("textStyleTab_Fonts").coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
