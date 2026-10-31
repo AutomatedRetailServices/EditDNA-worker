@@ -969,6 +969,16 @@ final class Build24UITests: XCTestCase {
         check(element("textStyleField").waitForExistence(timeout: 5), "text: field to write")
         element("textStyleField").typeText("SALE 50%")
         shot("text_typing")
+        check(element("textStyleField").isHittable, "while typing the text field sits above the keyboard")
+        app.keyboards.buttons["Done"].firstMatch.tap(); pause(0.8)
+        check(element("textStyleTab_Fonts").isHittable, "Done on the keyboard brings Fonts / Style back")
+        // Drag the sheet up: taller.
+        let handleTop = element("textStyleTab_Fonts").coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let fontsTabY = element("textStyleTab_Fonts").frame.minY
+        handleTop.press(forDuration: 0.05, thenDragTo: handleTop.withOffset(CGVector(dx: 0, dy: -250))); pause(1)
+        check(element("textStyleTab_Fonts").frame.minY < fontsTabY - 80, "dragged up: the sheet is taller",
+              "\(fontsTabY) -> \(element("textStyleTab_Fonts").frame.minY)")
+        shot("text_sheet_tall")
         element("textStyleTab_Style").tap(); pause(0.8)       // closes the keyboard
         element("textPreset_dark_box").tap(); pause(0.5)
         shot("text_style")

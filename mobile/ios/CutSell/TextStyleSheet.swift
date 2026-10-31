@@ -4,12 +4,45 @@ import SwiftUI
 /// captions and for a text. Fonts: every face, in a grid, each name written in its own face. Style: the
 /// "Aa" looks, then Text / Highlight / Stroke / Background / Shadow / Spacing with every colour (swatches
 /// plus the colour wheel) and sliders. Changes show at once on the video; sliders save when the finger lifts.
+/// 30 Oct (PO, build 68 feedback): the sheet can be dragged taller / shorter (or down to close), and while
+/// typing it shrinks to the text field sitting right on the keyboard (the video stays in view).
+@MainActor
+final class TextSheetLayout: ObservableObject {
+    @Published var expanded = false
+    @Published var keyboard: CGFloat = 0
+    private var observers: [NSObjectProtocol] = []
+
+    init() {
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: .main) { [weak self] note in
+            guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+            let height = max(0, UIScreen.main.bounds.maxY - frame.minY)
+            MainActor.assumeIsolated { withAnimation(.easeOut(duration: 0.25)) { self?.keyboard = height } }
+        })
+        observers.append(center.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { withAnimation(.easeOut(duration: 0.25)) { self?.keyboard = 0 } }
+        })
+    }
+
+    deinit { observers.forEach(NotificationCenter.default.removeObserver) }
+
+    /// Height the sheet takes at the bottom of the editor.
+    var height: CGFloat {
+        if keyboard > 0 { return TextStyleSheet.typingBar + keyboard }
+        return expanded ? TextStyleSheet.tallHeight : TextStyleSheet.height
+    }
+}
+
 struct TextStyleSheet: View {
     static var height: CGFloat { 452 + max(0, ToolbarV4.bottomInset - 8) }
+    static var tallHeight: CGFloat { max(height, UIScreen.main.bounds.height * 0.74) }
+    /// Handle + the text field and ✓, above the keyboard.
+    static let typingBar: CGFloat = 92
 
     @ObservedObject var model: DraftEditorViewModel
     let target: TextStyleTarget
     let playhead: Double
+    @ObservedObject var layout: TextSheetLayout
     /// Closed with ✓ (the id of a text that was just added, if any).
     let onDone: (String?) -> Void
 
@@ -32,20 +65,33 @@ struct TextStyleSheet: View {
     private var parts: [Part] { isCaptions ? Part.allCases : Part.allCases.filter { $0 != .highlight } }
     private var textID: String? { if case .text(let id) = target { return id } else { return nil } }
 
+    @State private var dragY: CGFloat = 0
+
     var body: some View {
         VStack(spacing: 0) {
-            Capsule().fill(CS.wiBorder).frame(width: 40, height: 5).padding(.top, 8)
-            header.padding(.horizontal, 16).padding(.top, 10)
-            tabs.padding(.horizontal, 16).padding(.top, 10)
-            Group {
-                switch tab {
-                case .fonts: fontsGrid
-                case .style: styleTab
+            VStack(spacing: 0) {
+                Capsule().fill(CS.wiBorder).frame(width: 40, height: 5).padding(.top, 8)
+                header.padding(.horizontal, 16).padding(.top, 10)
+                if layout.keyboard == 0 {
+                    tabs.padding(.horizontal, 16).padding(.top, 10)
                 }
             }
-            .frame(maxHeight: .infinity, alignment: .top)
+            .contentShape(Rectangle())
+            .gesture(sheetDrag)
+            if layout.keyboard == 0 {
+                Group {
+                    switch tab {
+                    case .fonts: fontsGrid
+                    case .style: styleTab
+                    }
+                }
+                .frame(maxHeight: .infinity, alignment: .top)
+                .clipped()
+            } else {
+                Spacer(minLength: 0)
+            }
         }
-        .frame(height: Self.height, alignment: .top)
+        .frame(height: max(Self.typingBar, layout.height - max(0, dragY)), alignment: .top)
         .background(
             UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28, style: .continuous)
                 .fill(Color(fixed: 0xFFFFFF))
@@ -53,8 +99,28 @@ struct TextStyleSheet: View {
                 .ignoresSafeArea(edges: .bottom)
         )
         .onAppear(perform: load)
+        .onDisappear { layout.expanded = false; typing = false }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("textStyleSheet")
+    }
+
+    /// Up: taller (more fonts in view). Down: back to the normal height, then closed.
+    private var sheetDrag: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { value in dragY = value.translation.height }
+            .onEnded { value in
+                let dy = value.translation.height
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                    dragY = 0
+                    if layout.keyboard > 0 {
+                        if dy > 30 { typing = false }
+                    } else if dy < -40 {
+                        layout.expanded = true
+                    } else if dy > 60 {
+                        if layout.expanded { layout.expanded = false } else { Task { await done() } }
+                    }
+                }
+            }
     }
 
     // MARK: Header: the text being written (or Captions On), and ✓
@@ -70,11 +136,12 @@ struct TextStyleSheet: View {
                     .labelsHidden().tint(CS.accent)
                     .accessibilityIdentifier("captionsOnToggle")
             } else {
-                TextField("", text: $text, prompt: Text(L10n.tr("Enter text")).foregroundStyle(CS.wiSecondary), axis: .vertical)
+                TextField("", text: $text, prompt: Text(L10n.tr("Enter text")).foregroundStyle(CS.wiSecondary))
                     .font(CS.inter(16, .semibold))
                     .foregroundStyle(CS.wiInk)
                     .tint(CS.accent)
-                    .lineLimit(1...3)
+                    .submitLabel(.done)
+                    .onSubmit { typing = false }       // "Done" on the keyboard: back to Fonts / Style
                     .focused($typing)
                     .padding(.horizontal, 16).padding(.vertical, 12)
                     .frame(minHeight: 50)

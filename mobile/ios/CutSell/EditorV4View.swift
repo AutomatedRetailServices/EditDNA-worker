@@ -47,6 +47,7 @@ struct EditorV4View: View {
     @State private var musicNotice = false
     /// 30 Oct (PO): which row the toolbar shows (main tools, or the Edit / Audio row).
     @State private var toolMenu: ToolMenu = .main
+    @StateObject private var textSheet = TextSheetLayout()
     /// "Almost no voice" is shown once each time this editor opens on such a cut.
     @State private var littleSpeechShown = false
     @AppStorage("cutsell.musicRightsNoticeShown") private var musicNoticeShown = false
@@ -261,7 +262,7 @@ struct EditorV4View: View {
         // Style (Figma 1054:2497): no controls; the panel sits where the controls and timeline were.
         case .style: return controls + 1 + TimelineV4.height + toolbar
         // 30 Oct (PO): the Fonts / Style sheet rises over the timeline and the toolbar.
-        case .textStyle: return TextStyleSheet.height
+        case .textStyle: return textSheet.height
         // Figma 1119:2316 / 1120:4: with the voice-over sheet up the video keeps its full 472 pt and the sheet
         // covers the controls and the timeline (nothing of the editor shows between the video and the sheet).
         case .voiceRecord, .voiceReview: return VoiceOverSheetV5.height(.review)
@@ -1406,7 +1407,7 @@ struct EditorV4View: View {
     private var bottomArea: some View {
         switch panel {
         case .textStyle(let target):
-            TextStyleSheet(model: model, target: target, playhead: playback.currentTime) { addedID in
+            TextStyleSheet(model: model, target: target, playhead: playback.currentTime, layout: textSheet) { addedID in
                 if case .newText = target, let addedID { selection = .overlay(addedID, isText: true) }
                 if case .captions = target { finishCaptionEditing() }
                 panel = .none
