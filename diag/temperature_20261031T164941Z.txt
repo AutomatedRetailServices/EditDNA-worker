@@ -1,0 +1,2 @@
+PROBE temperature0 model=claude-sonnet-5-5 status=400 invalid_request_error: `temperature` is deprecated for this model.
+PROBE temperature0_thinking_off model=claude-sonnet-5-5 status=400 invalid_request_error: To turn thinking off on this model, send "thinking": {"type": "between_tools"} instead of {"type": "disabled"}. The model does not think before responding. The short updates it writes between tool cal
