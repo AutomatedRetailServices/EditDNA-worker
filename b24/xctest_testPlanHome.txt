@@ -1,0 +1,8 @@
+B24UI    30.0 PASS Plan my week on top
+B24UI    32.0 PASS no In progress
+B24UI    36.2 PASS Plan my week opens
+B24UI    79.8 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testPlanHome]' passed (80.309 seconds).
+Test Suite 'Build24UITests' passed at 2026-11-01 00:08:37.407.
+Test Suite 'CutSellUITests.xctest' passed at 2026-11-01 00:08:37.407.
+Test Suite 'Selected tests' passed at 2026-11-01 00:08:37.407.
