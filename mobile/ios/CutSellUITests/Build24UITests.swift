@@ -424,6 +424,29 @@ final class Build24UITests: XCTestCase {
         log("FAILURES: \(failures.isEmpty ? "none" : failures.joined(separator: " | "))")
     }
 
+    /// PO 3 Nov: the app as it is today (build 69): Edits · Ready → Select → Add to Plan → Plan my week. Shots only.
+    func testCurrentEditToPlan() throws {
+        launchApp(fresh: true, extra: ["-CutSellProjectsMock", "-CutSellCatalogMock"])
+        pause(2)
+        element("tab_edits").tap(); pause(2)
+        let ready = element("editsFilterReady")
+        if ready.waitForExistence(timeout: 10) { ready.tap() }
+        pause(1.5); shot("now_1_edits_ready")
+        element("editsSelect").tap(); pause(1)
+        let tiles = app.descendants(matching: .any).matching(identifier: "editsPick")
+        for i in 0..<min(3, tiles.count) where tiles.element(boundBy: i).isHittable { tiles.element(boundBy: i).tap(); pause(0.5) }
+        pause(1); shot("now_2_edits_selected")
+        let add = element("editsAddToPlan")
+        check(add.waitForExistence(timeout: 5), "Add to Plan button")
+        add.tap(); pause(3)
+        shot("now_3_plan_my_week")
+        app.swipeUp(velocity: .slow); pause(1)
+        shot("now_4_plan_my_week_bottom")
+        element("tab_plan").tap(); pause(2)
+        shot("now_5_plan_tab")
+        done()
+    }
+
     func testStorageAndScreens() throws {
         launchApp(fresh: true, extra: ["-CutSellProjectsMock", "-CutSellCatalogMock"])
         pause(2)
