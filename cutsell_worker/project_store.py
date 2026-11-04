@@ -103,13 +103,20 @@ def list_projects(*, user_id: str, client=None, limit: int = 50) -> list[dict[st
     target = _redis_client(client)
     count = max(1, min(int(limit), 500))
     ids = target.zrevrange(project_index_key(user_id=user_id), 0, count - 1)
+    project_ids = [raw.decode("utf-8") if isinstance(raw, bytes) else str(raw) for raw in ids]
+    # PO 4 Nov (Plan my week took ~11 s per video): one MGET round trip per 100 projects instead of one GET each.
     output = []
-    for raw_id in ids:
-        project_id = raw_id.decode("utf-8") if isinstance(raw_id, bytes) else str(raw_id)
-        try:
-            output.append(get_project(user_id=user_id, project_id=project_id, client=target))
-        except KeyError:
-            continue
+    for start in range(0, len(project_ids), 100):
+        chunk = project_ids[start:start + 100]
+        keys = [project_key(user_id=user_id, project_id=pid) for pid in chunk]
+        raws = target.mget(keys) if hasattr(target, "mget") else [target.get(key) for key in keys]
+        for project_id, raw in zip(chunk, raws):
+            if raw is None:
+                continue
+            record = _decode(raw)
+            if str(record.get("user_id") or "") != str(user_id) or str(record.get("project_id") or "") != project_id:
+                continue
+            output.append(record)
     return output
 
 

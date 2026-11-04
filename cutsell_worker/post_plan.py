@@ -529,6 +529,29 @@ def move(user_id: str, project_id: str, *, day: str, time: str, client=None) -> 
     return update(user_id, change, client=client)
 
 
+def move_many(user_id: str, items: list[dict], *, client=None) -> dict:
+    """Several videos on their day and time (pinned) in ONE plan write (PO 4 Nov: Plan my week sent one request per
+    video, ~11 s each). Same rules as `move`, applied in order; the last entry for a video wins."""
+    clean = []
+    for item in items:
+        day = str(item["date"])
+        date.fromisoformat(day)
+        hh, mm = str(item["time"]).split(":")[:2]
+        clean.append((str(item["project_id"]), day, f"{int(hh) % 24:02d}:{int(mm) % 60:02d}"))
+
+    def change(data):
+        week = data.get("week") or {}
+        slots = list(week.get("slots") or [])
+        for project_id, day, time in clean:
+            slots = [s for s in slots if s.get("project_id") != project_id]
+            slots.append({"date": day, "time": time, "project_id": project_id, "pinned": True})
+            data["videos"].setdefault(project_id, {})["scheduled_for"] = f"{day}T{time}"
+        week["slots"] = sorted(slots, key=lambda s: (s["date"], s["time"]))
+        data["week"] = week
+        return week
+    return update(user_id, change, client=client)
+
+
 def remove(user_id: str, project_id: str, *, client=None) -> dict:
     def change(data):
         week = data.get("week") or {}

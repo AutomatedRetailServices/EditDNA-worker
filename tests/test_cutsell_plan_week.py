@@ -379,3 +379,46 @@ def test_the_api_gives_one_videos_caption_and_posted_state(monkeypatch, r):
     client.post("/v1/plan/posted", json={"user_id": "u1", "project_id": ids["single1"]})
     assert client.get("/v1/plan/video", params={"user_id": "u1", "project_id": ids["single1"]}).json()["posted_at"]
     assert client.get("/v1/plan/video", params={"user_id": "u1", "project_id": "nope"}).status_code == 404
+
+
+def test_the_api_schedules_many_videos_in_one_request(monkeypatch, r):
+    """PO 4 Nov: Plan my week sent one /slots/move per video (~11 s each) and the wait was cut half way. /schedule
+    places every video, saves her settings and builds the week in ONE request."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from cutsell_app import plan_routes
+    monkeypatch.setattr(plan_routes, "_caption_missing", lambda user, view: None)
+    ids = _library()
+    app = FastAPI()
+    app.include_router(plan_routes.router)
+    client = TestClient(app)
+    chosen = [ids["single1"], ids["bulk1"], ids["combine"]]
+    items = [{"project_id": pid, "date": "2026-11-05", "time": t} for pid, t in zip(chosen, ["9:00", "12:00", "15:00"])]
+    view = client.post("/v1/plan/schedule", json={"user_id": "u1", "items": items, "times": ["09:00", "12:00", "15:00"],
+                                                   "days": [0, 1, 2, 3, 4, 5], "start": "2026-11-05", "count": 3,
+                                                   "remind": True}).json()
+    slots = {s["project_id"]: s for s in view["week"]["slots"]}
+    assert [(slots[p]["date"], slots[p]["time"]) for p in chosen] == [("2026-11-05", "09:00"), ("2026-11-05", "12:00"),
+                                                                     ("2026-11-05", "15:00")]
+    assert all(slots[p]["pinned"] for p in chosen)
+    plan = post_plan.load("u1")
+    assert plan["prefs"]["times"] == ["09:00", "12:00", "15:00"] and plan["prefs"]["start"] == "2026-11-05"
+    # Someone else's video, or none: refused, and nothing is written.
+    before = json.dumps(post_plan.load("u1"), sort_keys=True)
+    assert client.post("/v1/plan/schedule", json={"user_id": "u1", "items": [{"project_id": "nope", "date": "2026-11-05",
+                                                                              "time": "9:00"}]}).status_code == 404
+    assert client.post("/v1/plan/schedule", json={"user_id": "u1", "items": []}).status_code == 422
+    assert json.dumps(post_plan.load("u1"), sort_keys=True) == before
+
+
+def test_listing_projects_reads_them_in_one_round_trip(r):
+    """PO 4 Nov: the library was read one GET per video (hundreds per request). Now one MGET per 100, same result."""
+    made = [_video("u1", f"v{i}") for i in range(130)]
+    _video("u2", "other")
+    calls = {"get": 0, "mget": 0}
+    real_get, real_mget = r.get, r.mget
+    r.get = lambda *a, **k: (calls.__setitem__("get", calls["get"] + 1), real_get(*a, **k))[1]
+    r.mget = lambda *a, **k: (calls.__setitem__("mget", calls["mget"] + 1), real_mget(*a, **k))[1]
+    listed = project_store.list_projects(user_id="u1", limit=500)
+    assert [p["project_id"] for p in listed] == list(reversed(made)) or {p["project_id"] for p in listed} == set(made)
+    assert len(listed) == 130 and calls == {"get": 0, "mget": 2}

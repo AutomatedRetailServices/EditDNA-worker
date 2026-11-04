@@ -101,6 +101,44 @@ def move_slot(payload: MoveRequest):
     return _view(payload.user_id)
 
 
+class Slot(BaseModel):
+    project_id: str
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    time: str = Field(pattern=r"^\d{1,2}:\d{2}$")
+
+
+class ScheduleRequest(BaseModel):
+    """Plan my week in ONE request (PO 4 Nov): every video on its day and time, her settings, and the week built.
+    Before, the app sent one /slots/move per video (~11 s each), then /prefs, then /week/build; a long wait was cut
+    when the iPhone locked, leaving half a plan."""
+    user_id: str
+    items: list[Slot] = Field(min_length=1, max_length=500)
+    times: list[str] | None = Field(default=None, min_length=1, max_length=post_plan.MAX_TIMES)
+    days: list[int] | None = None
+    start: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    count: int | None = Field(default=None, ge=1, le=1000)
+    remind: bool | None = None
+    tz: str | None = None
+
+
+@router.post("/schedule")
+def schedule(payload: ScheduleRequest):
+    projects = _projects(payload.user_id)
+    owned = {str(p.get("project_id")) for p in projects}
+    if any(item.project_id not in owned for item in payload.items):
+        raise HTTPException(status_code=404, detail="video not found")
+    items = [item.model_dump() for item in payload.items]
+    _guard(lambda: post_plan.move_many(payload.user_id, items))
+    prefs = {k: v for k, v in payload.model_dump(include={"times", "days", "start", "count", "remind", "tz"}).items()
+             if v is not None}
+    if prefs:
+        _guard(lambda: post_plan.set_prefs(payload.user_id, prefs))
+    _guard(lambda: post_plan.build_week(payload.user_id, projects))
+    view = post_plan.view(payload.user_id, projects)
+    _caption_missing(payload.user_id, view)
+    return view
+
+
 class VideoRequest(BaseModel):
     user_id: str
     project_id: str
