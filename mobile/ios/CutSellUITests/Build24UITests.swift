@@ -1709,7 +1709,11 @@ final class Build24UITests: XCTestCase {
         check(element("planMyWeekSimple").waitForExistence(timeout: 10), "Plan my week opens")
         let tiles = app.descendants(matching: .any).matching(identifier: "pmwVideo")
         _ = wait(10) { tiles.count >= 6 }
-        for index in 0..<min(6, tiles.count) { tiles.element(boundBy: index).tap(); pause(0.3) }
+        for index in 0..<min(6, tiles.count) {
+            let tile = tiles.element(boundBy: index)
+            if !tile.isHittable { app.swipeUp(velocity: .slow); pause(0.5) }      // a smaller simulator: scroll to it
+            if tile.isHittable { tile.tap(); pause(0.3) }
+        }
         element("pmwBuild").tap()
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         if springboard.buttons["Allow"].waitForExistence(timeout: 5) { springboard.buttons["Allow"].tap() }
