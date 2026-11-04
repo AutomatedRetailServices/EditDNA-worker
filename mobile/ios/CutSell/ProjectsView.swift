@@ -506,10 +506,10 @@ struct ProjectsView: View {
             picked = []
         } label: {
             Text(L10n.tr("Add to Plan · \(picked.count) video\(picked.count == 1 ? "" : "s")"))
-                .font(CS.inter(16, .bold)).foregroundStyle(Color(fixed: 0xFFFFFF))
-                .frame(maxWidth: .infinity).frame(height: 52).background(CS.accent, in: Capsule())
+                .font(CS.inter(16, .semibold)).foregroundStyle(Color(fixed: 0xFFFFFF))
+                .frame(maxWidth: .infinity).frame(height: 50).softPuff(.blue, in: Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(BubblePress())
         .padding(.horizontal, 20)
         .accessibilityIdentifier("editsAddToPlan")
     }

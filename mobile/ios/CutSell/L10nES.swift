@@ -158,6 +158,7 @@ enum L10nES {
         "Brand (e.g. CeraVe)": "Marca (ej. CeraVe)",
         "Build my plan": "Crear mi plan",
         "Build plan · {} video{}": "Armar plan · {} video{}",
+        "{} video{} chosen": "Elegiste {} video{}",
         "Building your sales edit": "Armando tu edición de venta",
         "Bulk": "Varios",
         "Bulk · {} videos": "Bulk · {} videos",

@@ -476,6 +476,8 @@ struct Puff3D<S: Shape>: ViewModifier {
     let look: PuffLook
     let shape: S
     var depth: CGFloat = 6
+    /// PO 3 Nov: "la elevación está exagerada" -- a thin base and a light floor shadow (Plan my week, Add to Plan).
+    var soft = false
 
     private var colors: (top: Color, bottom: Color, base: Color, glow: Color) {
         switch look {
@@ -496,7 +498,7 @@ struct Puff3D<S: Shape>: ViewModifier {
                         .shadow(.inner(color: Color(fixed: 0xFFFFFF, opacity: 0.32), radius: 4, x: 0, y: 4))
                         .shadow(.inner(color: Color(fixed: 0x000000, opacity: 0.16), radius: 8, x: 0, y: -9)))
                 }
-                .shadow(color: c.glow, radius: 12, x: 0, y: 12)
+                .shadow(color: soft ? c.glow.opacity(0.55) : c.glow, radius: soft ? 7 : 12, x: 0, y: soft ? 4 : 12)
             }
     }
 }
@@ -504,6 +506,10 @@ struct Puff3D<S: Shape>: ViewModifier {
 extension View {
     func puff3D<S: Shape>(_ look: PuffLook, in shape: S, depth: CGFloat = 6) -> some View {
         modifier(Puff3D(look: look, shape: shape, depth: depth))
+    }
+    /// The same 3D look, low: 2 pt thick and a light shadow.
+    func softPuff<S: Shape>(_ look: PuffLook, in shape: S) -> some View {
+        modifier(Puff3D(look: look, shape: shape, depth: 2, soft: true))
     }
 }
 

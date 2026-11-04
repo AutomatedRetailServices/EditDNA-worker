@@ -143,6 +143,8 @@ struct PlanMyWeekView: View {
     @State private var editing: Setting?
     @State private var building = false
     @State private var errorMessage: String?
+    /// PO 4 Nov: she chose the videos in Edits (or Export): only those show, as one strip -- not every video again.
+    @State private var fromEdits = false
 
     enum Setting: String, Identifiable { case perDay, between, days, starts; var id: String { rawValue } }
 
@@ -183,18 +185,24 @@ struct PlanMyWeekView: View {
                     HStack(alignment: .firstTextBaseline) {
                         Text(L10n.tr("Plan my week")).font(CS.inter(28, .bold)).foregroundStyle(CS.wiInk)
                         Spacer()
+                        if !fromEdits {
                         Button(L10n.tr("Select all")) {
                             for v in shown where !scheduled.contains(v.projectID) && !chosen.contains(v.projectID) { chosen.append(v.projectID) }
                         }
                         .font(CS.inter(15, .semibold)).foregroundStyle(CS.accent)
                         .accessibilityIdentifier("pmwSelectAll")
+                        }
                     }
                     .padding(.top, 12)
+                    if fromEdits {
+                        chosenStrip.padding(.top, 14)
+                    } else {
                     Text(L10n.tr("Tap videos in the order you want to post."))
                         .font(CS.inter(14)).foregroundStyle(CS.wiSecondary).padding(.top, 4)
                     chips.padding(.top, 14)
                     grid.padding(.top, 12)
-                    if videos.isEmpty {
+                    }
+                    if videos.isEmpty && !fromEdits {
                         Text(L10n.tr("No Ready videos yet. Finished cuts show here."))
                             .font(CS.inter(13, .medium)).foregroundStyle(CS.wiSecondary)
                             .frame(maxWidth: .infinity, minHeight: 120)
@@ -213,7 +221,7 @@ struct PlanMyWeekView: View {
             await catalog.refresh(session: appState.session, projects: appState.projects)
         }
         .onChange(of: settings) { _, value in value.save() }
-        .onAppear { if !store.preselect.isEmpty { chosen = store.preselect; store.preselect = [] } }
+        .onAppear { if !store.preselect.isEmpty { chosen = store.preselect; store.preselect = []; fromEdits = true } }
         .sheet(item: $editing) { which in
             PlanSettingSheet(which: which, settings: $settings)
                 .presentationDetents([.height(which == .days ? 360 : 400)])
@@ -224,6 +232,40 @@ struct PlanMyWeekView: View {
         } message: { Text(L10n.tr(errorMessage ?? "")) }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("planMyWeekSimple")
+    }
+
+    /// The videos she chose in Edits / Export, in her order, on one soft card.
+    private var chosenStrip: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L10n.tr("\(chosen.count) video\(chosen.count == 1 ? "" : "s") chosen")).font(CS.inter(15, .bold)).foregroundStyle(CS.wiInk)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Array(chosen.enumerated()), id: \.element) { index, id in
+                        ZStack(alignment: .bottomLeading) {
+                            Color(fixed: 0xE9ECF1)
+                            if let image = thumbnails.image(for: id) { Image(uiImage: image).resizable().scaledToFill() }
+                            LinearGradient(colors: [.clear, Color(fixed: 0x000000, opacity: 0.55)], startPoint: .center, endPoint: .bottom)
+                            Text(videos.first { $0.projectID == id }?.label ?? "").font(CS.inter(11, .bold))
+                                .foregroundStyle(Color(fixed: 0xFFFFFF)).lineLimit(1).padding(6)
+                        }
+                        .frame(width: 74, height: 106)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(alignment: .topTrailing) {
+                            Text(verbatim: "\(index + 1)").font(CS.inter(11, .bold)).foregroundStyle(Color(fixed: 0xFFFFFF))
+                                .frame(width: 22, height: 22).background(CS.accent, in: Circle()).padding(5)
+                        }
+                        .accessibilityIdentifier("pmwChosen")
+                        .task { if let project = appState.projects.first(where: { $0.projectID == id }) {
+                            await thumbnails.load(project: project, session: appState.session) } }
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .softPuff(.white, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("pmwChosenStrip")
     }
 
     private var chips: some View {
@@ -308,10 +350,9 @@ struct PlanMyWeekView: View {
                         Text(n.rawValue).font(CS.inter(13, .semibold)).lineLimit(1).minimumScaleFactor(0.8)
                             .foregroundStyle(on ? Color(fixed: 0xFFFFFF) : CS.wiInk)
                             .frame(maxWidth: .infinity).frame(height: 34)
-                            .background(on ? CS.accent : CS.wiSurface2, in: Capsule())
-                            .overlay(Capsule().stroke(on ? .clear : CS.wiBorder, lineWidth: 1))
+                            .softPuff(on ? .blue : .white, in: Capsule())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(BubblePress())
                     .accessibilityIdentifier("pmwNetwork_\(n.rawValue)")
                 }
             }
@@ -326,16 +367,17 @@ struct PlanMyWeekView: View {
             Button { Task { await build() } } label: {
                 VStack(spacing: 2) {
                     if building { BrandRing(size: 22) } else {
-                        Text(L10n.tr("Build plan · \(chosen.count) video\(chosen.count == 1 ? "" : "s")")).font(CS.inter(17, .bold))
+                        Text(L10n.tr("Build plan · \(chosen.count) video\(chosen.count == 1 ? "" : "s")")).font(CS.inter(16, .semibold))
                         Text(L10n.tr(PlanScheduler.summary(placed, perDay: settings.perDay, reminders: reminders)))
                             .font(CS.inter(11, .medium)).opacity(0.9)
                     }
                 }
                 .foregroundStyle(Color(fixed: 0xFFFFFF))
-                .frame(maxWidth: .infinity).frame(height: 56)
-                .background(CS.accent.opacity(chosen.isEmpty ? 0.4 : 1), in: Capsule())
+                .frame(maxWidth: .infinity).frame(height: 54)
+                .softPuff(.blue, in: Capsule())
+                .opacity(chosen.isEmpty ? 0.45 : 1)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(BubblePress())
             .padding(.top, 4)
             .accessibilityElement(children: .ignore)
             .accessibilityAddTraits(.isButton)
@@ -370,10 +412,9 @@ struct PlanMyWeekView: View {
                 }
             }
             .padding(.horizontal, 12).frame(maxWidth: .infinity, alignment: .leading).frame(height: 56)
-            .background(CS.wiCard, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
+            .softPuff(.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(BubblePress())
         .accessibilityIdentifier("pmwSetting_\(which.rawValue)")
     }
 

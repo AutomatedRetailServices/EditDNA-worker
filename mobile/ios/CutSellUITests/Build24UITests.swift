@@ -1725,6 +1725,26 @@ final class Build24UITests: XCTestCase {
         done()
     }
 
+    /// PO 4 Nov: Edits › Select › Add to Plan opens Plan my week with ONLY her videos (one strip), soft 3D buttons.
+    func testPlanFromEdits() throws {
+        launchApp(fresh: true, extra: ["-CutSellPlanMock", "-CutSellProjectsMock", "-CutSellCatalogMock"])
+        pause(2)
+        element("tab_edits").tap(); pause(2)
+        let ready = element("editsFilterReady")
+        if ready.waitForExistence(timeout: 10) { ready.tap() }
+        element("editsSelect").tap(); pause(1)
+        let tiles = app.descendants(matching: .any).matching(identifier: "editsPick")
+        for i in 0..<min(3, tiles.count) where tiles.element(boundBy: i).isHittable { tiles.element(boundBy: i).tap(); pause(0.4) }
+        pause(1); shot("edits_selected_soft")
+        element("editsAddToPlan").tap()
+        check(element("pmwChosenStrip").waitForExistence(timeout: 15), "Plan my week shows only her videos")
+        let chosen = app.descendants(matching: .any).matching(identifier: "pmwChosen")
+        check(chosen.count == 3, "the 3 videos she chose", "\(chosen.count)")
+        check(!element("pmwSelectAll").exists, "no Select all (she already chose)")
+        pause(1.5); shot("plan_my_week_from_edits")
+        done()
+    }
+
     func testWIPlanSimple() throws {
         launchApp(fresh: true, extra: ["-CutSellPlanMock", "-CutSellProjectsMock", "-CutSellCatalogMock", "-CutSellPlanTestReminder"])
         element("tab_plan").tap()
