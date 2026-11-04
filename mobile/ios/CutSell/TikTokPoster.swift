@@ -163,7 +163,7 @@ struct PostToTikTokButton: View {
             }
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity).frame(height: 52)
-            .background(Capsule().fill(CS.accentGradient))     // White Indigo primary (Figma 1209:170)
+            .softPuff(.blue, in: Capsule())     // White Indigo primary (Figma 1209:170)
         }
         .accessibilityIdentifier("postToTikTok")
     }

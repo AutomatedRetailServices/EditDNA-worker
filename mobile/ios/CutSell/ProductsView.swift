@@ -449,8 +449,7 @@ struct ProductDetailView: View {
                         .font(CS.inter(11, .medium)).foregroundStyle(CS.wiSecondary)
                         .padding(.horizontal, 13)
                         .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
-                        .background(CS.wiPage, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(CS.accent, lineWidth: 1))
+                        .softPuff(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .padding(.top, 12)
                     }
 
@@ -470,8 +469,7 @@ struct ProductDetailView: View {
                             Text(L10n.tr(selecting ? (selected.isEmpty ? "Cancel" : "Move \(selected.count)") : "Select"))
                                 .font(CS.inter(15, .bold)).foregroundStyle(CS.wiInk)
                                 .frame(width: 110, height: 52)
-                                .background(CS.wiPage, in: Capsule())
-                                .overlay(Capsule().stroke(CS.wiInk, lineWidth: 1.5))
+                                .softPuff(.white, in: Capsule())
                         }
                         .accessibilityIdentifier("productSelect")
                         if route.mixID != nil {
@@ -494,7 +492,7 @@ struct ProductDetailView: View {
                                 Text(L10n.tr("Add to Plan · \(selected.count)"))
                                     .font(CS.inter(15, .bold)).foregroundStyle(.white)
                                     .frame(maxWidth: .infinity).frame(height: 52)
-                                    .background(Capsule().fill(CS.accent))
+                                    .softPuff(.blue, in: Capsule())
                             }
                             .accessibilityIdentifier("productAddToPlan")
                         } else {
@@ -502,7 +500,7 @@ struct ProductDetailView: View {
                             Text(L10n.tr("Edit \(drafts.count) draft\(drafts.count == 1 ? "" : "s") in bulk"))
                                 .font(CS.inter(15, .bold)).foregroundStyle(.white)
                                 .frame(maxWidth: .infinity).frame(height: 52)
-                                .background(Capsule().fill(CS.accentGradient))
+                                .softPuff(.blue, in: Capsule())
                         }
                         .disabled(drafts.isEmpty)
                         .opacity(drafts.isEmpty ? 0.5 : 1)
@@ -751,7 +749,7 @@ struct AssignProductSheet: View {
                     Button { Task { await move(brand: suggestion.brand, product: suggestion.product) } } label: {
                         Text(L10n.tr("Confirm")).font(CS.inter(13, .semibold)).foregroundStyle(.white)
                             .padding(.horizontal, 14).frame(height: 30)
-                            .background(Capsule().fill(CS.accent))
+                            .softPuff(.blue, in: Capsule())
                     }
                     .accessibilityIdentifier("assignConfirmSuggestion")
                 }
@@ -802,7 +800,7 @@ struct AssignProductSheet: View {
                     }
                 }
                 .frame(maxWidth: .infinity).frame(height: 52)
-                .background(Capsule().fill(CS.accentGradient))
+                .softPuff(.blue, in: Capsule())
             }
             .disabled(chosen == nil || working)
             .opacity(chosen == nil ? 0.55 : 1)

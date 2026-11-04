@@ -397,7 +397,7 @@ struct WIPillButtonGradient: View {
         Button(action: action) {
             Text(L10n.tr(title)).font(CS.inter(16, .bold)).foregroundStyle(Color(fixed: 0xFFFFFF))
                 .frame(maxWidth: .infinity).frame(height: 52)
-                .background(CS.accentGradient, in: Capsule())
+                .softPuff(.blue, in: Capsule())
                 .opacity(enabled ? 1 : 0.4)
         }
         .buttonStyle(.plain)

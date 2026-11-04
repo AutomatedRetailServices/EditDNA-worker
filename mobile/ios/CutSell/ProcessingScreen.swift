@@ -274,8 +274,7 @@ struct ProcessingContent: View {
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 16)
                         .frame(maxWidth: .infinity, minHeight: 48)
-                        .background(Color(fixed: 0xF3F7FF), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(CS.accent, lineWidth: 1))
+                        .softPuff(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 } else {
                 HStack(spacing: 8) {
                     Image("WIInfo").renderingMode(.template).resizable().frame(width: 18, height: 18)
@@ -326,8 +325,7 @@ struct ProcessingContent: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 16)
                 .frame(maxWidth: .infinity, minHeight: 48)
-                .background(Color(fixed: 0xF3F7FF), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(CS.accent, lineWidth: 1))
+                .softPuff(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .accessibilityIdentifier("originalSafe")
             Button {
                 guard !retrying else { return }
@@ -569,8 +567,7 @@ struct ReadyContent: View {
                             .lineLimit(1).minimumScaleFactor(0.8)
                             .frame(maxWidth: .infinity)
                             .frame(height: 52)
-                            .background(CS.wiPage, in: Capsule())
-                            .overlay(Capsule().stroke(CS.wiInk, lineWidth: 1.5))
+                            .softPuff(.white, in: Capsule())
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("readyReviewButton")

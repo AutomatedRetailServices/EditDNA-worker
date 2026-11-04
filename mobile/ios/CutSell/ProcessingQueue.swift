@@ -515,7 +515,7 @@ struct BulkStartedSheet: View {
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .frame(height: 52)
-                    .background(CS.accentGradient, in: Capsule())
+                    .softPuff(.blue, in: Capsule())
             }
             .buttonStyle(.plain)
             .padding(.top, 18)
