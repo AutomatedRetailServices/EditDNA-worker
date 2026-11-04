@@ -121,7 +121,7 @@ struct ExportSettingsView: View {
             case .done(let url):
                 if destination == .plan {
                     // PO 26 Oct: the same door as Edits › Select: Plan my week, with this video chosen.
-                    Text(L10n.tr("Opening Plan my week…")).font(CS.inter(14, .medium)).foregroundStyle(CS.wiSecondary)
+                    Text(L10n.tr("Opening Week Plan…")).font(CS.inter(14, .medium)).foregroundStyle(CS.wiSecondary)
                         .frame(maxWidth: .infinity, minHeight: 80)
                         .onAppear {
                             PlanWeekStore.shared.preselect = [projectID]

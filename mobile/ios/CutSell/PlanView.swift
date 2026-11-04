@@ -29,7 +29,7 @@ struct PlanView: View {
         guard router.pending == .planWeek || router.pending == .thisWeek else { return }
         let week = router.pending == .thisWeek
         router.pending = nil
-        path = week ? [.week] : [.goal]                // PO 24 Oct: "Plan my week" always opens Plan my week first
+        path = week ? [.week] : [.goal]                // PO 24 Oct: "Week Plan" always opens Week Plan first
     }
 
     var body: some View {
@@ -186,7 +186,7 @@ struct PlanView: View {
             HStack(spacing: 12) {
                 Image(systemName: "calendar.badge.plus").font(.system(size: 22, weight: .semibold))
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(L10n.tr("Plan my week")).font(CS.inter(17, .bold))
+                    Text(L10n.tr("Week Plan")).font(CS.inter(17, .bold))
                     Text(L10n.tr(week.hasWeek ? "Change what and when you post" : "Pick your videos, we set the times"))
                         .font(CS.inter(12, .medium)).opacity(0.85)
                 }

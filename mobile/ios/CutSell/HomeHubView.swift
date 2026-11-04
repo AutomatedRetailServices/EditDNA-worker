@@ -81,7 +81,7 @@ struct HomeHubView: View {
                             // The Faceless flow is not built yet: the existing "Coming soon" notice.
                             askPromoting(.faceless) { voiceOverSoon = true }
                         }
-                        bubble(icon: "WIPlanCal", title: "Plan my week", id: "hubPlanWeek") {
+                        bubble(icon: "WIPlanCal", title: "Week Plan", id: "hubPlanWeek") {
                             AppRouter.shared.pending = .planWeek
                             selectTab(.plan)
                         }

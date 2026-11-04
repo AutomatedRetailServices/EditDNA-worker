@@ -401,15 +401,15 @@ struct Guide: Identifiable, Hashable {
                           body: "If CutSell couldn’t tell the product, tap Assign and pick it or add a new one."),
                 GuideStep(title: "Move videos", body: "Open a product, select videos and tap Move to change their product."),
               ], tryTitle: "Try Products now", destination: .products),
-        Guide(id: "planweek", glyph: "▦", gradientIcon: false, title: "Plan my week", name: "Plan my week",
+        Guide(id: "planweek", glyph: "▦", gradientIcon: false, title: "Week Plan", name: "Week Plan",
               subtitle: "A video ready at each time you pick.", steps: [
-                GuideStep(title: "Open Plan my week", body: "In Plan, tap Plan my week."),
+                GuideStep(title: "Open Week Plan", body: "In Plan, tap Week Plan."),
                 GuideStep(title: "Pick how many and when", body: "Choose how many videos and at what times, then tap Build my plan."),
                 GuideStep(title: "Check your week",
                           body: "We spread your ready videos so every day has variety. Tap one to move it to another day or time."),
                 GuideStep(title: "Get reminded",
                           body: "At each time you get a reminder with the caption and video ready."),
-              ], tryTitle: "Try Plan my week now", destination: .planWeek),
+              ], tryTitle: "Try Week Plan now", destination: .planWeek),
         Guide(id: "tiktok", glyph: "↗", gradientIcon: false, title: "Post to TikTok", name: "Post to TikTok",
               subtitle: "From CutSell to TikTok in a few taps.", steps: [
                 GuideStep(title: "Open a ready video",

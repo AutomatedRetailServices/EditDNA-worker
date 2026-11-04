@@ -768,7 +768,7 @@ struct PlanGoalView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     PlanBackButton(title: "Plan") { dismiss() }.padding(.top, 8)
-                    Text(L10n.tr("Plan my week")).font(CS.inter(28, .bold)).foregroundStyle(Color.ink).padding(.top, 14)
+                    Text(L10n.tr("Week Plan")).font(CS.inter(28, .bold)).foregroundStyle(Color.ink).padding(.top, 14)
                     Text(L10n.tr("Pick how many videos and when. We spread them so every day has variety."))
                         .font(CS.inter(13)).foregroundStyle(PlanStyle.muted).fixedSize(horizontal: false, vertical: true).padding(.top, 6)
 
