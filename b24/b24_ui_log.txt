@@ -1,4 +1,8 @@
-B24UI    95.6 PASS Plan my week shows only her videos
-B24UI    95.9 PASS the 3 videos she chose
-B24UI    97.1 PASS no Select all (she already chose)
-B24UI    98.8 FAILURES: none
+B24UI    48.1 PASS Plan my week on top
+B24UI    51.6 PASS no In progress
+B24UI    57.1 PASS Plan my week opens
+B24UI   117.1 FAILURES: none
+B24UI    51.5 PASS Plan my week shows only her videos
+B24UI    51.8 PASS the 3 videos she chose
+B24UI    53.3 PASS no Select all (she already chose)
+B24UI    55.0 FAILURES: none
