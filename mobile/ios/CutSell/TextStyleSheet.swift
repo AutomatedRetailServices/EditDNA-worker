@@ -151,7 +151,7 @@ struct TextStyleSheet: View {
                     .focused($typing)
                     .padding(.horizontal, 16).padding(.vertical, 12)
                     .frame(minHeight: 50)
-                    .puff3D(.white, in: Capsule(), depth: 3)
+                    .softPuff(.white, in: Capsule())
                     .accessibilityIdentifier("textStyleField")
             }
             Button { Task { await done() } } label: {
@@ -161,7 +161,7 @@ struct TextStyleSheet: View {
                     }
                 }
                 .frame(width: 48, height: 48)
-                .puff3D(.blue, in: Circle(), depth: 4)
+                .softPuff(.blue, in: Circle())
             }
             .buttonStyle(BubblePress())
             .disabled(saving)
@@ -201,7 +201,7 @@ struct TextStyleSheet: View {
                             .foregroundStyle(on ? Color(fixed: 0xFFFFFF) : CS.wiInk)
                             .padding(.horizontal, 8)
                             .frame(maxWidth: .infinity).frame(height: 52)
-                            .puff3D(on ? .blue : .white, in: RoundedRectangle(cornerRadius: 16, style: .continuous), depth: 3)
+                            .softPuff(on ? .blue : .white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     }
                     .buttonStyle(BubblePress())
                     .accessibilityIdentifier("textFont_\(spec.key)")
@@ -314,7 +314,7 @@ struct TextStyleSheet: View {
                         Image(systemName: icon).font(.system(size: 17, weight: .semibold))
                             .foregroundStyle(on ? Color(fixed: 0xFFFFFF) : CS.wiInk)
                             .frame(width: 52, height: 44)
-                            .puff3D(on ? .blue : .white, in: RoundedRectangle(cornerRadius: 14, style: .continuous), depth: 3)
+                            .softPuff(on ? .blue : .white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
                     .buttonStyle(BubblePress())
                     .accessibilityIdentifier("textAlign_\(key)")
@@ -324,7 +324,7 @@ struct TextStyleSheet: View {
                     Text(verbatim: "AA").font(CS.inter(15, .heavy))
                         .foregroundStyle(look.uppercase ? Color(fixed: 0xFFFFFF) : CS.wiInk)
                         .frame(width: 60, height: 44)
-                        .puff3D(look.uppercase ? .blue : .white, in: RoundedRectangle(cornerRadius: 14, style: .continuous), depth: 3)
+                        .softPuff(look.uppercase ? .blue : .white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
                 .buttonStyle(BubblePress())
                 .accessibilityIdentifier("textUppercase")

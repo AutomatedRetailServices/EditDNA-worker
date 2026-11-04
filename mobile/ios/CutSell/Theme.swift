@@ -344,7 +344,7 @@ struct PrimaryButton: View {
                 .shadow(color: Color(fixed: 0x000000, opacity: 0.16), radius: 0, x: 0, y: 2)
                 .frame(maxWidth: .infinity)
                 .frame(height: height)
-                .puff3D(.blue, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous), depth: 5)
+                .softPuff(.blue, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                 .opacity(isEnabled ? 1 : 0.45)
         }
         .buttonStyle(BubblePress())
@@ -367,7 +367,7 @@ struct SecondaryButton: View {
                 .foregroundStyle(CS.wiInk)
                 .frame(maxWidth: .infinity)
                 .frame(height: height)
-                .puff3D(.white, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous), depth: 5)
+                .softPuff(.white, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         }
         .buttonStyle(BubblePress())
     }
@@ -427,7 +427,7 @@ struct OptionCard: View {
             }
             .frame(maxWidth: .infinity)
             .frame(height: 56)
-            .puff3D(.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous), depth: 4)
+            .softPuff(.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(isSelected ? Color(fixed: 0x0A55F0) : .clear, lineWidth: 2)
@@ -453,7 +453,7 @@ struct FilterChip: View {
                 .minimumScaleFactor(0.8)
                 .frame(maxWidth: .infinity)
                 .frame(height: 40)
-                .puff3D(isSelected ? .blue : .white, in: Capsule(), depth: 3)
+                .softPuff(isSelected ? .blue : .white, in: Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -470,7 +470,7 @@ struct CircleIconButton<Icon: View>: View {
         Button(action: action) {
             icon()
                 .frame(width: size, height: size)
-                .puff3D(.white, in: Circle(), depth: 3)
+                .softPuff(.white, in: Circle())
         }
         .buttonStyle(BubblePress())
     }

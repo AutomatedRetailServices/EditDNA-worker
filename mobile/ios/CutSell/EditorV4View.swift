@@ -719,7 +719,7 @@ struct EditorV4View: View {
                     .foregroundStyle(Color(fixed: 0xFFFFFF))
                     .shadow(color: Color(fixed: 0x000000, opacity: 0.16), radius: 0, x: 0, y: 1.5)
                     .frame(width: 78, height: 34)
-                    .puff3D(.blue, in: Capsule(), depth: 4)
+                    .softPuff(.blue, in: Capsule())
             }
             .buttonStyle(BubblePress())
             .padding(.leading, 8)
@@ -2037,7 +2037,7 @@ struct ToolbarV4: View {
                     Image(systemName: "chevron.left").font(.system(size: 17, weight: .bold))
                         .foregroundStyle(Color(fixed: 0xFFFFFF))
                         .frame(width: 44, height: 44)
-                        .puff3D(.blue, in: Circle(), depth: 3)
+                        .softPuff(.blue, in: Circle())
                         .frame(width: 56, height: 62)
                 }
                 .buttonStyle(BubblePress())
@@ -2061,7 +2061,7 @@ struct ToolbarV4: View {
                                 .foregroundStyle(active == tool ? Color(fixed: 0xFFFFFF) : CS.wiInk)
                                 .frame(width: 24, height: 24)
                                 .frame(width: 38, height: 38)
-                                .puff3D(active == tool ? .blue : .white, in: RoundedRectangle(cornerRadius: 13, style: .continuous), depth: 3)
+                                .softPuff(active == tool ? .blue : .white, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
                             Text(L10n.tr(tool.title))
                                 .font(CS.inter(10.5, .medium))
                                 .foregroundStyle(CS.wiSecondary)
@@ -2123,7 +2123,7 @@ struct ExportQualityMenu: View {
             }
             .padding(.leading, 12).padding(.trailing, 10)
             .frame(width: 108, height: 34)
-            .puff3D(.white, in: Capsule(), depth: 4)
+            .softPuff(.white, in: Capsule())
         }
         .accessibilityLabel(L10n.tr(on4K ? "Export quality: 4K" : "Export quality: 1080p"))
         .accessibilityIdentifier("exportQuality")
@@ -2541,7 +2541,7 @@ struct EditorBackButton: View {
             .font(.system(size: 12, weight: .bold))
             .foregroundStyle(CS.accent)
             .frame(width: 32, height: 32)
-            .puff3D(.white, in: Circle(), depth: 3)      // 29 Oct (PO): 3D like the rest of the app
+            .softPuff(.white, in: Circle())      // 29 Oct (PO): 3D like the rest of the app
             .contentShape(Rectangle())
     }
 }

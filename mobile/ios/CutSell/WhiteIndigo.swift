@@ -54,7 +54,7 @@ struct WIHeaderIcon: View {
         Image(image).renderingMode(.template).resizable().frame(width: 20, height: 20)
             .foregroundStyle(CS.wiInk)
             .frame(width: 40, height: 40)
-            .puff3D(.white, in: Circle(), depth: 3)
+            .softPuff(.white, in: Circle())
             .contentShape(Circle())
     }
 }
@@ -113,7 +113,7 @@ struct WISegmented<ID: Hashable>: View {
                     .padding(.horizontal, 4)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background {
-                        if active { Capsule().fill(.clear).puff3D(.blue, in: Capsule(), depth: 3) }
+                        if active { Capsule().fill(.clear).softPuff(.blue, in: Capsule()) }
                     }
                     .contentShape(Rectangle())
                 }
@@ -276,7 +276,7 @@ struct WIPillButton: View {
             .foregroundStyle(style == .outline ? CS.wiInk : Color(fixed: 0xFFFFFF))
             .frame(maxWidth: .infinity)
             .frame(height: 52)
-            .puff3D(style == .primary ? .blue : style == .neutral ? .ink : .white, in: Capsule(), depth: 5)
+            .softPuff(style == .primary ? .blue : style == .neutral ? .ink : .white, in: Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(BubblePress())
