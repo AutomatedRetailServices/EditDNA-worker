@@ -1,4 +1,0 @@
-B24UI    46.7 PASS Plan my week on top
-B24UI    50.1 PASS no In progress
-B24UI    55.3 PASS Plan my week opens
-B24UI   108.1 FAILURES: none
