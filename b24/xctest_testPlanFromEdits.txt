@@ -1,9 +1,8 @@
-B24UI    72.4 PASS Plan my week shows only her videos
-B24UI    73.0 FAIL the 3 videos she chose · 6
-B24UI    75.8 PASS no Select all (she already chose)
-B24UI    77.5 FAILURES: the 3 videos she chose
-/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:1465: error: -[CutSellUITests.Build24UITests testPlanFromEdits] : XCTAssertTrue failed - the 3 videos she chose
-Test Case '-[CutSellUITests.Build24UITests testPlanFromEdits]' failed (83.486 seconds).
-Test Suite 'Build24UITests' failed at 2026-11-04 18:14:42.363.
-Test Suite 'CutSellUITests.xctest' failed at 2026-11-04 18:14:42.364.
-Test Suite 'Selected tests' failed at 2026-11-04 18:14:42.365.
+B24UI    95.6 PASS Plan my week shows only her videos
+B24UI    95.9 PASS the 3 videos she chose
+B24UI    97.1 PASS no Select all (she already chose)
+B24UI    98.8 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testPlanFromEdits]' passed (100.617 seconds).
+Test Suite 'Build24UITests' passed at 2026-11-04 19:13:31.834.
+Test Suite 'CutSellUITests.xctest' passed at 2026-11-04 19:13:31.836.
+Test Suite 'Selected tests' passed at 2026-11-04 19:13:31.837.
