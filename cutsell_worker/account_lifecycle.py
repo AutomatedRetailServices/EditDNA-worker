@@ -179,6 +179,8 @@ def delete_account_data(*, user_id: str, redis_client=None, s3_client=None,
     pipe.delete(project_index_key(user_id=user_id))
     pipe.delete(notification_key(user_id))
     pipe.delete(session_index_key(user_id))
+    from .post_plan import prints_key
+    pipe.delete(prints_key(user_id))          # Plan's recording prints (4 Nov)
     for key in redis_client.scan_iter(match=f"cutsell:v1:batch:{_scope20(user_id)}:*"):
         pipe.delete(key)
     pipe.execute()

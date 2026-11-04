@@ -422,3 +422,23 @@ def test_listing_projects_reads_them_in_one_round_trip(r):
     listed = project_store.list_projects(user_id="u1", limit=500)
     assert [p["project_id"] for p in listed] == list(reversed(made)) or {p["project_id"] for p in listed} == set(made)
     assert len(listed) == 130 and calls == {"get": 0, "mget": 2}
+
+
+def test_recording_prints_are_kept_and_read_again_only_for_a_new_cut(r):
+    """PO 4 Nov (Plan took 3-10 s to open): every plan request read every Ready draft. The print is kept per cut and
+    the draft is read again only when the cut changes (new job or new sources); the week is the same."""
+    ids = _library()
+    for pid in (ids["single1"], ids["single2"]):
+        r.set(draft_store.draft_key(user_id="u1", project_id=pid), json.dumps({"sources": [{"duration_sec": 30}],
+              "draft": {"selected": [{"source_order": 0, "start": 0, "words": [{"text": w, "start": i} for i, w in
+                                                                              enumerate("hola esto es una prueba".split())]}]}}))
+    first = post_plan.view("u1", _projects())
+    reads = {"n": 0}
+    real = r.mget
+    r.mget = lambda keys, *a, **k: (reads.__setitem__("n", reads["n"] + sum(":draft:" in str(x) for x in keys)), real(keys, *a, **k))[1]
+    second = post_plan.view("u1", _projects())
+    assert reads["n"] == 0          # nothing changed: no draft read
+    assert json.dumps(first, sort_keys=True, default=str) == json.dumps(second, sort_keys=True, default=str)
+    project_store.update_project(user_id="u1", project_id=ids["single1"], latest_job_id="job_new")
+    post_plan.view("u1", _projects())
+    assert reads["n"] <= 1          # only the re-cut video's draft was read again

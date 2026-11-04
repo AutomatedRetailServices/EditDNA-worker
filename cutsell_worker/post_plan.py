@@ -183,7 +183,9 @@ def candidates(user_id: str, projects: list[dict], *, client=None, plan: dict | 
                     "source": source_of(project, entry, link), "posted_at": entry.get("posted_at"),
                     "caption": entry.get("caption"), "caption_source": entry.get("caption_source"),
                     "duration_sec": round(seconds, 1)})
-    prints = recordings(user_id, [v["project_id"] for v in out if not v.get("mix_id")], client=client)
+    by_id = {str(p.get("project_id")): p for p in projects}
+    ids = [v["project_id"] for v in out if not v.get("mix_id")]
+    prints = recordings(user_id, ids, client=client, versions={pid: _draft_version(by_id.get(pid) or {}) for pid in ids})
     week_ids = {s.get("project_id") for s in (plan.get("week") or {}).get("slots") or []}
     return one_per_recording(out, prints, prefer=week_ids)
 
@@ -231,19 +233,58 @@ def same_recording(a: list[tuple[float, str]], b: list[tuple[float, str]]) -> bo
     return True
 
 
-def recordings(user_id: str, project_ids: list[str], *, client=None) -> dict[str, list]:
+def prints_key(user_id: str) -> str:
+    return f"cutsell:v1:plan-prints:{_scope(user_id)}"
+
+
+def _draft_version(project: dict) -> str:
+    """What a cut's recording print depends on: its latest cut job and its sources. A new cut or new sources make a
+    new version, so the print is read again from the draft."""
+    sources = [round(float(s.get("duration_sec") or 0), 2) for s in project.get("sources") or [] if isinstance(s, dict)]
+    return json.dumps([project.get("latest_job_id"), sources])
+
+
+def recordings(user_id: str, project_ids: list[str], *, client=None,
+               versions: Optional[dict[str, str]] = None) -> dict[str, list]:
+    """Each cut's recording print. PO 4 Nov (Plan took 3-10 s to open): reading every Ready draft (~50 KB each) on
+    every plan request was the slow part, so the print is kept per cut with the version it was read from; only a
+    new or changed cut reads its draft."""
     if not project_ids:
         return {}
     from . import draft_store
     target = draft_store._redis_client(client)
-    raw = target.mget([draft_store.draft_key(user_id=user_id, project_id=pid) for pid in project_ids])
-    out = {}
-    for pid, item in zip(project_ids, raw):
+    versions = versions or {}
+    cached: dict[str, list] = {}
+    if versions and hasattr(target, "hmget"):
         try:
-            out[pid] = recording_of(json.loads(item.decode() if isinstance(item, bytes) else item)) if item else []
+            rows = target.hmget(prints_key(user_id), project_ids)
         except Exception:
-            out[pid] = []
-    return out
+            rows = [None] * len(project_ids)
+        for pid, row in zip(project_ids, rows):
+            try:
+                stored = json.loads(row.decode() if isinstance(row, bytes) else row) if row else None
+            except Exception:
+                stored = None
+            if stored and pid in versions and stored.get("v") == versions[pid]:
+                cached[pid] = [tuple(x) for x in stored.get("p") or []]
+    missing = [pid for pid in project_ids if pid not in cached]
+    out = dict(cached)
+    if missing:
+        raw = target.mget([draft_store.draft_key(user_id=user_id, project_id=pid) for pid in missing])
+        fresh = {}
+        for pid, item in zip(missing, raw):
+            try:
+                out[pid] = recording_of(json.loads(item.decode() if isinstance(item, bytes) else item)) if item else []
+            except Exception:
+                out[pid] = []
+            if pid in versions:
+                fresh[pid] = json.dumps({"v": versions[pid], "p": out[pid]})
+        if fresh and hasattr(target, "hset"):
+            try:
+                target.hset(prints_key(user_id), mapping=fresh)
+            except Exception:
+                pass
+    return {pid: out.get(pid, []) for pid in project_ids}
 
 
 def one_per_recording(videos: list[dict], prints: dict[str, list], *, prefer: set | None = None) -> list[dict]:
