@@ -196,7 +196,7 @@ struct PlanView: View {
             .foregroundStyle(Color(fixed: 0xFFFFFF))
             .padding(.horizontal, 20)
             .frame(maxWidth: .infinity).frame(height: 68)
-            .puff3D(.blue, in: RoundedRectangle(cornerRadius: 24, style: .continuous), depth: 6)
+            .softPuff(.blue, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         }
         .buttonStyle(BubblePress())
         .accessibilityIdentifier("planMyWeek")
@@ -247,7 +247,7 @@ struct PlanView: View {
                             .frame(height: 6)
                         }
                         .frame(maxWidth: .infinity).frame(height: 64)
-                        .puff3D(isToday ? .blue : .white, in: RoundedRectangle(cornerRadius: 16, style: .continuous), depth: 4)
+                        .softPuff(isToday ? .blue : .white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
                             .stroke(picked && !isToday ? CS.accent : .clear, lineWidth: 2.5))
                     }
@@ -286,7 +286,7 @@ struct PlanView: View {
                 }
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .puff3D(.white, in: RoundedRectangle(cornerRadius: 20, style: .continuous), depth: 4)
+                .softPuff(.white, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             } else {
                 HStack(alignment: .firstTextBaseline) {
                     Text(L10n.tr(isToday ? "Today · \(PlanDay.short(day))" : PlanDay.short(day)))
@@ -328,7 +328,7 @@ struct PlanView: View {
             }
         }
         .padding(10)
-        .puff3D(.white, in: RoundedRectangle(cornerRadius: 20, style: .continuous), depth: 4)
+        .softPuff(.white, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .opacity(slot.postedAt == nil ? 1 : 0.6)
     }
 
