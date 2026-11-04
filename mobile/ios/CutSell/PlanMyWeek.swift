@@ -183,7 +183,7 @@ struct PlanMyWeekView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     PlanBackButton(title: "Plan") { dismiss() }.padding(.top, 8)
                     HStack(alignment: .firstTextBaseline) {
-                        Text(L10n.tr("Plan my week")).font(CS.inter(28, .bold)).foregroundStyle(CS.wiInk)
+                        Text(L10n.tr("Week Plan")).font(CS.inter(28, .bold)).foregroundStyle(CS.wiInk)
                         Spacer()
                         if !fromEdits {
                         Button(L10n.tr("Select all")) {

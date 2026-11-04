@@ -796,6 +796,7 @@ enum L10nES {
         "Plan & Usage": "Plan y uso",
         "Plan ends early: {} of {} videos fit without the same product back to back.": "El plan termina antes: caben {} de {} videos sin repetir el mismo producto seguido.",
         "Plan my week": "Planear mi semana",
+        "Week Plan": "Plan de la semana",
         "Plan my week ›": "Planear mi semana ›",
         "Plan needs attention": "El plan necesita atención",
         "Plan your week": "Planea tu semana",
