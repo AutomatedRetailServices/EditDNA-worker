@@ -1,6 +1,0 @@
-B24UI    36.6 PASS Add to Plan button
-B24UI    45.8 FAILURES: none
-Test Case '-[CutSellUITests.Build24UITests testCurrentEditToPlan]' passed (46.291 seconds).
-Test Suite 'Build24UITests' passed at 2026-11-03 21:39:12.052.
-Test Suite 'CutSellUITests.xctest' passed at 2026-11-03 21:39:12.052.
-Test Suite 'Selected tests' passed at 2026-11-03 21:39:12.053.

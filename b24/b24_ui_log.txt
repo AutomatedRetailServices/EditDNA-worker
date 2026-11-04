@@ -1,2 +1,3 @@
-B24UI    36.6 PASS Add to Plan button
-B24UI    45.8 FAILURES: none
+B24UI    45.3 PASS Plan my week on top
+B24UI    48.2 PASS no In progress
+B24UI    53.2 PASS Plan my week opens
