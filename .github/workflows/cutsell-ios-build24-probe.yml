@@ -24,7 +24,8 @@ on:
     branches: [probe/build24]
 
 concurrency:
-  group: cutsell-ios-build24-probe
+  # base run alongside
+  group: cutsell-ios-build24-probe-base
   cancel-in-progress: false
 
 permissions:
@@ -32,7 +33,7 @@ permissions:
 
 jobs:
   probe:
-    runs-on: macos-latest
+    runs-on: macos-15-intel
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
