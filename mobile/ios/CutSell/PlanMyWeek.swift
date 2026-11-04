@@ -612,7 +612,7 @@ struct SlotActionsSheet: View {
                 Spacer()
             }
             .padding(12)
-            .wiCard(radius: 14, shadow: false)
+            .softPuff(.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             row("arrow.left.arrow.right", "Swap video", id: "slotSwap", action: onSwap)
             row("clock", "Change day or time", id: "slotChange", action: onChange)
             row("trash", "Remove from plan", id: "slotRemove", red: true, action: onRemove)
@@ -634,10 +634,9 @@ struct SlotActionsSheet: View {
             }
             .foregroundStyle(red ? CS.wiError : CS.wiInk)
             .padding(.horizontal, 16).frame(height: 56)
-            .background(CS.wiPage, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
+            .softPuff(.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(BubblePress())
         .accessibilityIdentifier(id)
     }
 }

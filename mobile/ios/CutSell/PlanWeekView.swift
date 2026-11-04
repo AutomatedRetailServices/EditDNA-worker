@@ -1236,9 +1236,9 @@ struct PlanWeekView: View {
             }
             .padding(13)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(PlanStyle.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(isToday ? CS.accent : PlanStyle.border, lineWidth: isToday ? 1.5 : 1))
+            .softPuff(.white, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            // Today keeps its blue edge (PO 4 Nov: soft 3D like the rest of Plan, no grey border).
+            .overlay { if isToday { RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(CS.accent, lineWidth: 1.5) } }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("weekDay_\(day)")
     }
