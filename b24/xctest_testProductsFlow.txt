@@ -1,0 +1,12 @@
+B24UI    22.4 PASS Products filter in Edits
+B24UI    26.7 PASS Products list
+B24UI    33.8 PASS ‘need a product’ notice · 2 videos need a product, We couldn’t tell from the video, Assign ›
+B24UI    36.5 PASS product row
+B24UI    41.2 PASS product view
+B24UI    43.5 videos in the product: 3
+B24UI    55.8 FAIL renamed · Hydrating Cleanser
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:482: error: -[CutSellUITests.Build24UITests testProductsFlow] : Failed to not hittable: Button, {{20.0, 428.5}, {110.0, 52.0}}, identifier: 'productSelect', label: 'Select'
+Test Case '-[CutSellUITests.Build24UITests testProductsFlow]' failed (65.623 seconds).
+Test Suite 'Build24UITests' failed at 2026-11-04 23:05:40.540.
+Test Suite 'CutSellUITests.xctest' failed at 2026-11-04 23:05:40.541.
+Test Suite 'Selected tests' failed at 2026-11-04 23:05:40.542.
