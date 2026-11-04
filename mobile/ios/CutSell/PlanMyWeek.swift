@@ -519,7 +519,7 @@ struct PlanSettingSheet: View {
                 dismiss()
             } label: {
                 Text(L10n.tr("Done")).font(CS.inter(16, .bold)).foregroundStyle(Color(fixed: 0xFFFFFF))
-                    .frame(maxWidth: .infinity).frame(height: 50).background(CS.accent, in: Capsule())
+                    .frame(maxWidth: .infinity).frame(height: 50).softPuff(.blue, in: Capsule())
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("settingDone")

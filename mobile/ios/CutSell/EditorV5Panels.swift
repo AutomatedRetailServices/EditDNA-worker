@@ -1020,7 +1020,7 @@ struct VoiceOverSheetV5: View {
                     Label(saving ? "Saving…" : "Save", systemImage: "checkmark")
                         .font(CS.inter(15, .semibold)).foregroundStyle(Color(fixed: 0xFFFFFF))
                         .frame(maxWidth: .infinity).frame(height: 46)
-                        .background(CS.accent, in: RoundedRectangle(cornerRadius: 14))
+                        .softPuff(.blue, in: RoundedRectangle(cornerRadius: 14))
                 }
                 .buttonStyle(.plain)
                 .disabled(saving)

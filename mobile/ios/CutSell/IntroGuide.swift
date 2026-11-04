@@ -102,7 +102,7 @@ struct IntroView: View {
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .frame(height: 52)
-                        .background(CS.accent, in: Capsule())
+                        .softPuff(.blue, in: Capsule())
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("intro_next")

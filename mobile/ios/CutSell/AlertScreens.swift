@@ -55,8 +55,7 @@ struct PermissionScreen: View {
                         Button(action: onClose) {
                             Image(systemName: "xmark").font(.system(size: 15, weight: .semibold)).foregroundStyle(CS.wiInk)
                                 .frame(width: 40, height: 40)
-                                .background(CS.wiSurface2, in: Circle())
-                                .overlay(Circle().stroke(CS.wiBorder, lineWidth: 1))
+                                .softPuff(.white, in: Circle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(L10n.tr("Close"))
@@ -163,8 +162,7 @@ struct ProblemScreen: View {
                                 Text(L10n.tr(secondaryTitle)).font(CS.inter(15, .semibold)).foregroundStyle(CS.wiInk)
                                     .lineLimit(2).multilineTextAlignment(.center)
                                     .frame(maxWidth: .infinity).frame(height: 52)
-                                    .background(CS.wiSurface2, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
+                                    .softPuff(.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                             }
                             .buttonStyle(.plain)
                         }

@@ -8,8 +8,10 @@ extension View {
         // 29 Oct (PO): every screen follows Create's 3D bubbly line -- the default card is a soft white 3D card.
         // A card with its own fill (a coloured note, an error) keeps its flat look.
         Group {
-            if fill == CS.wiCard && shadow {
-                self.puff3D(.white, in: RoundedRectangle(cornerRadius: max(radius, 22), style: .continuous), depth: 4)
+            // 4 Nov (PO): "busca todas las pantallas con el diseño viejo" -- every white card, with or without its old
+            // shadow flag, is the soft 3D card (thin base, light shadow) used across Plan.
+            if fill == CS.wiCard {
+                self.softPuff(.white, in: RoundedRectangle(cornerRadius: max(radius, 16), style: .continuous))
             } else {
                 self
                     .background(fill, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
@@ -123,8 +125,7 @@ struct WISegmented<ID: Hashable>: View {
         .padding(3)
         .frame(height: 40)
         .frame(maxWidth: .infinity)
-        .background(CS.wiSurface2, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
+        .softPuff(.white, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 }
 

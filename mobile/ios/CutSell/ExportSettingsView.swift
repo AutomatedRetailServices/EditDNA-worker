@@ -162,8 +162,7 @@ struct ExportSettingsView: View {
                 .accessibilityIdentifier("exportEstimate")
         }
         .padding(.horizontal, 14).frame(height: 44)
-        .background(CS.wiSurface2, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(CS.wiBorder, lineWidth: 1))
+        .softPuff(.white, in: RoundedRectangle(cornerRadius: 14))
         if case .noSpace(let bytes) = exporter.phase {
             noSpace(bytes)
         } else if case .failed(let why) = exporter.phase {
@@ -234,8 +233,7 @@ struct ExportSettingsView: View {
             }
             .padding(3)
             .frame(height: 44)
-            .background(CS.wiSurface2, in: Capsule())
-            .overlay(Capsule().stroke(CS.wiBorder, lineWidth: 1))
+            .softPuff(.white, in: Capsule())
         }
     }
 
@@ -282,7 +280,7 @@ struct ExportSettingsView: View {
             }
             Button { sharing = url } label: {
                 Text(L10n.tr("Share")).font(CS.inter(16, .bold)).foregroundStyle(Color(fixed: 0xFFFFFF))
-                    .frame(maxWidth: .infinity).frame(height: 52).background(CS.accent, in: Capsule())
+                    .frame(maxWidth: .infinity).frame(height: 52).softPuff(.blue, in: Capsule())
             }
             .buttonStyle(.plain)
             .padding(.top, 8)
@@ -407,7 +405,7 @@ struct ExportFailedView: View {
                     Button(action: onTryAgain) {
                         Text(L10n.tr("Try Again")).font(CS.inter(16, .bold)).foregroundStyle(Color(fixed: 0xFFFFFF))
                             .frame(maxWidth: .infinity).frame(height: 52)
-                            .background(CS.accent, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .softPuff(.blue, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("exportTryAgain")
@@ -542,8 +540,7 @@ struct ExportScheduleContent: View {
                 Text(L10n.tr("We'll remind you at that time to post it in one tap.")).font(CS.inter(12)).foregroundStyle(CS.wiSecondary)
             }
             .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-            .background(CS.wiSurface2, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
+            .softPuff(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             if let errorMessage { Text(L10n.tr(errorMessage)).font(CS.inter(12)).foregroundStyle(CS.wiError) }
             Button { Task { await schedule() } } label: {
                 Group {
@@ -552,7 +549,7 @@ struct ExportScheduleContent: View {
                     }
                 }
                 .foregroundStyle(Color(fixed: 0xFFFFFF))
-                .frame(maxWidth: .infinity).frame(height: 54).background(CS.accent, in: Capsule())
+                .frame(maxWidth: .infinity).frame(height: 54).softPuff(.blue, in: Capsule())
             }
             .buttonStyle(.plain)
             .disabled(saving)

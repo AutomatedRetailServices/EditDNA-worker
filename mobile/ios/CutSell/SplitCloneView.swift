@@ -100,7 +100,7 @@ struct SplitCloneView: View {
             Button { start() } label: {
                 Text(L10n.tr("Start part 1")).font(CS.inter(16, .bold)).foregroundStyle(Color(fixed: 0xFFFFFF))
                     .frame(maxWidth: .infinity).frame(height: 52)
-                    .background(CS.accent, in: Capsule())
+                    .softPuff(.blue, in: Capsule())
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("splitStart")
@@ -132,8 +132,7 @@ struct SplitCloneView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(fixed: 0xFFFFFF), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
+        .softPuff(.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("splitTips")
     }
@@ -376,7 +375,7 @@ struct SplitCloneView: View {
                     Button { goToPart2() } label: {
                         Text(L10n.tr("Record part 2")).font(CS.inter(16, .bold)).foregroundStyle(Color(fixed: 0xFFFFFF))
                             .frame(maxWidth: .infinity).frame(height: 52)
-                            .background(CS.accent, in: Capsule())
+                            .softPuff(.blue, in: Capsule())
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("splitRecordPart2")
@@ -433,15 +432,14 @@ struct SplitCloneView: View {
                 Button { backToPart1Ready() } label: {
                     Text(L10n.tr("Retake")).font(CS.inter(16, .bold)).foregroundStyle(CS.wiInk)
                         .frame(maxWidth: .infinity).frame(height: 52)
-                        .background(Color(fixed: 0xFFFFFF), in: Capsule())
-                        .overlay(Capsule().stroke(CS.wiBorder, lineWidth: 1.5))
+                        .softPuff(.white, in: Capsule())
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("splitResultRetake")
                 Button { useVideo() } label: {
                     Text(L10n.tr("Use this video")).font(CS.inter(16, .bold)).foregroundStyle(Color(fixed: 0xFFFFFF))
                         .frame(maxWidth: .infinity).frame(height: 52)
-                        .background(CS.accent, in: Capsule())
+                        .softPuff(.blue, in: Capsule())
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("splitUse")

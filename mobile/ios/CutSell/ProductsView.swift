@@ -973,7 +973,7 @@ struct BrandProductSheet: View {
             Spacer(minLength: 0)
             Button { onSave(); dismiss() } label: {
                 Text(L10n.tr("Save")).font(CS.inter(16, .bold)).foregroundStyle(Color(fixed: 0xFFFFFF))
-                    .frame(maxWidth: .infinity).frame(height: 52).background(CS.accent, in: Capsule())
+                    .frame(maxWidth: .infinity).frame(height: 52).softPuff(.blue, in: Capsule())
             }
             .buttonStyle(.plain)
             .disabled(product.trimmingCharacters(in: .whitespaces).isEmpty)

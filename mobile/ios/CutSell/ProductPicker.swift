@@ -220,9 +220,8 @@ struct PromotingSheet: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("promotingAddNew")
             }
-            .background(CS.wiCard)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
+            .softPuff(.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
     }
 
@@ -316,7 +315,7 @@ struct PromotingSheet: View {
                 Button { addingNew = false } label: {
                     Text(L10n.tr("Cancel")).font(CS.inter(14, .bold)).foregroundStyle(CS.wiInk)
                         .frame(maxWidth: .infinity).frame(height: 44)
-                        .overlay(Capsule().stroke(CS.wiBorder, lineWidth: 1))
+                        .softPuff(.white, in: Capsule())
                 }
                 .buttonStyle(.plain)
                 Button { Task { await saveNew() } } label: {
@@ -325,7 +324,7 @@ struct PromotingSheet: View {
                     }
                     .foregroundStyle(Color(fixed: 0xFFFFFF))
                     .frame(maxWidth: .infinity).frame(height: 44)
-                    .background(CS.accent, in: Capsule())
+                    .softPuff(.blue, in: Capsule())
                     .opacity(canSave ? 1 : 0.4)
                 }
                 .buttonStyle(.plain)

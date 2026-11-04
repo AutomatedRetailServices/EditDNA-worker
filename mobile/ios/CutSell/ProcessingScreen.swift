@@ -347,7 +347,7 @@ struct ProcessingContent: View {
                 .foregroundStyle(Color(fixed: 0xFFFFFF))
                 .frame(maxWidth: .infinity)
                 .frame(height: 52)
-                .background(CS.accent, in: Capsule())
+                .softPuff(.blue, in: Capsule())
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("retryProcessing")
@@ -581,7 +581,7 @@ struct ReadyContent: View {
                             .lineLimit(1).minimumScaleFactor(0.8)
                             .frame(maxWidth: .infinity)
                             .frame(height: 52)
-                            .background(CS.accent, in: Capsule())
+                            .softPuff(.blue, in: Capsule())
                     }
                     .buttonStyle(.plain)
                 }

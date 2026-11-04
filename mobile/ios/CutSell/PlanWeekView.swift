@@ -830,8 +830,7 @@ struct PlanGoalView: View {
                             Text(L10n.tr("Change")).font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
                         }
                         .padding(.horizontal, 15).frame(height: 48)
-                        .background(PlanStyle.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(PlanStyle.border, lineWidth: 1))
+                        .softPuff(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .padding(.top, 8)
@@ -854,8 +853,7 @@ struct PlanGoalView: View {
                         .accessibilityValue(remind ? "on" : "off")
                     }
                     .padding(.horizontal, 15).frame(height: 52)
-                    .background(PlanStyle.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(PlanStyle.border, lineWidth: 1))
+                    .softPuff(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .padding(.top, 12)
 
                     summaryBox.padding(.top, 14)
@@ -942,8 +940,7 @@ struct PlanGoalView: View {
         }
         .padding(.horizontal, 13)
         .frame(height: 74)
-        .background(PlanStyle.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(PlanStyle.border, lineWidth: 1))
+        .softPuff(.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     /// "✦  11 videos · 3 per day · 4 days" / "Thu 22 → Tue 27 · 6 products"
@@ -1444,8 +1441,7 @@ struct PlanDayView: View {
             }
         }
         .padding(13)
-        .background(PlanStyle.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(PlanStyle.border, lineWidth: 1))
+        .softPuff(.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .task {
             if let project = appState.projects.first(where: { $0.projectID == slot.projectID }) {
                 await thumbnails.load(project: project, session: appState.session)
@@ -1461,7 +1457,7 @@ struct PlanDayView: View {
                 Text(L10n.tr(exporter.progress[slot.projectID].map { "Preparing… \(Int($0 * 100)) %" } ?? "Share to \(PostNetwork.of(slot.projectID).rawValue)"))
                     .font(CS.inter(16, .semibold)).foregroundStyle(Color(fixed: 0xFFFFFF))
                     .frame(maxWidth: .infinity).frame(height: 50)
-                    .background(CS.accent, in: Capsule())
+                    .softPuff(.blue, in: Capsule())
             }
             .buttonStyle(.plain)
             .disabled(busy)
@@ -1478,8 +1474,7 @@ struct PlanDayView: View {
 
     private func outline(_ title: String) -> some View {
         Text(L10n.tr(title)).font(CS.inter(13, .semibold)).foregroundStyle(CS.wiInk).frame(maxWidth: .infinity).frame(height: 46)
-            .background(CS.wiPage, in: Capsule())
-            .overlay(Capsule().stroke(CS.wiBorder, lineWidth: 1))
+            .softPuff(.white, in: Capsule())
     }
 
     private func otherCard(_ slot: PlanSlot) -> some View {
@@ -1500,8 +1495,7 @@ struct PlanDayView: View {
             Text(L10n.tr("›")).font(CS.inter(20, .medium)).foregroundStyle(PlanStyle.muted)
         }
         .padding(.horizontal, 13).padding(.vertical, 11)
-        .background(PlanStyle.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(PlanStyle.border, lineWidth: 1))
+        .softPuff(.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private func reminderOn(_ slot: PlanSlot) -> Bool {
