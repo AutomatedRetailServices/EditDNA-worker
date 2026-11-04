@@ -1,8 +1,0 @@
-B24UI    51.5 PASS Plan my week shows only her videos
-B24UI    51.8 PASS the 3 videos she chose
-B24UI    53.3 PASS no Select all (she already chose)
-B24UI    55.0 FAILURES: none
-Test Case '-[CutSellUITests.Build24UITests testPlanFromEdits]' passed (54.920 seconds).
-Test Suite 'Build24UITests' passed at 2026-11-04 20:00:45.475.
-Test Suite 'CutSellUITests.xctest' passed at 2026-11-04 20:00:45.477.
-Test Suite 'Selected tests' passed at 2026-11-04 20:00:45.478.
