@@ -359,8 +359,30 @@ final class PlanWeekStore: ObservableObject {
             state = mockState(); PostReminders.shared.schedule(state); return
         }
         guard let session else { throw APIError.invalidResponse }
+        // PO 4 Nov: one request for everything (before: one /slots/move per video, ~11 s each, then /prefs and
+        // /week/build; a long wait was cut when the iPhone locked, leaving half a plan). What is already planned
+        // stays where it is (pinned), then her new videos.
+        struct Item: Encodable { let project_id: String; let date: String; let time: String }
+        struct Schedule: Encodable {
+            let user_id: String; let items: [Item]; let times: [String]; let days: [Int]; let start: String
+            let count: Int; let remind: Bool; let tz: String
+        }
+        let kept = open.filter { slot in slot.pinned != true && !items.contains(where: { $0.projectID == slot.projectID }) }
+        let all = kept.map { Item(project_id: $0.projectID, date: $0.date, time: $0.time) }
+            + items.map { Item(project_id: $0.projectID, date: $0.date, time: $0.time) }
+        let total = Set(open.map(\.projectID)).union(items.map(\.projectID)).count
+        do {
+            state = try await APIClient.shared.request("/v1/plan/schedule", method: "POST",
+                body: Schedule(user_id: session.userID, items: all, times: Array(times.prefix(8)), days: days, start: start,
+                               count: max(1, total), remind: state?.prefs.remind ?? true, tz: TimeZone.current.identifier),
+                timeout: 120)
+            PostReminders.shared.schedule(state)
+            CutSellDiagnostics.log("plan_simple_built", ["videos": String(items.count), "one_request": "1"])
+            return
+        } catch APIError.http(let code, let detail) where code == 405 || (code == 404 && detail == "Not Found") {
+            // An older server without /schedule: the step-by-step way below.
+        }
         struct Move: Encodable { let user_id: String; let project_id: String; let date: String; let time: String }
-        // What is already planned stays where it is (pinned), then her new videos.
         for slot in open where slot.pinned != true && !items.contains(where: { $0.projectID == slot.projectID }) {
             let _: PlanState = try await APIClient.shared.request("/v1/plan/slots/move", method: "POST",
                 body: Move(user_id: session.userID, project_id: slot.projectID, date: slot.date, time: slot.time))

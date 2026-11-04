@@ -379,7 +379,12 @@ struct PlanMyWeekView: View {
 
     private func build() async {
         building = true
-        defer { building = false }
+        // PO 4 Nov: keep going if she locks the iPhone or leaves the app while the plan is saved.
+        let task = UIApplication.shared.beginBackgroundTask(withName: "plan-my-week")
+        defer {
+            building = false
+            if task != .invalid { UIApplication.shared.endBackgroundTask(task) }
+        }
         do {
             let network = PostNetwork(rawValue: settings.network) ?? .tiktok
             for item in placed { PostNetwork.set(network, for: item.pick.projectID) }
