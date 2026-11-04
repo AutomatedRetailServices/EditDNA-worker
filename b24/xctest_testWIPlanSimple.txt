@@ -1,2 +1,0 @@
-Testing failed:
-	CutSellUITests-Runner (27470) encountered an error (The test runner failed to initialize for UI testing. (Underlying Error: Timed out waiting for AX loaded notification))

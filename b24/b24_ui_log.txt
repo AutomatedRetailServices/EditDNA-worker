@@ -1,11 +1,7 @@
-B24UI    97.2 PASS Plan my week shows only her videos
-B24UI    97.4 PASS the 3 videos she chose
-B24UI    99.1 PASS no Select all (she already chose)
-B24UI   100.8 FAILURES: none
-B24UI    22.4 PASS Products filter in Edits
-B24UI    26.7 PASS Products list
-B24UI    33.8 PASS ‘need a product’ notice · 2 videos need a product, We couldn’t tell from the video, Assign ›
-B24UI    36.5 PASS product row
-B24UI    41.2 PASS product view
-B24UI    43.5 videos in the product: 3
-B24UI    55.8 FAIL renamed · Hydrating Cleanser
+B24UI   139.5 PASS Products filter in Edits
+B24UI   142.5 PASS Products list
+B24UI   146.9 PASS ‘need a product’ notice · 2 videos need a product, We couldn’t tell from the video, Assign ›
+B24UI   148.3 PASS product row
+B24UI   151.5 PASS product view
+B24UI   153.9 videos in the product: 3
+B24UI   167.3 FAIL renamed · Hydrating Cleanser

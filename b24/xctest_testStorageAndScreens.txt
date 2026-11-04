@@ -1,5 +1,5 @@
-/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:435: error: -[CutSellUITests.Build24UITests testStorageAndScreens] : Failed to tap "prefStorage" Any: No matches found for first query match sequence: `Descendants matching type Any` -> `Elements matching predicate '"prefStorage" IN identifiers'`, given input App element pid: 43923
-Test Case '-[CutSellUITests.Build24UITests testStorageAndScreens]' failed (71.451 seconds).
-Test Suite 'Build24UITests' failed at 2026-11-04 23:02:46.142.
-Test Suite 'CutSellUITests.xctest' failed at 2026-11-04 23:02:46.143.
-Test Suite 'Selected tests' failed at 2026-11-04 23:02:46.145.
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:435: error: -[CutSellUITests.Build24UITests testStorageAndScreens] : Failed to tap "prefStorage" Any: No matches found for first query match sequence: `Descendants matching type Any` -> `Elements matching predicate '"prefStorage" IN identifiers'`, given input App element pid: 39011
+Test Case '-[CutSellUITests.Build24UITests testStorageAndScreens]' failed (79.648 seconds).
+Test Suite 'Build24UITests' failed at 2026-11-04 23:40:06.945.
+Test Suite 'CutSellUITests.xctest' failed at 2026-11-04 23:40:06.946.
+Test Suite 'Selected tests' failed at 2026-11-04 23:40:06.948.
