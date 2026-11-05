@@ -233,6 +233,7 @@ def process_with_simple_engine(
     timeline_captions: list[dict] = []
     zoom_keyframes: list[ZoomKeyframe] = []
     timeline_offset = 0.0
+    spoken: list = []              # (source, words, duration) of every source that has speech
     total = len(sources)
 
     # Prompt cache for every video (PO 2026-10-22): 1 hour while few videos are being cut, else 5 minutes.
@@ -249,6 +250,7 @@ def process_with_simple_engine(
             words = [w for w in heard.get("words", []) if float(w["e"]) > float(w["s"])]
             if not words:
                 raise NoSpeechError(f"no speech found in source {source.source_asset_id}")
+            spoken.append((source, words, duration))
             # PO 2026-10-29: a video with only a little speech (a few words, quiet, or the rest silent) is no longer
             # refused: the cut keeps the words that were said and drops the rest. Only a video with no words at all
             # is "no speech". The two old checks are kept as a note in the diagnostics.
@@ -308,6 +310,27 @@ def process_with_simple_engine(
                 "zoom_moments": zoom_log,
             })
 
+    kept_spoken_part = False
+    if not selected and spoken:
+        # PO 5 Nov 2026 (a 2 s clip came back as "No pudimos terminar este corte"): when the engine keeps nothing of
+        # a video that HAS speech, the cut keeps the part where she talks (first word to last word) instead of
+        # failing -- "cut where the audio ends, never an error because there is audio" (PO 29 Oct). WHEN UNCERTAIN,
+        # KEEP. A video with no words at all is still "no speech" (raised above).
+        kept_spoken_part = True
+        offset = 0.0
+        for source, words, duration in spoken:
+            start = max(0.0, float(words[0]["s"]) - 0.15)
+            end = min(float(duration), float(words[-1]["e"]) + 0.35) if duration else float(words[-1]["e"]) + 0.35
+            if end <= start:
+                continue
+            selected.append(_clip(clip_id=f"se-{source.source_order:03d}-0001", source=source,
+                                  split={"start": start, "end": end}, words=words, selected=True))
+            timeline_captions.extend({"w": w["w"], "s": round(float(w["s"]) - start + offset, 3),
+                                      "e": round(float(w["e"]) - start + offset, 3)} for w in words)
+            offset += end - start
+        for item in per_source:
+            item["little_speech"] = True
+            item["kept_spoken_part"] = True
     if not selected:
         raise ValueError("simple engine kept no content")
 
@@ -317,6 +340,7 @@ def process_with_simple_engine(
         "engine_version": ENGINE_VERSION,
         # The app shows "Almost no voice in this video, check the cut" when this is true (PO 2026-10-29).
         "little_speech": any(item.get("little_speech") for item in per_source),
+        "kept_spoken_part": kept_spoken_part,
         "simple_engine": {
             "model": _llm.model_name(),
             "asr": "deepgram-nova-3",

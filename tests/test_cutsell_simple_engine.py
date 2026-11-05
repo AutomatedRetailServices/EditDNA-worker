@@ -1171,3 +1171,28 @@ def test_g02_the_two_words_the_cut_lost_are_kept_by_the_fix():
     mira = next(d for d in g02["decisions"] if d["s"] == 18.62)
     covered = max(0.0, min(mira["e"], splits[0]["end"]) - mira["s"]) / (mira["e"] - mira["s"])
     assert mira["mark"] == "keep" and covered >= 0.9
+
+
+def test_adapter_keeps_the_spoken_part_when_the_engine_keeps_nothing(video, monkeypatch):
+    """PO 5 Nov: a 2 s clip with a few words came back as "No pudimos terminar este corte" (ValueError "kept no
+    content"). A video that HAS speech never fails for that: the cut keeps first word to last word."""
+    real = simple_engine_adapter._process
+
+    def nothing_kept(words, duration, *a, **k):
+        out = real(words, duration, *a, **k)
+        out["splits"] = [{**sp, "visible": False} for sp in out["splits"]]
+        out["captions"], out["cut_duration"] = [], 0.0
+        return out
+
+    monkeypatch.setattr(simple_engine_adapter, "_process", nothing_kept)
+    result = simple_engine_adapter.process_with_simple_engine(
+        _request({"s1": video}), {"s1": video}, transcribe=_fake_transcribe, llm=FakeLLM())
+    draft = result.draft
+    words = _fake_transcribe(video)["words"]
+    assert len(draft.selected) == 1
+    clip = draft.selected[0]
+    assert clip.start <= float(words[0]["s"]) and clip.end >= float(words[-1]["e"])
+    assert len(clip.words) == len(words)
+    assert draft.diagnostics["kept_spoken_part"] is True and draft.diagnostics["little_speech"] is True
+    caps = draft.diagnostics["simple_engine"]["captions"]
+    assert len(caps) == len(words) and caps[0]["s"] >= 0
