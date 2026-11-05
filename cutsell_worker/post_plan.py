@@ -186,8 +186,16 @@ def candidates(user_id: str, projects: list[dict], *, client=None, plan: dict | 
     by_id = {str(p.get("project_id")): p for p in projects}
     ids = [v["project_id"] for v in out if not v.get("mix_id")]
     prints = recordings(user_id, ids, client=client, versions={pid: _draft_version(by_id.get(pid) or {}) for pid in ids})
-    week_ids = {s.get("project_id") for s in (plan.get("week") or {}).get("slots") or []}
-    return one_per_recording(out, prints, prefer=week_ids)
+    slots = (plan.get("week") or {}).get("slots") or []
+    week_ids = {s.get("project_id") for s in slots}
+    chosen = one_per_recording(out, prints, prefer=week_ids)
+    # PO 4 Nov ("estoy seleccionando varios videos y no están"): a cut SHE put on a day (pinned) is hers to post,
+    # even when another cut of the same recording is planned too. One cut per recording stays the rule only for
+    # the videos the week picks by itself.
+    pinned = {s.get("project_id") for s in slots if s.get("pinned")}
+    have = {v["project_id"] for v in chosen}
+    chosen += [v for v in out if v["project_id"] in pinned and v["project_id"] not in have]
+    return chosen
 
 
 # ---------------------------------------------------------------- one cut per recording

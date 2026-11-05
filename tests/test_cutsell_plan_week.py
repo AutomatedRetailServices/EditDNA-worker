@@ -442,3 +442,25 @@ def test_recording_prints_are_kept_and_read_again_only_for_a_new_cut(r):
     project_store.update_project(user_id="u1", project_id=ids["single1"], latest_job_id="job_new")
     post_plan.view("u1", _projects())
     assert reads["n"] <= 1          # only the re-cut video's draft was read again
+
+
+def test_cuts_she_chooses_stay_even_if_they_share_a_recording(monkeypatch, r):
+    """PO 4 Nov: she chose several cuts of the same recording in Week Plan; the week kept one and dropped the rest
+    silently. A cut she puts on a day (pinned) stays on that day; one cut per recording only for what the week picks."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from cutsell_app import plan_routes
+    monkeypatch.setattr(plan_routes, "_caption_missing", lambda user, view: None)
+    cuts = [_video("u1", f"cut{i}") for i in range(3)]
+    for pid in cuts:                                   # three cuts of ONE recording (same length, same first words)
+        r.set(draft_store.draft_key(user_id="u1", project_id=pid), json.dumps({"sources": [{"duration_sec": 30}],
+              "draft": {"selected": [{"source_order": 0, "start": 0, "words": [{"text": w, "start": i} for i, w in
+                                                                              enumerate("hola esto es una prueba".split())]}]}}))
+    assert len(post_plan.candidates("u1", _projects())) == 1          # the week by itself: one cut per recording
+    app = FastAPI(); app.include_router(plan_routes.router)
+    client = TestClient(app)
+    items = [{"project_id": pid, "date": "2026-11-05", "time": t} for pid, t in zip(cuts, ["9:00", "12:00", "15:00"])]
+    view = client.post("/v1/plan/schedule", json={"user_id": "u1", "items": items, "times": ["09:00", "12:00", "15:00"],
+                                                   "days": [0, 1, 2, 3, 4, 5, 6], "start": "2026-11-05", "count": 3}).json()
+    shown = {s["project_id"]: (s["date"], s["time"]) for s in view["week"]["slots"]}
+    assert shown == {cuts[0]: ("2026-11-05", "09:00"), cuts[1]: ("2026-11-05", "12:00"), cuts[2]: ("2026-11-05", "15:00")}
