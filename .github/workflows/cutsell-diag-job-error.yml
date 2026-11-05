@@ -1,0 +1,32 @@
+name: CutSell diag · why a cut stopped (one-off, 5 Nov)
+
+# Read-only: runs ops/diag_job_error.py once on Modal (ephemeral, nothing deployed). Prints numbers only.
+# Cost: under a cent (one tiny container, no AI calls).
+
+on:
+  push:
+    branches: [perf/diagnostico]
+    paths: [ops/diag_job_error.py, .github/workflows/cutsell-diag-plan-sync.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/simple-engine-v1
+      - uses: actions/checkout@v4
+        with:
+          path: diag
+      - name: Run the diagnosis on Modal
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          pip install -q modal
+          cp diag/ops/diag_job_error.py ./diag_job_error.py
+          modal run diag_job_error.py
