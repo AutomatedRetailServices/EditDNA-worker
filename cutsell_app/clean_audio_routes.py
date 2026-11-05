@@ -96,13 +96,14 @@ def start_clean_audio(project_id: str, payload: CleanAudioRequest, request: Requ
     current = _status(payload.user_id, project_id, payload.target, payload.id, redis)
     if current["status"] in ("ready", "cleaning"):
         return current
-    from cutsell_worker.queueing import enqueue_clean_audio
+    from cutsell_worker.queueing import enqueue_clean_audio, guard
     import time
+    guard(payload.user_id, "clean_audio")          # before "queued" is written (429 leaves no stuck status)
     audio_clean.write_status(redis, user_id=payload.user_id, project_id=project_id, target=payload.target,
                              ident=payload.id, state="queued", progress=0, queued_at=time.time(),
                              updated_at=time.time(), error=None)
     submission = enqueue_clean_audio({"user_id": payload.user_id, "project_id": project_id,
-                                      "target": payload.target, "id": payload.id})
+                                      "target": payload.target, "id": payload.id}, kind=None)
     return {"status": "cleaning", "progress": 0, "job_id": submission.job_id}
 
 

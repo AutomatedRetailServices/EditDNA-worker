@@ -61,6 +61,15 @@ from cutsell_worker.uploads import (
 )
 
 app = FastAPI(title="CutSell API", version="0.1.0")
+
+
+@app.exception_handler(ProcessingLimitError)
+async def _processing_limit(_request, exc: ProcessingLimitError):
+    """PO 5 Nov: any route that queues paid work answers 429 when a limit is reached (the app retries later)."""
+    from fastapi.responses import JSONResponse
+    return JSONResponse(status_code=429, content={"detail": str(exc)}, headers={"Retry-After": "60"})
+
+
 app.add_middleware(AuthScopeMiddleware)
 app.include_router(auth_router)
 app.include_router(multipart_router)
@@ -421,7 +430,7 @@ def video_ready(project_id: str, payload: VideoReadyRequest):
         from cutsell_worker.queueing import enqueue_mix
         record = mix_store.load(payload.user_id, project_id)
         if record.get("state") in ("waiting_for_videos", "ready", "needs_retry"):
-            submission = enqueue_mix({"user_id": payload.user_id, "mix_id": project_id})
+            submission = enqueue_mix({"user_id": payload.user_id, "mix_id": project_id}, kind="video_ready")
             return {"job_id": submission.job_id, "queue": submission.queue_name}
         mix_store.update(payload.user_id, project_id, lambda d: d.update(rerun=True))
         return {"job_id": None, "queue": "mix"}

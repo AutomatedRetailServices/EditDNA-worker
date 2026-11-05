@@ -593,6 +593,11 @@ def run_flow_b_job(payload: dict) -> dict:
                 measured_seconds += max(0.0, float(probe.duration_sec))
                 publish("preparing", min(10, 2 + int((index + 1) * 8 / len(request.sources))))
 
+            # PO 5 Nov (security review): the REAL lengths, measured just above, are checked before anything paid
+            # (speech-to-text, AI) runs. The phone's declared length is no longer the only check.
+            from .usage_limits import check_measured
+            check_measured(user_id=request.user_id, durations_sec=list(measured_by_source.values()))
+
             downloaded_paths = dict(local_paths)
             # The video format gate is for videos; a voice-only source skips it (its video is checked
             # by the follow-up job when it arrives).

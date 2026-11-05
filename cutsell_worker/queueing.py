@@ -6,7 +6,7 @@ import threading
 from dataclasses import dataclass
 
 from .config import load_runtime_config
-from .usage_limits import release_processing_slot, reserve_processing_slot
+from .usage_limits import bulk_counter, release_processing_slot, reserve_processing_slot, work_gate
 from .worker_wake import wake_worker
 
 
@@ -33,17 +33,37 @@ class ProcessingLimitError(RuntimeError):
     """The user already has as many cuts processing as allowed (API answers 429, the app retries later)."""
 
 
-def bulk_extra_slots(payload: dict) -> int:
+def bulk_extra_slots(payload: dict, *, client=None) -> int:
     """A Bulk send's videos run side by side (Batch API: up to 30 min each), so the send gets one slot per video,
-    at most BULK_MAX_VIDEOS. Single / Combine: 0."""
-    size = 0
+    at most BULK_MAX_VIDEOS. Single / Combine: 0.
+
+    PO 5 Nov (security review): the phone's "bulk_size" is no longer believed on its own. The server counts the
+    videos it has received for that Bulk (its bulk_id): the Nth video of a send may use N slots, never more than
+    the size the phone announced, never more than BULK_MAX_VIDEOS. One request claiming "Bulk of 10" gets 1."""
+    size, bulk_id = 0, ""
     for src in payload.get("sources") or []:
         meta = (src or {}).get("metadata") or {}
         try:
             size = max(size, int(str(meta.get("bulk_size") or "0")))
         except ValueError:
             continue
-    return max(0, min(size, BULK_MAX_VIDEOS) - 1)
+        bulk_id = bulk_id or str(meta.get("bulk_id") or "")
+    if size <= 1:
+        return 0
+    received = bulk_counter(user_id=str(payload.get("user_id") or ""), bulk_id=bulk_id, client=client) \
+        if payload.get("user_id") and bulk_id else None
+    if received is None:
+        received = size              # no counter reachable: no slot limit is enforced without Redis either
+    return max(0, min(received, size, BULK_MAX_VIDEOS) - 1)
+
+
+def guard(user_id: str, kind: str) -> None:
+    """The one gate for paid work (usage_limits.work_gate): raises ProcessingLimitError (API: 429)."""
+    if not kind:
+        return
+    reason = work_gate(user_id=str(user_id or ""), kind=kind)
+    if reason:
+        raise ProcessingLimitError(reason)
 
 
 def enqueue_flow_b(payload: dict, *, queue=None, timeout: int = 3600) -> QueueSubmission:
@@ -79,8 +99,9 @@ def enqueue_flow_b(payload: dict, *, queue=None, timeout: int = 3600) -> QueueSu
         raise
 
 
-def enqueue_video_followup(payload: dict, *, queue=None, timeout: int = 1200) -> QueueSubmission:
+def enqueue_video_followup(payload: dict, *, queue=None, kind: str | None = "video_ready", timeout: int = 1200) -> QueueSubmission:
     """Audio first (iOS build 23): the video of an audio-first source finished uploading."""
+    guard(str(payload.get("user_id") or ""), kind)
     target = queue or get_queue()
     job = target.enqueue(
         "cutsell_worker.worker_job.run_video_followup_job",
@@ -94,8 +115,9 @@ def enqueue_video_followup(payload: dict, *, queue=None, timeout: int = 1200) ->
     return QueueSubmission(job_id=str(job.id), queue_name=str(getattr(target, "name", "cutsell")))
 
 
-def enqueue_mix(payload: dict, *, queue=None, timeout: int = 3600) -> QueueSubmission:
+def enqueue_mix(payload: dict, *, queue=None, kind: str | None = "mix", timeout: int = 3600) -> QueueSubmission:
     """One job for a whole Mix (cutsell_worker.mix_job). Started again by video-ready / retry: it is resumable."""
+    guard(str(payload.get("user_id") or ""), kind)
     target = queue or get_queue()
     job = target.enqueue(
         "cutsell_worker.mix_job.run_mix_job",
@@ -119,7 +141,8 @@ def enqueue_captions(payload: dict, *, queue=None, timeout: int = 900) -> QueueS
     return QueueSubmission(job_id=str(job.id), queue_name=str(getattr(target, "name", "cutsell")))
 
 
-def enqueue_export(payload: dict, *, queue=None, timeout: int = 3600) -> QueueSubmission:
+def enqueue_export(payload: dict, *, queue=None, kind: str | None = "export", timeout: int = 3600) -> QueueSubmission:
+    guard(str(payload.get("user_id") or ""), kind)
     target = queue or get_queue()
     job = target.enqueue(
         "cutsell_worker.export_job.run_export_job",
@@ -180,8 +203,9 @@ def enqueue_unseen_clean_cut_benchmark(
     return QueueSubmission(job_id=str(job.id), queue_name=str(getattr(target, "name", "cutsell")))
 
 
-def enqueue_clean_audio(payload: dict, *, queue=None, timeout: int = 1800) -> QueueSubmission:
+def enqueue_clean_audio(payload: dict, *, queue=None, kind: str | None = "clean_audio", timeout: int = 1800) -> QueueSubmission:
     """Editor v5 Clean up voice: make the cleaned copy of one sound on the worker (audio_clean)."""
+    guard(str(payload.get("user_id") or ""), kind)
     target = queue or get_queue()
     job = target.enqueue(
         "cutsell_worker.audio_clean.run_clean_audio_job",

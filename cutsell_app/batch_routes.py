@@ -83,6 +83,8 @@ def create_batch_job(payload: BatchCreateRequest):
             if project.dialogue_overlap_enabled is not None:
                 processing_payload["dialogue_overlap_enabled"] = project.dialogue_overlap_enabled
             processing_payloads.append(processing_payload)
+        from cutsell_worker.queueing import guard
+        guard(payload.user_id, "batch")
         record = create_batch(user_id=payload.user_id, payloads=processing_payloads)
         submission = enqueue_batch_item(
             batch_id=record["batch_id"], user_id=payload.user_id, index=0

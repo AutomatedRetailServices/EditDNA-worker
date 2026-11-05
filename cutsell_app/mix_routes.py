@@ -122,9 +122,11 @@ def start(payload: MixJobRequest):
 
 
 def _enqueue(user_id: str, mix_id: str):
-    from cutsell_worker.queueing import enqueue_mix
+    from cutsell_worker.queueing import ProcessingLimitError, enqueue_mix
     try:
         return enqueue_mix({"user_id": user_id, "mix_id": mix_id})
+    except ProcessingLimitError as exc:
+        raise HTTPException(status_code=429, detail=str(exc), headers={"Retry-After": "60"}) from None
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from None
 

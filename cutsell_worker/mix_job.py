@@ -23,6 +23,7 @@ from types import SimpleNamespace
 from typing import Callable, Optional
 
 from . import mix_engine as engine
+from .usage_limits import MAX_SOURCE_SECONDS
 from . import mix_store as store
 
 _LOG = logging.getLogger("cutsell.mix_job")
@@ -149,10 +150,13 @@ def _clean_phase(user_id, mix_id, record, deps, work: Path) -> dict:
         try:
             uri = clip.get("audio_uri") or clip["uri"]
             local = deps.fetch(uri, str(work / f"{cid}-voice{Path(uri).suffix or '.m4a'}"))
-            audio = deps.extract_audio(local, str(work / f"{cid}.mp3"))
-            heard = deps.transcribe(audio)
             from .media_probe import probe_media
             duration = float(probe_media(local).duration_sec)
+            # PO 5 Nov (security review): the clip's REAL length is checked before anything paid hears it.
+            if duration > MAX_SOURCE_SECONDS:
+                return cid, {"error": "clip_too_long"}
+            audio = deps.extract_audio(local, str(work / f"{cid}.mp3"))
+            heard = deps.transcribe(audio)
             words = [w for w in heard.get("words", []) if float(w["e"]) > float(w["s"])]
             return cid, {"audio": audio, "duration": duration, "words": words, "language": heard.get("language")}
         except Exception as exc:
