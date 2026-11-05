@@ -63,8 +63,20 @@ def diagnose():
     meta = plan["videos"]
     lost = [pid for pid, v in meta.items() if v.get("scheduled_for") and pid not in stored_ids]
     print(f"scheduled_for set but not in the week: {len(lost)} (not candidates: {len([p for p in lost if p not in cand_ids])})")
+    # Same answer without the per-cut print cache (fresh from every draft)?
+    ready_cands = [p for p in projects if p.get("state") == "draft_ready" and str(p["project_id"]) not in personal]
+    ids_fresh = [str(p["project_id"]) for p in ready_cands]
+    fresh = post_plan.recordings(user, ids_fresh, client=r)          # no versions -> no cache
+    groups = []
+    for pid in ids_fresh:
+        fp = fresh.get(pid) or []
+        home = next((g for g in groups if fp and fresh.get(g[0]) and post_plan.same_recording(fresh[g[0]], fp)), None)
+        if home: home.append(pid)
+        else: groups.append([pid])
+    sizes = sorted((len(g) for g in groups), reverse=True)
+    print(f"fresh prints: {len(ids_fresh)} ready non-personal cuts in {len(groups)} recordings; group sizes {sizes}")
+    print(f"cuts with no print (no draft words): {sum(1 for pid in ids_fresh if not fresh.get(pid))}")
     print("lost by scheduled day:", dict(sorted(collections.Counter(meta[p]['scheduled_for'][:10] for p in lost).items())))
-
 
 @app.local_entrypoint()
 def main():
