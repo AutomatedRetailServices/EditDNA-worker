@@ -22,7 +22,7 @@ permissions:
 
 jobs:
   testflight:
-    runs-on: macos-latest
+    runs-on: macos-15-intel   # arm64 macOS runners unavailable
     timeout-minutes: 75
     env:
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
