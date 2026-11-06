@@ -36,15 +36,21 @@ def verify_apple_identity_token(
     import jwt
     from jwt import PyJWKClient
 
-    signing_key = PyJWKClient(APPLE_JWKS_URL).get_signing_key_from_jwt(token)
-    claims: dict[str, Any] = jwt.decode(
-        token,
-        signing_key.key,
-        algorithms=["RS256"],
-        audience=audience,
-        issuer=APPLE_ISSUER,
-        options={"require": ["exp", "iat", "iss", "aud", "sub"]},
-    )
+    from jwt.exceptions import PyJWKClientConnectionError, PyJWTError
+    try:
+        signing_key = PyJWKClient(APPLE_JWKS_URL).get_signing_key_from_jwt(token)
+        claims: dict[str, Any] = jwt.decode(
+            token,
+            signing_key.key,
+            algorithms=["RS256"],
+            audience=audience,
+            issuer=APPLE_ISSUER,
+            options={"require": ["exp", "iat", "iss", "aud", "sub"]},
+        )
+    except PyJWKClientConnectionError as exc:      # Apple's keys unreachable: "try again" (503)
+        raise RuntimeError("Apple sign-in keys unreachable") from exc
+    except PyJWTError as exc:                        # a bad, expired or foreign token: rejected (401)
+        raise PermissionError(f"Apple identity token rejected: {exc.__class__.__name__}") from exc
     if nonce is not None and str(claims.get("nonce") or "") != str(nonce):
         raise PermissionError("Apple nonce mismatch")
     subject = str(claims.get("sub") or "").strip()

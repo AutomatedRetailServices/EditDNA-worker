@@ -176,3 +176,12 @@ def test_logout_route(client, redis):
     assert client.post("/v1/auth/logout", headers={"Authorization": f"Bearer {session['access_token']}"}).json() == {
         "status": "signed_out"}
     assert client.post("/v1/auth/logout").status_code == 401
+
+
+def test_a_malformed_apple_token_is_rejected_not_reported_as_an_outage(monkeypatch):
+    """6 Nov 2026: with the client id set, a broken token must answer 401, not 503 'unavailable'."""
+    import pytest as _pytest
+    from cutsell_worker import apple_auth
+    monkeypatch.setenv("CUTSELL_APPLE_CLIENT_ID", "ai.cutsell.app")
+    with _pytest.raises(PermissionError):
+        apple_auth.verify_apple_identity_token("x.y.z")
