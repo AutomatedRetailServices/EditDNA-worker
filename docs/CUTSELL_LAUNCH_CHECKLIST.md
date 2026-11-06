@@ -27,7 +27,7 @@ Last updated 6 Nov 2026.
    per component, repo private, 2FA, provider spend caps).
 
 ## Already done
-- 6 Nov 2026 (server LIVE at 6e2a2b9; app part on build/privacy-create = build 73, pending): product AI skipped when
+- 6 Nov 2026 (server LIVE at 6e2a2b9; app = build 73 on TestFlight, also soft Record/Upload): product AI skipped when
   the product is picked, photo step off; complete account deletion (every project, every record, every storage
   drawer in both buckets, AI answers; "partial" never reported as deleted); AI answers remembered 30 days per
   creator (same video, same cut, no repeat cost); privacy policy and AI notice say words only; soft Create bubbles.
