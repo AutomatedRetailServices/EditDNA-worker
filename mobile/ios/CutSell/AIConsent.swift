@@ -95,7 +95,7 @@ struct AIConsentSheet: View {
                 .font(CS.inter(15)).foregroundStyle(CS.textSecondaryF)
             VStack(alignment: .leading, spacing: 10) {
                 row("Deepgram", "turns the speech in your video's audio into text.")
-                row("Anthropic (Claude)", "reads that text to pick your best takes. It does not receive the video or the audio.")
+                row("Anthropic (Claude)", "reads that text to pick your best takes and, if you did not pick a product, to suggest one. It never receives the video, the audio or any picture from it.")
             }
             Text(L10n.tr("No other AI service receives your content. Cloudflare and Amazon Web Services store your videos, and Modal renders your cut."))
                 .font(CS.inter(13)).foregroundStyle(CS.textSecondaryF).fixedSize(horizontal: false, vertical: true)

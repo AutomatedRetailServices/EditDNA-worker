@@ -155,7 +155,7 @@ struct HomeHubView: View {
                     .frame(width: 22, height: 22)
                     .foregroundStyle(CS.accent)
                     .frame(width: 58, height: 58)
-                    .puff3D(.white, in: Circle())
+                    .softPuff(.white, in: Circle())   // PO 6 Nov: the Create bubbles in the same soft style
                 Text(L10n.tr(title))
                     .font(CS.inter(11, .semibold))
                     .foregroundStyle(CS.wiInk)

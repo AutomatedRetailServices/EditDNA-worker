@@ -60,7 +60,9 @@ struct AppleSignInButton: View {
             Task {
                 defer { isWorking = false }
                 do {
-                    try await appState.signInWithApple(identityToken: identityToken, nonce: nonce)
+                    // The one-time code lets the server cancel this Apple sign-in when she deletes her account.
+                    let code = credential.authorizationCode.flatMap { String(data: $0, encoding: .utf8) }
+                    try await appState.signInWithApple(identityToken: identityToken, nonce: nonce, authorizationCode: code)
                     if let name, !name.isEmpty { await AccountProfile.shared.setName(name, session: appState.session) }
                     await AccountProfile.shared.refresh(session: appState.session)
                     onSignedIn()

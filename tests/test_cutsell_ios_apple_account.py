@@ -14,7 +14,7 @@ def test_apple_sign_in_is_not_hidden_behind_a_flag():
     state = read("AppState.swift")
     assert "cutsell.auth.apple.enabled" not in state
     assert "persistentAppleAuthEnabled" not in state
-    assert "func signInWithApple(identityToken: String, nonce: String?)" in state
+    assert "func signInWithApple(identityToken: String, nonce: String?, authorizationCode: String? = nil)" in state
 
 
 def test_button_uses_hashed_nonce_and_apple_button():
@@ -22,7 +22,8 @@ def test_button_uses_hashed_nonce_and_apple_button():
     assert "SignInWithAppleButton(.signIn)" in button
     assert "request.nonce = hashedNonce" in button
     assert "AppleNonce.sha256(AppleNonce.random())" in button
-    assert "appState.signInWithApple(identityToken: identityToken, nonce: nonce)" in button
+    assert "appState.signInWithApple(identityToken: identityToken, nonce: nonce, authorizationCode: code)" in button
+    assert "credential.authorizationCode" in button
 
 
 def test_guest_session_goes_with_the_apple_request():

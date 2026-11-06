@@ -874,7 +874,10 @@ struct AccountPage: View {
         .confirmationDialog(L10n.tr("Delete CutSell account?"), isPresented: $showingDelete, titleVisibility: .visible) {
             Button(L10n.tr("Delete My Account"), role: .destructive) {
                 Task {
-                    do { try await appState.deleteAccount(); profile.clear() } catch { errorMessage = error.localizedDescription }
+                    do { try await appState.deleteAccount(); profile.clear() } catch {
+                        // PO 6 Nov: the server never says "deleted" until everything is gone; asking again finishes it.
+                        errorMessage = "Your account isn't fully deleted yet. Tap Delete My Account again to finish."
+                    }
                 }
             }
             Button(L10n.tr("Cancel"), role: .cancel) {}

@@ -65,8 +65,9 @@ final class AppState: ObservableObject {
 
     /// Sign in with Apple. If this phone was using a guest account, the server keeps its projects
     /// on the Apple account (the current guest session goes with the request).
-    func signInWithApple(identityToken: String, nonce: String?) async throws {
-        let value = try await api.createAppleSession(identityToken: identityToken, nonce: nonce)
+    func signInWithApple(identityToken: String, nonce: String?, authorizationCode: String? = nil) async throws {
+        let value = try await api.createAppleSession(identityToken: identityToken, nonce: nonce,
+                                                     authorizationCode: authorizationCode)
         let current = CutSellSession(userID: value.userID, accessToken: value.accessToken, accountProvider: "apple")
         try KeychainStore.save(current)
         needsSignIn = false

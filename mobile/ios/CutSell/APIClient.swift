@@ -48,15 +48,17 @@ actor APIClient {
 
     /// Sends the current guest session (if any) with the request, so the server can keep the
     /// guest's projects on the Apple account the first time this phone signs in with Apple.
-    func createAppleSession(identityToken: String, nonce: String?) async throws -> SessionResponse {
+    func createAppleSession(identityToken: String, nonce: String?,
+                            authorizationCode: String? = nil) async throws -> SessionResponse {
         struct Body: Encodable {
             let identity_token: String
             let nonce: String?
+            let authorization_code: String?
         }
         let value: SessionResponse = try await request(
             "/v1/auth/apple",
             method: "POST",
-            body: Body(identity_token: identityToken, nonce: nonce)
+            body: Body(identity_token: identityToken, nonce: nonce, authorization_code: authorizationCode)
         )
         self.session = CutSellSession(userID: value.userID, accessToken: value.accessToken, accountProvider: "apple")
         return value

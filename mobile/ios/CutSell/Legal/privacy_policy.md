@@ -28,7 +28,7 @@ We use your data only to run CutSell:
 CutSell uses two AI services, and only these two:
 
 - **Deepgram:** speech to text. It receives the audio of your videos.
-- **Anthropic (Claude):** AI that helps choose the best takes and places captions and zooms. It receives the transcript of your videos, not the video or the audio.
+- **Anthropic (Claude):** AI that helps choose the best takes, places captions and zooms, and, only when you did not pick a product yourself, suggests which product a video is about. It receives the transcript of your videos, not the video, the audio or any picture from it. When you pick the brand and product yourself, the AI is not asked.
 
 No other AI service receives your content. No AI service receives your photos, the video picture or your voice-overs.
 
@@ -45,7 +45,7 @@ You are asked to agree to this before your first cut is processed. Nothing is pr
 
 ## How long we keep it
 
-We keep your videos, edits and exports while your account exists, so you can come back to your cuts. You can delete a cut at any time. When you delete your account, we delete your cuts, the media you uploaded and your exports from our servers, including any copies kept in our older storage.
+We keep your videos, edits and exports while your account exists, so you can come back to your cuts. You can delete a cut at any time. The AI's answer for a video is kept for up to 30 days, so the same video gives the same cut again. When you delete your account, we delete everything in it from our servers: your cuts, the media you uploaded, your exports, your products, Mixes and plans, and the AI's answers, including any copies kept in our older storage. Copies inside our automatic server backups expire on their own within 30 days.
 
 ## Delete your account
 
