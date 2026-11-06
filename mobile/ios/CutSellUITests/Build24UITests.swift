@@ -128,6 +128,7 @@ final class Build24UITests: XCTestCase {
         guard style.waitForExistence(timeout: 10) else { check(false, "style sheet"); return false }
         style.tap()
         if wait(20, until: { self.element("aiConsentAgree").exists || self.app.buttons["Agree"].exists }) {
+            shot("ai_consent")
             (element("aiConsentAgree").exists ? element("aiConsentAgree") : app.buttons["Agree"]).tap()
         }
         return true
