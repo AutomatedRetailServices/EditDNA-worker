@@ -281,6 +281,9 @@ def delete_account_data(*, user_id: str, redis_client=None, s3_client=None,
         pipe.delete(mix_key(user_id, mix_id))
     for key in redis_client.scan_iter(match=f"cutsell:v1:batch:{_scope20(user_id)}:*"):
         pipe.delete(key)
+    from .simple_engine.llm import memory_pattern
+    for key in redis_client.scan_iter(match=memory_pattern(user_id)):      # remembered AI answers (6 Nov)
+        pipe.delete(key)
     pipe.execute()
 
     durable = {"status": "not_configured"}

@@ -261,7 +261,7 @@ def process_with_simple_engine(
             # A voice-only source (audio first) has no picture yet: no shot-change snap for its first cut.
             voice_only = bool(audio_only) and source.source_asset_id in audio_only
             # Bulk (PO 2026-10-23): the calls go through the Batch API (50 %), never more than 30 min of waiting.
-            with _llm.cache_scope(True, ttl=cache_ttl), _llm.batch_scope(bulk):
+            with _llm.cache_scope(True, ttl=cache_ttl), _llm.batch_scope(bulk), _llm.memory_owner(request.user_id):
                 out = _process(words, duration, path, video_path=None if voice_only else path,
                                scene_cut_list=[] if voice_only else None, llm=llm)
             notify("composing", base + int(70 / total))

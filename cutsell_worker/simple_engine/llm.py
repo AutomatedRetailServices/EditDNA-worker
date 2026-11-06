@@ -308,3 +308,81 @@ def call_anthropic(prompt, *, max_tokens: int = 16000, attempts: int = 4) -> tup
         if attempt < attempts - 1:
             time.sleep(5 * (attempt + 1))
     raise RuntimeError(f"Anthropic call failed: {last}")
+
+
+# --- Remembered answers (PO 6 Nov 2026) -----------------------------------------------------------------------------
+# The same video (same words, same instructions, same model and effort) gets the same answer: the first answer is kept
+# for 30 days and reused instead of asking the model again. Same input -> same cut, and the repeat costs nothing.
+# Kept per creator (deleted with her account). CUTSELL_SIMPLE_ENGINE_REMEMBER=0 turns it off without a redeploy.
+
+MEMORY_TTL_SEC = 30 * 24 * 3600
+_MEMORY_OWNER: contextvars.ContextVar = contextvars.ContextVar("cutsell_simple_engine_memory_owner", default="")
+
+
+def memory_enabled() -> bool:
+    return os.environ.get("CUTSELL_SIMPLE_ENGINE_REMEMBER", "1").strip() != "0"
+
+
+def owner_scope(user_id: str) -> str:
+    import hashlib
+    return hashlib.sha256(str(user_id).encode()).hexdigest()[:20]
+
+
+@contextlib.contextmanager
+def memory_owner(user_id: str):
+    token = _MEMORY_OWNER.set(owner_scope(user_id) if user_id else "")
+    try:
+        yield
+    finally:
+        _MEMORY_OWNER.reset(token)
+
+
+def memory_pattern(user_id: str) -> str:
+    return f"cutsell:v1:llm-memory:{owner_scope(user_id)}:*"
+
+
+def _memory_key(prompt) -> str | None:
+    owner = _MEMORY_OWNER.get()
+    if not owner or not memory_enabled():
+        return None
+    import hashlib
+    fingerprint = json.dumps({"model": model_name(), "effort": effort_for(), "step": _STEP.get(),
+                              "schema": getattr(prompt, "schema", None), "prompt": str(prompt)}, sort_keys=True)
+    return f"cutsell:v1:llm-memory:{owner}:{hashlib.sha256(fingerprint.encode()).hexdigest()}"
+
+
+def _memory_client():
+    url = os.environ.get("REDIS_URL", "").strip()
+    if not url:
+        return None
+    from redis import Redis
+    return Redis.from_url(url, socket_timeout=2)
+
+
+def recall(prompt, *, client=None) -> str | None:
+    key = _memory_key(prompt)
+    if not key:
+        return None
+    try:
+        target = client or _memory_client()
+        raw = target.get(key) if target is not None else None
+    except Exception:
+        return None
+    return raw.decode("utf-8") if isinstance(raw, bytes) else raw
+
+
+def remember(prompt, text: str, *, client=None) -> None:
+    key = _memory_key(prompt)
+    if not key or not text:
+        return
+    try:
+        target = client or _memory_client()
+        if target is not None:
+            target.set(key, text, ex=MEMORY_TTL_SEC)
+    except Exception:
+        pass
+
+
+def remembered_usage() -> dict:
+    """Usage of an answer read from memory: no tokens, no cost."""
+    return {"step": _STEP.get(), "input_tokens": 0, "output_tokens": 0, "remembered": True}

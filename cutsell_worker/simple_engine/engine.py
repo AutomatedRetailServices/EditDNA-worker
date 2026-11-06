@@ -137,8 +137,19 @@ def _ask(call: LLMCall, tag: str, prompt, tries: int = 3, schema=None):
     for i in range(tries):
         run_tag = tag if i == 0 else f"{tag}-retry{i}"
         try:
-            text, usage = call(_llm.Prompt(fixed, own, f"\n(run {run_tag})", schema=schema))
-            return parse(text), [usage]
+            asked = _llm.Prompt(fixed, own, f"\n(run {run_tag})", schema=schema)
+            if i == 0:
+                kept = _llm.recall(asked)
+                if kept:
+                    try:
+                        return parse(kept), [_llm.remembered_usage()]
+                    except Exception:
+                        pass                          # unreadable memory: ask the model as usual
+            text, usage = call(asked)
+            decision = parse(text)
+            if i == 0:
+                _llm.remember(asked, text)
+            return decision, [usage]
         except Exception as exc:                      # malformed answer or transport error: ask again
             last = exc
     raise RuntimeError(f"engine answer unreadable after {tries} tries: {last}")
