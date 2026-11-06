@@ -1,15 +1,5 @@
-B24UI    40.7 PASS no avatar on Create
-B24UI    41.7 PASS no plan meter on Create
-B24UI    41.9 PASS no 'Create more' title
-B24UI    43.6 PASS hubRecord shown
-B24UI    45.2 PASS hubFaceless shown
-B24UI    48.2 PASS hubMix shown
-B24UI    49.6 PASS hubPlanWeek shown
-B24UI    50.8 PASS hubMode_single shown
-B24UI    58.3 PASS hubMode_bulk shown
-B24UI    61.9 PASS hubMode_combine shown
-/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:662: error: -[CutSellUITests.Build24UITests testCreateHub] : Failed to get list of active applications: Accessibility error kAXErrorIPCTimeout from AXUIElementCopyMultipleAttributeValues for 1102
-Test Case '-[CutSellUITests.Build24UITests testCreateHub]' failed (1386.699 seconds).
-Test Suite 'Build24UITests' failed at 2026-11-06 18:40:37.589.
-Test Suite 'CutSellUITests.xctest' failed at 2026-11-06 18:40:37.590.
-Test Suite 'Selected tests' failed at 2026-11-06 18:40:37.592.
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:105: error: -[CutSellUITests.Build24UITests testCreateHub] : Failed to get matching snapshots: Timed out while fetching snapshot from testmanagerd..
+Test Case '-[CutSellUITests.Build24UITests testCreateHub]' failed (532.613 seconds).
+Test Suite 'Build24UITests' failed at 2026-11-06 21:01:32.421.
+Test Suite 'CutSellUITests.xctest' failed at 2026-11-06 21:01:32.425.
+Test Suite 'Selected tests' failed at 2026-11-06 21:01:32.430.
