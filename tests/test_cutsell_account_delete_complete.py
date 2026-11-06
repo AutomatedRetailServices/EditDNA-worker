@@ -111,3 +111,28 @@ def test_apple_sign_in_is_revoked_at_deletion_when_the_key_is_configured(monkeyp
     assert auth.revoke_apple_token(user_id="u", client=r, post=post) == "revoked"
     assert calls[1][0] == apple_auth.APPLE_REVOKE_URL and calls[1][1]["token"] == "rt_1"
     assert not r.exists(auth.apple_refresh_key("u"))
+
+
+def test_every_file_in_her_drawers_is_deleted_even_without_a_project_record(r, monkeypatch):
+    from cutsell_worker.account_lifecycle import _user_prefixes
+
+    class S3:
+        def __init__(self, keys):
+            self.keys = list(keys)
+
+        def list_objects_v2(self, **kw):
+            return {"Contents": [{"Key": k} for k in self.keys if k.startswith(kw["Prefix"])], "IsTruncated": False}
+
+        def delete_objects(self, **kw):
+            for item in kw["Delete"]["Objects"]:
+                self.keys.remove(item["Key"])
+
+    mine = [p + "orphan_project/video.mp4" for p in _user_prefixes(user_id="usr_me")]
+    other = [p + "x/video.mp4" for p in _user_prefixes(user_id="usr_other")]
+    s3 = S3(mine + other)
+    monkeypatch.setattr(lifecycle, "load_runtime_config",
+                        lambda: SimpleNamespace(s3_bucket="cutsell-videos", aws_region="auto", redis_url="redis://x",
+                                                database_url=None))
+    out = lifecycle.delete_account_data(user_id="usr_me", redis_client=r, s3_client=s3)
+    assert out["status"] == "deleted" and sorted(s3.keys) == sorted(other)
+    assert any(p.startswith("cutsell/pending-review/") for p in _user_prefixes(user_id="usr_me"))

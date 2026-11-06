@@ -54,6 +54,17 @@ def _project_prefixes(*, user_id: str, project_id: str) -> tuple[str, ...]:
     )
 
 
+def _user_prefixes(*, user_id: str) -> tuple[str, ...]:
+    """Every storage "drawer" of one user (all her projects together). Account deletion empties these after the
+    project-by-project pass, so a project missing from the index, a Mix output or a pending-review render is not
+    left behind (PO 6 Nov 2026: when she deletes her account, everything goes and nothing can be recovered)."""
+    from .pending_watch_listen_review import PENDING_REVIEW_PREFIX
+    user16 = _scope16(user_id)
+    return tuple(f"{prefix}{user16}/" for prefix in (
+        upload_prefix(), OVERLAY_PREFIX, ASSET_PREFIX, EXPORT_PREFIX, FEEDBACK_PREFIX,
+        voice_over_upload_prefix(), PENDING_REVIEW_PREFIX))
+
+
 def _project_key_patterns(*, user_id: str, project_id: str) -> tuple[str, ...]:
     return (
         f"cutsell:v1:pending_watch_listen:{_scope20(user_id)}:{_scope20(project_id)}:*",
@@ -225,6 +236,24 @@ def delete_account_data(*, user_id: str, redis_client=None, s3_client=None,
         deleted_projects.append(project_id)
         deleted_objects += int(result.get("s3_objects_deleted") or 0)
         old_deleted += int(result.get("old_storage_objects_deleted") or 0)
+
+    # The whole drawer of each storage area, in the current and the old bucket (anything the pass above missed).
+    if not failed_projects:
+        try:
+            if config.s3_bucket:
+                if s3_client is None:
+                    import boto3
+                    s3_client = boto3.client("s3", region_name=config.aws_region or "us-east-1")
+                for prefix in _user_prefixes(user_id=user_id):
+                    deleted_objects += _delete_s3_prefix(s3_client, bucket=config.s3_bucket, prefix=prefix)
+            from . import storage_routing
+            fallback = storage_routing.fallback_storage()
+            if fallback is not None and fallback.bucket != config.s3_bucket:
+                old_client = old_storage_client or storage_routing.fallback_client_factory(fallback)
+                for prefix in _user_prefixes(user_id=user_id):
+                    old_deleted += _delete_s3_prefix(old_client, bucket=fallback.bucket, prefix=prefix)
+        except Exception as exc:
+            failed_projects.append({"project_id": "*storage*", "error": exc.__class__.__name__})
 
     if failed_projects:
         # Sessions stay alive so the app can ask again; nothing is reported as deleted when it is not.
