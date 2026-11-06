@@ -35,15 +35,24 @@ class FakeRedis:
     def scan_iter(self, match):
         return iter(())
 
+    def zrange(self, key, start, end):
+        return [b"prj_a"] if key.startswith("cutsell:v1:projects:") else []
+
+    def zrem(self, *a):
+        return 0
+
+    def type(self, key):
+        return b"none"
+
 
 def _setup(monkeypatch, fallback=True):
     monkeypatch.setattr(lifecycle, "load_runtime_config",
                         lambda: SimpleNamespace(s3_bucket="cutsell-videos", aws_region="auto",
                                                 redis_url="redis://x", database_url=None))
     monkeypatch.setattr(lifecycle, "get_project", lambda **k: {"project_id": k["project_id"]})
-    monkeypatch.setattr(lifecycle, "list_projects", lambda **k: [{"project_id": "prj_a"}])
     monkeypatch.setattr(lifecycle, "revoke_all_sessions", lambda **k: {"revoked": 1})
     monkeypatch.setattr(lifecycle, "delete_apple_binding", lambda **k: False)
+    monkeypatch.setattr(lifecycle, "revoke_apple_token", lambda **k: "not_configured")
     monkeypatch.setattr(lifecycle, "delete_project_timeline_assets", lambda **k: {"timeline_assets_deleted": 0})
     if fallback:
         monkeypatch.setenv("FALLBACK_S3_BUCKET", "old-amazon-bucket")

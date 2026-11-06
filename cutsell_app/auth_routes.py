@@ -25,6 +25,7 @@ router = APIRouter(prefix="/v1/auth", tags=["auth"])
 class AppleSessionRequest(BaseModel):
     identity_token: str
     nonce: str | None = None
+    authorization_code: str | None = None     # one-time; swapped for the token Apple needs us to revoke later
 
 
 class AccountDeleteRequest(BaseModel):
@@ -109,6 +110,12 @@ def create_apple_session(payload: AppleSessionRequest, request: Request):
             )
             durable_status = "written"
         session = create_session(user_id=user_id)
+        try:
+            from cutsell_worker.apple_auth import exchange_authorization_code
+            from cutsell_worker.auth import store_apple_refresh_token
+            store_apple_refresh_token(user_id=user_id, token=exchange_authorization_code(payload.authorization_code or ""))
+        except Exception as exc:                          # never blocks sign-in
+            capture_operational_event("auth.apple.code_exchange_failed", reason=exc.__class__.__name__)
         capture_operational_event("auth.apple.success", user_id=user_id, durable_status=durable_status, outcome=outcome)
         return {**session, "account_provider": "apple", "durable_status": durable_status,
                 "account_outcome": outcome, "guest_projects_not_merged": guest_projects_not_merged}
@@ -145,7 +152,12 @@ def delete_authenticated_account(payload: AccountDeleteRequest):
         raise HTTPException(status_code=409, detail="account deletion requires confirmation DELETE MY ACCOUNT")
     try:
         result = delete_account_data(user_id=payload.user_id)
-        capture_operational_event("account.deleted", user_id=payload.user_id)
-        return result
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from None
+    if result.get("status") == "partial":
+        # PO 6 Nov: never tell the creator her account is gone when some of it is not. The session stays valid,
+        # so asking again finishes the job (deletion is idempotent).
+        capture_operational_event("account.delete_partial", user_id=payload.user_id)
+        raise HTTPException(status_code=503, detail="account_deletion_incomplete_retry")
+    capture_operational_event("account.deleted", user_id=payload.user_id)
+    return result

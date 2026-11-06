@@ -125,6 +125,7 @@ def test_low_confidence_reads_two_frames_of_the_video(monkeypatch, tmp_path):
                      "evidence": "CeraVe FOAMING FACIAL CLEANSER", "product_moment_seconds": None}])
     sent = []
     monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setenv("CUTSELL_PRODUCT_PHOTO", "1")
     monkeypatch.setattr(tagging.requests, "post", lambda url, json=None, **k: sent.append(json) or _answer(next(answers)))
     out = tagging.tag(_draft(), [], video_path=str(video), duration=8.0)
     images = [c for c in sent[1]["messages"][0]["content"] if c["type"] == "image"]
@@ -136,6 +137,7 @@ def test_low_confidence_reads_two_frames_of_the_video(monkeypatch, tmp_path):
 
 def test_voice_only_asks_for_the_photo_later(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setenv("CUTSELL_PRODUCT_PHOTO", "1")
     monkeypatch.setattr(tagging.requests, "post", lambda *a, **k: _answer(
         {"brand": "Dior", "product": None, "category": None, "confidence": 0.4, "evidence": None,
          "product_moment_seconds": 3.0}))
@@ -208,3 +210,60 @@ def test_api_catalog_assign_rename(monkeypatch, r):
 def test_a_brand_not_read_on_the_label_is_dropped():
     assert tagging._read_on_label({"brand": "Nike", "evidence": "PRO NIKE printed on the waistband"})
     assert not tagging._read_on_label({"brand": "Essentia", "evidence": "16.9 FL OZ (1 PT 0.9 FL OZ) 500ml"})
+
+
+def _boom_post(*a, **k):
+    raise AssertionError("the AI must not be called")
+
+
+def test_chosen_product_skips_the_ai_and_places_the_video(monkeypatch, r):
+    from types import SimpleNamespace as NS
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setattr(tagging.requests, "post", _boom_post)
+    sources = [NS(metadata={"brand": "CeraVe", "product": "Hydrating Cleanser"})]
+    out = tagging.tag_and_record(user_id="u", project_id="p1", draft=_draft(), sources=sources,
+                                 video_path="/nope.mp4", client=r)
+    assert out["status"] == "user_choice" and out["ai_called"] is False and out["placed"]
+    entry = catalog.load("u", client=r)["videos"]["p1"]
+    assert entry["source"] == "user" and entry["product_id"] == out["product_id"]
+    # a second video with the same names lands in the same product
+    again = tagging.tag_and_record(user_id="u", project_id="p2", draft=_draft(), sources=sources, video_path=None,
+                                   client=r)
+    assert again["product_id"] == out["product_id"]
+
+
+def test_chosen_product_id_is_used_and_a_stale_id_falls_back_to_names(monkeypatch, r):
+    monkeypatch.setattr(tagging.requests, "post", _boom_post)
+    made = catalog.create("u", brand="Dior", product="Sauvage", client=r)
+    pid = made["product_id"]
+    out = tagging.tag_and_record(user_id="u", project_id="p1", draft=_draft(),
+                                 sources=[{"metadata": {"brand": "Dior", "product": "Sauvage", "product_id": pid}}],
+                                 video_path=None, client=r)
+    assert out["product_id"] == pid
+    stale = tagging.tag_and_record(user_id="u", project_id="p2", draft=_draft(),
+                                   sources=[{"metadata": {"brand": "Dior", "product": "Sauvage", "product_id": "gone"}}],
+                                   video_path=None, client=r)
+    assert stale["status"] == "user_choice" and stale["product_id"] == pid
+
+
+def test_chosen_product_is_honored_even_when_ai_tagging_is_off(monkeypatch, r):
+    monkeypatch.setenv("CUTSELL_PRODUCT_TAGGING", "0")
+    out = tagging.tag_and_record(user_id="u", project_id="p1", draft=_draft(),
+                                 sources=[{"metadata": {"brand": "Nike", "product": "Pro Shorts"}}],
+                                 video_path=None, client=r)
+    assert out["status"] == "user_choice"
+
+
+def test_photo_step_is_off_by_default_only_words_are_sent(monkeypatch, tmp_path):
+    monkeypatch.delenv("CUTSELL_PRODUCT_PHOTO", raising=False)
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+    sent = []
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setattr(tagging.requests, "post", lambda url, json=None, **k: sent.append(json) or _answer(
+        {"brand": None, "product": None, "category": None, "confidence": 0.1, "evidence": None,
+         "product_moment_seconds": None}))
+    out = tagging.tag(_draft(), [], video_path=str(video), duration=8.0)
+    assert len(sent) == 1 and not out["used_photo"] and not out["needs_photo"]
+    assert all(c["type"] != "image" for c in sent[0]["messages"][0]["content"])
+    assert tagging.photo_followup(user_id="u", project_id="p1", video_path=str(video)) == {"status": "off"}

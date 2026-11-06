@@ -59,3 +59,56 @@ def verify_apple_identity_token(
         email_verified = None
     email = str(claims.get("email") or "").strip() or None
     return AppleIdentity(subject=subject, email=email, email_verified=email_verified)
+
+
+# --- Token revoke on account deletion (Apple App Review 5.1.1(v), PO 6 Nov 2026) --------------------------------
+# At sign-in the app sends the one-time authorization code; the server swaps it for Apple's refresh token and keeps
+# it only to revoke it when the creator deletes her account. Needs a "Sign in with Apple" key from the Apple
+# Developer account: CUTSELL_APPLE_TEAM_ID, CUTSELL_APPLE_KEY_ID, CUTSELL_APPLE_PRIVATE_KEY (the .p8 text).
+# Without them every step below is skipped and says "not_configured"; sign-in itself is unchanged.
+
+APPLE_TOKEN_URL = "https://appleid.apple.com/auth/token"
+APPLE_REVOKE_URL = "https://appleid.apple.com/auth/revoke"
+
+
+def revoke_configured() -> bool:
+    return all(str(os.getenv(name) or "").strip() for name in
+               ("CUTSELL_APPLE_CLIENT_ID", "CUTSELL_APPLE_TEAM_ID", "CUTSELL_APPLE_KEY_ID", "CUTSELL_APPLE_PRIVATE_KEY"))
+
+
+def _client_secret() -> str:
+    import time
+
+    import jwt
+    now = int(time.time())
+    key = os.environ["CUTSELL_APPLE_PRIVATE_KEY"].replace("\\n", "\n")
+    return jwt.encode({"iss": os.environ["CUTSELL_APPLE_TEAM_ID"], "iat": now, "exp": now + 300,
+                       "aud": APPLE_ISSUER, "sub": os.environ["CUTSELL_APPLE_CLIENT_ID"]},
+                      key, algorithm="ES256", headers={"kid": os.environ["CUTSELL_APPLE_KEY_ID"]})
+
+
+def exchange_authorization_code(code: str, *, post=None) -> str | None:
+    """The refresh token for this sign-in, or None (not configured, no code, or Apple said no)."""
+    if not revoke_configured() or not str(code or "").strip():
+        return None
+    import requests
+    post = post or requests.post
+    response = post(APPLE_TOKEN_URL, data={"client_id": os.environ["CUTSELL_APPLE_CLIENT_ID"],
+                                           "client_secret": _client_secret(), "code": code,
+                                           "grant_type": "authorization_code"}, timeout=15)
+    if getattr(response, "status_code", 0) != 200:
+        return None
+    return str((response.json() or {}).get("refresh_token") or "") or None
+
+
+def revoke_refresh_token(token: str, *, post=None) -> str:
+    if not revoke_configured():
+        return "not_configured"
+    if not token:
+        return "no_token"
+    import requests
+    post = post or requests.post
+    response = post(APPLE_REVOKE_URL, data={"client_id": os.environ["CUTSELL_APPLE_CLIENT_ID"],
+                                            "client_secret": _client_secret(), "token": token,
+                                            "token_type_hint": "refresh_token"}, timeout=15)
+    return "revoked" if getattr(response, "status_code", 0) == 200 else f"failed_{getattr(response, 'status_code', 0)}"

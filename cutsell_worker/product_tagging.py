@@ -232,7 +232,7 @@ def tag(draft: dict, known: list[dict], *, video_path: str | None = None, durati
             if info["error"]:
                 log["errors"].append("text_" + info["error"])
         result.update({"used_photo": False, "needs_photo": False, "thumb_jpeg_b64": None})
-        if needs_photo(result) and transcript.strip():
+        if photo_enabled() and needs_photo(result) and transcript.strip():
             if video_path and Path(video_path).exists():
                 photo_result, photo_info, thumb = _photo_step(result, first_words, known, video_path, duration)
                 log["calls"].append({"kind": "photo", **photo_info["usage"]})
@@ -304,6 +304,39 @@ def album_hint_of(sources) -> str | None:
     return None
 
 
+def photo_enabled() -> bool:
+    """The photo step (frames sent to the AI) is OFF unless CUTSELL_PRODUCT_PHOTO=1: the AI reads only the words."""
+    return os.environ.get("CUTSELL_PRODUCT_PHOTO", "0").strip() == "1"
+
+
+def chosen_product(sources) -> dict | None:
+    """The brand + product the creator picked in the app (sent in each source's metadata: brand, product and
+    optionally product_id). None when nothing was picked."""
+    for source in sources or []:
+        meta = getattr(source, "metadata", None) if not isinstance(source, dict) else source.get("metadata")
+        if not isinstance(meta, dict):
+            continue
+        brand = str(meta.get("brand") or "").strip()[:80]
+        product = str(meta.get("product") or "").strip()[:80]
+        product_id = str(meta.get("product_id") or "").strip()[:80] or None
+        if product_id or (brand and product):
+            return {"brand": brand, "product": product, "product_id": product_id}
+    return None
+
+
+def place_chosen(user_id: str, project_id: str, pick: dict, *, client=None) -> dict:
+    """Put the video straight in the creator's product, no AI. A product_id that no longer exists falls back to
+    the brand + product names (created or reused)."""
+    from . import product_catalog
+    if pick.get("product_id"):
+        try:
+            return product_catalog.assign(user_id, [project_id], product_id=pick["product_id"], client=client)
+        except KeyError:
+            if not (pick.get("brand") and pick.get("product")):
+                raise
+    return product_catalog.assign(user_id, [project_id], brand=pick["brand"], product=pick["product"], client=client)
+
+
 def enabled() -> bool:
     """CUTSELL_PRODUCT_TAGGING=0 turns the step off (rollback without a redeploy)."""
     return os.environ.get("CUTSELL_PRODUCT_TAGGING", "1").strip() != "0"
@@ -311,7 +344,17 @@ def enabled() -> bool:
 
 def tag_and_record(*, user_id: str, project_id: str, draft: dict, sources, video_path: str | None,
                    duration: float | None = None, client=None) -> dict:
-    """Worker entry point, called after the cut is saved and announced. Never raises."""
+    """Worker entry point, called after the cut is saved and announced. Never raises. If the creator already
+    picked the product in the app, the AI is never called: the video goes straight into that product."""
+    pick = chosen_product(sources)
+    if pick:
+        try:
+            placed = place_chosen(user_id, project_id, pick, client=client)
+            return {"status": "user_choice", "ai_called": False, "product_id": placed.get("product_id"),
+                    "placed": True}
+        except Exception as exc:
+            _LOG.warning("product_choice_failed %s", exc.__class__.__name__)
+            return {"status": "user_choice_failed", "ai_called": False, "error": exc.__class__.__name__}
     if not enabled():
         return {"status": "off"}
     try:
@@ -330,7 +373,7 @@ def tag_and_record(*, user_id: str, project_id: str, draft: dict, sources, video
 
 def photo_followup(*, user_id: str, project_id: str, video_path: str, client=None) -> dict:
     """Audio first: the video arrived after the cut. If the text step asked for a photo, read it now. Never raises."""
-    if not enabled():
+    if not enabled() or not photo_enabled():
         return {"status": "off"}
     try:
         from . import product_catalog

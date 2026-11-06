@@ -232,6 +232,31 @@ def resolve_apple_account(subject: str, *, guest_user_id: str | None = None, cli
     return candidate, outcome
 
 
+def apple_refresh_key(user_id: str) -> str:
+    return f"cutsell:v1:apple-refresh:{_user_scope(user_id)}"
+
+
+def store_apple_refresh_token(*, user_id: str, token: str | None, client=None) -> bool:
+    """Kept only to revoke it at account deletion; never returned by any route."""
+    if not token:
+        return False
+    _redis_client(client).set(apple_refresh_key(user_id), token)
+    return True
+
+
+def revoke_apple_token(*, user_id: str, client=None, post=None) -> str:
+    """Account deletion: tell Apple to revoke the sign-in, then forget the token."""
+    from .apple_auth import revoke_refresh_token
+    target = _redis_client(client)
+    token = _decoded(target.get(apple_refresh_key(user_id)))
+    try:
+        status = revoke_refresh_token(token or "", post=post)
+    except Exception as exc:
+        status = "failed_" + exc.__class__.__name__
+    target.delete(apple_refresh_key(user_id))
+    return status
+
+
 def delete_apple_binding(*, user_id: str, client=None) -> bool:
     """Called on account deletion: the Apple ID may sign up again as a fresh account."""
     target = _redis_client(client)
