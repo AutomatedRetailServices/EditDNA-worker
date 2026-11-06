@@ -832,6 +832,8 @@ enum L10nES {
         "Previous keyframe": "Keyframe anterior",
         "Privacy & Data": "Privacidad y datos",
         "Privacy Policy": "Política de privacidad",
+        "One tap with Face ID. You can hide your email.": "Un toque con Face ID. Puedes ocultar tu correo.",
+        "Create your account to start. Your videos stay safe on every iPhone you use.": "Crea tu cuenta para empezar. Tus videos quedan seguros en cualquier iPhone que uses.",
         "Your account isn't fully deleted yet. Tap Delete My Account again to finish.": "Tu cuenta todavía no se borró por completo. Toca Eliminar mi cuenta otra vez para terminar.",
         "Privacy and legal pages open in the selected language when available.": "Las páginas de privacidad y legales se abren en el idioma elegido cuando están disponibles.",
         "Pro blend not available for this video": "La mezcla Pro no está disponible para este video",

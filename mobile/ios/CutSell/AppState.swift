@@ -35,12 +35,9 @@ final class AppState: ObservableObject {
                     }
                 }
             }
-            if needsSignIn { return }
-            // No saved session: start without an account (guest). Signing in with Apple later keeps
-            // the guest's projects.
-            let fresh = try await api.createSession()
-            try KeychainStore.save(fresh)
-            try await start(with: fresh)
+            // No saved session: the person creates her account with Sign in with Apple (PO 6 Nov 2026).
+            // Guest sessions already saved on a phone keep working; no new guest accounts are made.
+            needsSignIn = true
         } catch {
             bootstrapError = error.localizedDescription
         }

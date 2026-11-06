@@ -86,27 +86,34 @@ enum AppleNonce {
     }
 }
 
-/// Shown after logging out, after deleting the account, or when an Apple session ended.
+/// The first screen when there is no account on this iPhone (also after logging out or deleting the
+/// account): Sign in with Apple creates the account or opens the existing one.
 struct WelcomeView: View {
     @EnvironmentObject private var appState: AppState
 
     var body: some View {
+        ZStack {
+            ScreenBackground()
+            welcome
+        }
+    }
+
+    private var welcome: some View {
         VStack(spacing: 24) {
             Spacer()
-            VStack(spacing: 8) {
-                Text(L10n.tr("CutSell"))
-                    .font(.largeTitle.bold())
-                Text(L10n.tr("Sign in to keep your projects on every iPhone you use."))
+            VStack(spacing: 14) {
+                BrandLogo()
+                Text(L10n.tr("Create your account to start. Your videos stay safe on every iPhone you use."))
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
             Spacer()
             AppleSignInButton()
-            Button(L10n.tr("Continue without an account")) {
-                Task { await appState.continueWithoutAccount() }
-            }
-            .font(.callout)
+            Text(L10n.tr("One tap with Face ID. You can hide your email."))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
         .padding(24)
     }
