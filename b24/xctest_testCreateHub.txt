@@ -1,5 +1,2 @@
-/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:105: error: -[CutSellUITests.Build24UITests testCreateHub] : Failed to get matching snapshots: Timed out while fetching snapshot from testmanagerd..
-Test Case '-[CutSellUITests.Build24UITests testCreateHub]' failed (532.613 seconds).
-Test Suite 'Build24UITests' failed at 2026-11-06 21:01:32.421.
-Test Suite 'CutSellUITests.xctest' failed at 2026-11-06 21:01:32.425.
-Test Suite 'Selected tests' failed at 2026-11-06 21:01:32.430.
+Testing failed:
+	CutSellUITests-Runner (30208) encountered an error (The test runner failed to initialize for UI testing. (Underlying Error: Timed out waiting for AX loaded notification))
