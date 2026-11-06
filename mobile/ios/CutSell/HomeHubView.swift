@@ -140,7 +140,7 @@ struct HomeHubView: View {
             .foregroundStyle(Color(fixed: 0xFFFFFF))
             .shadow(color: Color(fixed: 0x000000, opacity: 0.18), radius: 0, x: 0, y: 2)
             .frame(maxWidth: .infinity, minHeight: 58, maxHeight: 58)
-            .puff3D(look, in: Capsule())
+            .softPuff(look, in: Capsule())   // PO 6 Nov: Record and Upload soft too
             .contentShape(Capsule())
         }
         .buttonStyle(BubblePress())
