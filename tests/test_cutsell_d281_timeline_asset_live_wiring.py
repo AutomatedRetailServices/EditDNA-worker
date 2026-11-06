@@ -713,6 +713,7 @@ def test_delete_project_data_calls_timeline_asset_cleanup(monkeypatch):
 
     class _Redis:
         def pipeline(self): return _NoOpPipe()
+        def scan_iter(self, match=None): return iter(())   # 6 Nov: project deletion also scans per-project keys
 
     class _Config:
         redis_url = "redis://fake"
