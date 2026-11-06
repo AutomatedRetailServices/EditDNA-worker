@@ -161,3 +161,15 @@ def test_session_route_uses_only_trusted_ip_headers(monkeypatch):
     c.post("/v1/auth/session", headers={"CF-Connecting-IP": "203.0.113.7"})
     c.post("/v1/auth/session", headers={"True-Client-IP": "198.51.100.9"})
     assert seen == [None, "203.0.113.7", "198.51.100.9"]
+
+
+def test_new_guest_accounts_stop_when_the_switch_is_off(monkeypatch):
+    """PO 6 Nov 2026: Sign in with Apple for everyone; no new guest accounts once CUTSELL_GUEST_SIGNUP=0."""
+    monkeypatch.setenv("CUTSELL_GUEST_SIGNUP", "0")
+    monkeypatch.setattr(auth_routes, "create_session", lambda: pytest.fail("must not create a session"))
+    app = FastAPI()
+    app.include_router(auth_routes.router)
+    r = TestClient(app).post("/v1/auth/session", headers={"CF-Connecting-IP": "203.0.113.7"})
+    assert r.status_code == 403 and r.json()["detail"] == "sign_in_with_apple_required"
+    monkeypatch.delenv("CUTSELL_GUEST_SIGNUP")
+    assert auth_routes.guest_signup_open()

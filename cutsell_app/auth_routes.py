@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -46,12 +47,22 @@ def _trusted_client_ip(request: Request) -> tuple[str | None, str]:
     return None, "none"
 
 
+def guest_signup_open() -> bool:
+    """New guest accounts: on unless CUTSELL_GUEST_SIGNUP=0 (switch on Render, no redeploy of code)."""
+    return os.environ.get("CUTSELL_GUEST_SIGNUP", "1").strip() != "0"
+
+
 @router.post("/session")
 def create_mobile_session(request: Request):
     """Legacy anonymous closed-beta bootstrap. Do not use for commercial accounts.
 
     Rate-limited: per network when the proxy gives the real client IP, and overall."""
     client_ip, ip_source = _trusted_client_ip(request)
+    if not guest_signup_open():
+        # PO 6 Nov 2026: every person creates her account with Sign in with Apple. Guest sessions that
+        # already exist keep working; no new ones are made (closes the "thousands of free accounts" hole).
+        capture_operational_event("auth.anonymous.closed", ip_source=ip_source)
+        raise HTTPException(status_code=403, detail="sign_in_with_apple_required")
     try:
         allowed, reason = check_anonymous_session_allowance(client_ip=client_ip)
         if not allowed:
