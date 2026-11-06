@@ -264,6 +264,15 @@ def _answer(data: dict, body: dict, max_tokens: int, effort: str, json_refused: 
 
 def call_anthropic(prompt, *, max_tokens: int = 16000, attempts: int = 4) -> tuple[str, dict]:
     """One user message in, (text, usage) out. Retries transient failures; never logs the prompt or the key."""
+    kept = recall(prompt)                     # the same video asked before: same answer, no cost (PO 6 Nov)
+    if kept:
+        return kept, remembered_usage()
+    text, usage = _call_anthropic(prompt, max_tokens=max_tokens, attempts=attempts)
+    remember(prompt, text)
+    return text, usage
+
+
+def _call_anthropic(prompt, *, max_tokens: int = 16000, attempts: int = 4) -> tuple[str, dict]:
     key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if not key:
         raise RuntimeError("ANTHROPIC_API_KEY missing")

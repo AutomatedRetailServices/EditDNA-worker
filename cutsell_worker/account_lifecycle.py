@@ -65,6 +65,12 @@ def _user_prefixes(*, user_id: str) -> tuple[str, ...]:
         voice_over_upload_prefix(), PENDING_REVIEW_PREFIX))
 
 
+def _scan(client, pattern: str):
+    """Keys matching a pattern (a client without SCAN, e.g. a minimal test double, has none)."""
+    scan = getattr(client, "scan_iter", None)
+    return scan(match=pattern) if scan else ()
+
+
 def _project_key_patterns(*, user_id: str, project_id: str) -> tuple[str, ...]:
     return (
         f"cutsell:v1:pending_watch_listen:{_scope20(user_id)}:{_scope20(project_id)}:*",
@@ -159,7 +165,7 @@ def delete_project_data(*, user_id: str, project_id: str, redis_client=None, s3_
     from .render_versions import render_versions_key
     pipe.delete(render_versions_key(user_id=user_id, project_id=project_id))
     for pattern in _project_key_patterns(user_id=user_id, project_id=project_id):
-        for key in redis_client.scan_iter(match=pattern):
+        for key in _scan(redis_client, pattern):
             pipe.delete(key)
     pipe.execute()
 
@@ -282,7 +288,7 @@ def delete_account_data(*, user_id: str, redis_client=None, s3_client=None,
     for key in redis_client.scan_iter(match=f"cutsell:v1:batch:{_scope20(user_id)}:*"):
         pipe.delete(key)
     from .simple_engine.llm import memory_pattern
-    for key in redis_client.scan_iter(match=memory_pattern(user_id)):      # remembered AI answers (6 Nov)
+    for key in _scan(redis_client, memory_pattern(user_id)):      # remembered AI answers (6 Nov)
         pipe.delete(key)
     pipe.execute()
 

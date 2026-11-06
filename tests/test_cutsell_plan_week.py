@@ -381,6 +381,10 @@ def test_the_api_gives_one_videos_caption_and_posted_state(monkeypatch, r):
     assert client.get("/v1/plan/video", params={"user_id": "u1", "project_id": "nope"}).status_code == 404
 
 
+# A day still ahead, whenever the tests run (they were written with a fixed date that became the past).
+DAY = (__import__("datetime").date.today() + __import__("datetime").timedelta(days=2)).isoformat()
+
+
 def test_the_api_schedules_many_videos_in_one_request(monkeypatch, r):
     """PO 4 Nov: Plan my week sent one /slots/move per video (~11 s each) and the wait was cut half way. /schedule
     places every video, saves her settings and builds the week in ONE request."""
@@ -393,19 +397,19 @@ def test_the_api_schedules_many_videos_in_one_request(monkeypatch, r):
     app.include_router(plan_routes.router)
     client = TestClient(app)
     chosen = [ids["single1"], ids["bulk1"], ids["combine"]]
-    items = [{"project_id": pid, "date": "2026-11-05", "time": t} for pid, t in zip(chosen, ["9:00", "12:00", "15:00"])]
+    items = [{"project_id": pid, "date": DAY, "time": t} for pid, t in zip(chosen, ["9:00", "12:00", "15:00"])]
     view = client.post("/v1/plan/schedule", json={"user_id": "u1", "items": items, "times": ["09:00", "12:00", "15:00"],
-                                                   "days": [0, 1, 2, 3, 4, 5], "start": "2026-11-05", "count": 3,
+                                                   "days": [0, 1, 2, 3, 4, 5], "start": DAY, "count": 3,
                                                    "remind": True}).json()
     slots = {s["project_id"]: s for s in view["week"]["slots"]}
-    assert [(slots[p]["date"], slots[p]["time"]) for p in chosen] == [("2026-11-05", "09:00"), ("2026-11-05", "12:00"),
-                                                                     ("2026-11-05", "15:00")]
+    assert [(slots[p]["date"], slots[p]["time"]) for p in chosen] == [(DAY, "09:00"), (DAY, "12:00"),
+                                                                     (DAY, "15:00")]
     assert all(slots[p]["pinned"] for p in chosen)
     plan = post_plan.load("u1")
-    assert plan["prefs"]["times"] == ["09:00", "12:00", "15:00"] and plan["prefs"]["start"] == "2026-11-05"
+    assert plan["prefs"]["times"] == ["09:00", "12:00", "15:00"] and plan["prefs"]["start"] == DAY
     # Someone else's video, or none: refused, and nothing is written.
     before = json.dumps(post_plan.load("u1"), sort_keys=True)
-    assert client.post("/v1/plan/schedule", json={"user_id": "u1", "items": [{"project_id": "nope", "date": "2026-11-05",
+    assert client.post("/v1/plan/schedule", json={"user_id": "u1", "items": [{"project_id": "nope", "date": DAY,
                                                                               "time": "9:00"}]}).status_code == 404
     assert client.post("/v1/plan/schedule", json={"user_id": "u1", "items": []}).status_code == 422
     assert json.dumps(post_plan.load("u1"), sort_keys=True) == before
@@ -459,8 +463,8 @@ def test_cuts_she_chooses_stay_even_if_they_share_a_recording(monkeypatch, r):
     assert len(post_plan.candidates("u1", _projects())) == 1          # the week by itself: one cut per recording
     app = FastAPI(); app.include_router(plan_routes.router)
     client = TestClient(app)
-    items = [{"project_id": pid, "date": "2026-11-05", "time": t} for pid, t in zip(cuts, ["9:00", "12:00", "15:00"])]
+    items = [{"project_id": pid, "date": DAY, "time": t} for pid, t in zip(cuts, ["9:00", "12:00", "15:00"])]
     view = client.post("/v1/plan/schedule", json={"user_id": "u1", "items": items, "times": ["09:00", "12:00", "15:00"],
-                                                   "days": [0, 1, 2, 3, 4, 5, 6], "start": "2026-11-05", "count": 3}).json()
+                                                   "days": [0, 1, 2, 3, 4, 5, 6], "start": DAY, "count": 3}).json()
     shown = {s["project_id"]: (s["date"], s["time"]) for s in view["week"]["slots"]}
-    assert shown == {cuts[0]: ("2026-11-05", "09:00"), cuts[1]: ("2026-11-05", "12:00"), cuts[2]: ("2026-11-05", "15:00")}
+    assert shown == {cuts[0]: (DAY, "09:00"), cuts[1]: (DAY, "12:00"), cuts[2]: (DAY, "15:00")}
