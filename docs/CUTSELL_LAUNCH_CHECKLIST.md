@@ -4,8 +4,11 @@ Last updated 6 Nov 2026.
 
 ## Decided by the Product Owner
 - **Free trial: 3 days** (PO 5 Nov 2026). After the trial the person pays to keep cutting.
-- **Testing phase now:** the app does NOT ask to sign in; it starts a guest account by itself. That stays while
-  CutSell is in testing (PO 5 Nov 2026).
+- **Sign in with Apple for everyone, starting in testing** (PO 6 Nov 2026, replaces the 5 Nov "guest in testing"
+  decision). Build 74: first open shows "Continue with Apple"; saved guest sessions keep working and move their
+  videos into the Apple account on sign-in. Server: CUTSELL_APPLE_CLIENT_ID=ai.cutsell.app is set on Render.
+  Still to do: set CUTSELL_GUEST_SIGNUP=0 once testers have build 74, and give the iPhone UI probes a non-guest
+  way to get a session first (they call /v1/auth/session today).
 - **When CutSell is paid:** paying needs an account (Sign in with Apple), so every subscription belongs to one person.
 - **Account deletion = everything, nothing recoverable** (PO 6 Nov 2026).
 - **Product AI:** when the creator picks brand + product in the app, the AI is never asked; when she picks nothing,
