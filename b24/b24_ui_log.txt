@@ -1,7 +1,10 @@
-B24UI   139.5 PASS Products filter in Edits
-B24UI   142.5 PASS Products list
-B24UI   146.9 PASS ‘need a product’ notice · 2 videos need a product, We couldn’t tell from the video, Assign ›
-B24UI   148.3 PASS product row
-B24UI   151.5 PASS product view
-B24UI   153.9 videos in the product: 3
-B24UI   167.3 FAIL renamed · Hydrating Cleanser
+B24UI    40.7 PASS no avatar on Create
+B24UI    41.7 PASS no plan meter on Create
+B24UI    41.9 PASS no 'Create more' title
+B24UI    43.6 PASS hubRecord shown
+B24UI    45.2 PASS hubFaceless shown
+B24UI    48.2 PASS hubMix shown
+B24UI    49.6 PASS hubPlanWeek shown
+B24UI    50.8 PASS hubMode_single shown
+B24UI    58.3 PASS hubMode_bulk shown
+B24UI    61.9 PASS hubMode_combine shown
