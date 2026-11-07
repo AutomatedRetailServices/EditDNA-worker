@@ -55,8 +55,9 @@ jobs:
 
       - name: Tools for the TestFlight check (fixed versions)
         run: |
-          pip3 install --quiet --break-system-packages PyJWT==2.15.1 cryptography==50.0.2 requests==2.34.2 2>/dev/null \
-            || pip3 install --quiet PyJWT==2.15.1 cryptography==50.0.2 requests==2.34.2
+          python3 -m venv "$RUNNER_TEMP/tfcheck"
+          "$RUNNER_TEMP/tfcheck/bin/pip" install --quiet PyJWT==2.15.1 requests==2.34.2 "cryptography>=46,<51"
+          "$RUNNER_TEMP/tfcheck/bin/pip" freeze | grep -iE "^(pyjwt|requests|cryptography)=="
 
       - name: Check the secrets exist (names only)
         env:
@@ -151,7 +152,7 @@ jobs:
 
       - name: Wait for the build to appear in TestFlight
         run: |
-          python3 - <<'PY'
+          "$RUNNER_TEMP/tfcheck/bin/python" - <<'PY'
           import os, time, jwt, requests
           key = open(os.environ["ASC_KEY_PATH"]).read()
           def token():
