@@ -103,7 +103,9 @@ struct WelcomeView: View {
             Spacer()
             VStack(spacing: 14) {
                 BrandLogo()
-                Text(L10n.tr("Create your account to start. Your videos stay safe on every iPhone you use."))
+                Text(L10n.tr(appState.signInKeepsGuestVideos
+                     ? "Sign in to keep using CutSell. Your videos move to your account."
+                     : "Create your account to start. Your videos stay safe on every iPhone you use."))
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

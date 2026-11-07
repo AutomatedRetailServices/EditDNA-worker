@@ -832,6 +832,7 @@ enum L10nES {
         "Previous keyframe": "Keyframe anterior",
         "Privacy & Data": "Privacidad y datos",
         "Privacy Policy": "Política de privacidad",
+        "Sign in to keep using CutSell. Your videos move to your account.": "Entra para seguir usando CutSell. Tus videos pasan a tu cuenta.",
         "One tap with Face ID. You can hide your email.": "Un toque con Face ID. Puedes ocultar tu correo.",
         "Create your account to start. Your videos stay safe on every iPhone you use.": "Crea tu cuenta para empezar. Tus videos quedan seguros en cualquier iPhone que uses.",
         "Your account isn't fully deleted yet. Tap Delete My Account again to finish.": "Tu cuenta todavía no se borró por completo. Toca Eliminar mi cuenta otra vez para terminar.",

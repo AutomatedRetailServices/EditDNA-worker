@@ -8,6 +8,8 @@ final class AppState: ObservableObject {
     @Published var bootstrapError: String?
     /// Shows the welcome screen (Sign in with Apple / continue without an account): after logging
     /// out, after deleting the account, or when an Apple session is no longer valid.
+    /// The welcome screen is shown to a phone that still has a guest account (its videos move to the new account).
+    @Published var signInKeepsGuestVideos = false
     @Published var needsSignIn = false
     /// A one-time message after signing in (e.g. guest projects that could not be moved).
     @Published var accountNotice: String?
@@ -19,6 +21,14 @@ final class AppState: ObservableObject {
         bootstrapError = nil
         defer { isBootstrapping = false }
         do {
+            if let saved = try KeychainStore.load(), !saved.isAppleAccount {
+                // PO 7 Nov 2026: guest accounts are closed. A phone still on a guest account signs in with Apple
+                // once; the guest session stays attached to that request, so her videos move to the Apple account.
+                await api.setSession(saved)
+                signInKeepsGuestVideos = true
+                needsSignIn = true
+                return
+            }
             if let saved = try KeychainStore.load() {
                 do {
                     try await start(with: saved)
@@ -68,6 +78,7 @@ final class AppState: ObservableObject {
         let current = CutSellSession(userID: value.userID, accessToken: value.accessToken, accountProvider: "apple")
         try KeychainStore.save(current)
         needsSignIn = false
+        signInKeepsGuestVideos = false
         bootstrapError = nil
         try await start(with: current)
         if value.accountOutcome == "existing_account_guest_not_merged",
