@@ -290,6 +290,8 @@ def delete_account_data(*, user_id: str, redis_client=None, s3_client=None,
     from .simple_engine.llm import memory_pattern
     for key in _scan(redis_client, memory_pattern(user_id)):      # remembered AI answers (6 Nov)
         pipe.delete(key)
+    for key in _scan(redis_client, f"cutsell:v1:usage-month:{_scope20(user_id)}:*"):   # month meter (7 Nov)
+        pipe.delete(key)
     pipe.execute()
 
     durable = {"status": "not_configured"}

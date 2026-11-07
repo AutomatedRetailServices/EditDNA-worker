@@ -37,33 +37,70 @@ def check_processing_allowance(*, user_id: str, durations_sec: list[float]) -> U
             monthly_limit_minutes=float(config.monthly_processing_minutes),
         )
 
+    limit = float(config.monthly_processing_minutes)
+    # Security review 4 Nov, point 9 (PO 7 Nov): the monthly meter fails CLOSED. It is the database when one is
+    # configured, otherwise this month's counter in Redis (Render has no database today). If neither can be read,
+    # the job is refused ("try again later") instead of processed for free.
+    used = None
     if config.database_url:
         try:
             from .commercial_usage import monthly_usage_total
             used = monthly_usage_total(config.database_url, user_id=user_id, event_type="processing_minutes")
-            limit = float(config.monthly_processing_minutes)
-            if used + requested_minutes > limit:
-                return UsageDecision(False, "monthly_processing_limit", requested_minutes, used, limit)
-            return UsageDecision(True, "allowed", requested_minutes, used, limit)
         except Exception:
-            # Migration/telemetry outages do not break closed beta processing.
-            pass
+            used = None
+    if used is None:
+        used = _redis_month_used(user_id)
+    if used is None:
+        return UsageDecision(False, "usage_meter_unavailable", requested_minutes, None, limit)
+    if used + requested_minutes > limit:
+        return UsageDecision(False, "monthly_processing_limit", requested_minutes, used, limit)
+    return UsageDecision(True, "allowed", requested_minutes, used, limit)
 
-    return UsageDecision(
-        True,
-        "allowed_without_durable_meter",
-        requested_minutes,
-        None,
-        float(config.monthly_processing_minutes),
-    )
+
+def _month_key(user_id: str, now: float | None = None) -> str:
+    import hashlib
+    import time
+    month = time.strftime("%Y%m", time.gmtime(now if now is not None else time.time()))
+    return f"cutsell:v1:usage-month:{hashlib.sha256(str(user_id).encode()).hexdigest()[:20]}:{month}"
+
+
+def _meter_client(client=None):
+    return _redis(client)
+
+
+def _redis_month_used(user_id: str, client=None) -> float | None:
+    try:
+        target = _meter_client(client)
+        if target is None:
+            return None
+        raw = target.get(_month_key(user_id))
+        return float(raw.decode() if isinstance(raw, bytes) else raw) if raw is not None else 0.0
+    except Exception:
+        return None
+
+
+def _redis_month_add(user_id: str, minutes: float, client=None) -> bool:
+    try:
+        target = _meter_client(client)
+        if target is None:
+            return False
+        key = _month_key(user_id)
+        pipe = target.pipeline()
+        pipe.incrbyfloat(key, float(minutes))
+        pipe.expire(key, 40 * 24 * 3600)
+        pipe.execute()
+        return True
+    except Exception:
+        return False
 
 
 def record_processing_minutes(*, user_id: str, project_id: str, minutes: float, metadata: dict | None = None) -> dict:
     config = load_runtime_config()
     if minutes < 0:
         raise ValueError("processing minutes must be non-negative")
+    counted = _redis_month_add(user_id, minutes)          # this month's meter (always, 7 Nov)
     if not config.database_url:
-        return {"status": "not_configured"}
+        return {"status": "recorded_month_counter" if counted else "not_configured"}
     try:
         from .commercial_store import record_usage
         event_id = f"usage_{uuid4().hex}"

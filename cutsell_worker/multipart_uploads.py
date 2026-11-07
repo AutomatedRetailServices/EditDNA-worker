@@ -262,6 +262,28 @@ def list_multipart_parts(
     }
 
 
+class UploadTooLarge(ValueError):
+    """The finished file is bigger than the size the phone declared (security review 4 Nov, point 8)."""
+
+
+def _refuse_oversized(client, session: dict[str, Any], upload_id: str) -> None:
+    """Each part URL accepts any size, so the finished file is measured: bigger than declared -> deleted, never
+    processed (the declared size is already capped at the upload limit when the upload starts)."""
+    try:
+        real = int(client.head_object(Bucket=session["bucket"], Key=session["object_key"]).get("ContentLength") or 0)
+    except Exception as exc:
+        raise _storage_error("HeadObject", exc) from None
+    if real <= int(session["size_bytes"]):
+        return
+    logger.warning("multipart complete upload=%s too large: %d > %d declared", _short(upload_id), real,
+                   int(session["size_bytes"]))
+    try:
+        client.delete_object(Bucket=session["bucket"], Key=session["object_key"])
+    except Exception as exc:
+        logger.warning("multipart oversized delete failed upload=%s %s", _short(upload_id), exc.__class__.__name__)
+    raise UploadTooLarge("upload_too_large: the file is bigger than allowed")
+
+
 def complete_multipart_upload(
     *,
     upload_id: str,
@@ -303,6 +325,7 @@ def complete_multipart_upload(
         error = _storage_error("CompleteMultipartUpload", exc)
         logger.warning("multipart complete upload=%s refused: %s", _short(upload_id), error)
         raise error from None
+    _refuse_oversized(client, session, upload_id)
     result = {
         "upload_id": upload_id,
         "state": "uploaded",

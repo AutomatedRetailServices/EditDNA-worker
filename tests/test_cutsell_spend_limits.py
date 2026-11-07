@@ -138,3 +138,30 @@ def test_any_route_raising_the_limit_answers_429(monkeypatch):
     monkeypatch.setattr(mix_routes, "is_mix", lambda user, project: False)
     r = TestClient(api.app).post("/v1/projects/p1/video-ready", json={"user_id": "u1", "uri": "s3://b/k.mp4"})
     assert r.status_code == 429 and r.json()["detail"] == "video_ready_hourly_limit"
+
+
+def test_the_monthly_meter_fails_closed_and_counts_in_redis(monkeypatch):
+    """Security review 4 Nov, point 9: no readable meter -> refused, never free processing."""
+    import fakeredis
+    from types import SimpleNamespace
+    from cutsell_worker import usage_limits as ul
+    config = SimpleNamespace(database_url=None, redis_url="redis://x", monthly_processing_minutes=10,
+                             max_source_minutes=0)
+    monkeypatch.setattr(ul, "load_runtime_config", lambda: config)
+    meter = fakeredis.FakeRedis()
+    monkeypatch.setattr(ul, "_meter_client", lambda client=None: meter)
+    assert ul.check_processing_allowance(user_id="u", durations_sec=[300]).allowed
+    assert ul.record_processing_minutes(user_id="u", project_id="p", minutes=8)["status"] == "recorded_month_counter"
+    late = ul.check_processing_allowance(user_id="u", durations_sec=[300])
+    assert not late.allowed and late.reason == "monthly_processing_limit" and late.monthly_used_minutes == 8
+    assert ul.check_processing_allowance(user_id="other", durations_sec=[300]).allowed
+
+    class Down:
+        def get(self, *a):
+            raise ConnectionError
+
+        def pipeline(self):
+            raise ConnectionError
+    monkeypatch.setattr(ul, "_meter_client", lambda client=None: Down())
+    refused = ul.check_processing_allowance(user_id="u", durations_sec=[60])
+    assert not refused.allowed and refused.reason == "usage_meter_unavailable"

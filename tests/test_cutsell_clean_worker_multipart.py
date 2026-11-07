@@ -44,6 +44,13 @@ class FakeS3:
     def abort_multipart_upload(self, **kwargs):
         self.aborted.append(kwargs)
         return {}
+    real_size = None          # finished file size; None = exactly the declared size
+    deleted = None
+    def head_object(self, **kwargs):
+        return {"ContentLength": self.real_size if self.real_size is not None else 20 * 1024 * 1024}
+    def delete_object(self, **kwargs):
+        self.deleted = kwargs
+        return {}
 
 
 def _target(size_bytes=20 * 1024 * 1024):
@@ -322,3 +329,23 @@ def test_part_links_reuse_one_s3_client_and_one_redis(monkeypatch):
     assert multipart._s3_client() is multipart._s3_client()
     assert multipart._s3_client(region="eu-west-1") is not multipart._s3_client()
     assert multipart._redis_client() is multipart._redis_client()
+
+
+def test_a_finished_upload_bigger_than_declared_is_deleted_and_refused(monkeypatch):
+    """Security review 4 Nov, point 8: each part URL takes any size, so the finished file is measured."""
+    redis = FakeRedis()
+    s3 = FakeS3()
+    s3.real_size = 900 * 1024 * 1024 * 1024        # ~900 GB instead of the declared 20 MB
+    monkeypatch.setattr(multipart, "prepare_upload_target", lambda **kwargs: _target(kwargs["size_bytes"]))
+    multipart.start_multipart_upload(project_id="project-1", user_id="user-1", original_name="video.mov",
+                                     content_type="video/quicktime", size_bytes=20 * 1024 * 1024,
+                                     s3=s3, redis_client=redis)
+    import pytest
+    with pytest.raises(multipart.UploadTooLarge):
+        multipart.complete_multipart_upload(upload_id="upload-123", user_id="user-1", project_id="project-1",
+                                            parts=[{"part_number": 1, "etag": "a"}, {"part_number": 2, "etag": "b"}],
+                                            s3=s3, redis_client=redis)
+    assert s3.deleted["Key"] == "cutsell/uploads/u/p/video.mov"
+    status = multipart.list_multipart_parts(upload_id="upload-123", user_id="user-1", project_id="project-1",
+                                            s3=s3, redis_client=redis)
+    assert status.get("state") != "completed"          # never marked uploaded, so nothing processes it

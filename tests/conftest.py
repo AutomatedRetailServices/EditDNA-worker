@@ -21,3 +21,18 @@ Individual tests that specifically exercise auth-REQUIRED behavior (see
 import os
 
 os.environ.setdefault("CUTSELL_AUTH_DISABLED_FOR_LOCAL_DEV_ONLY", "1")
+
+
+
+# 7 Nov 2026: the monthly minutes meter fails closed (no meter -> no processing). Tests that never set a Redis
+# URL get a fresh in-memory meter each; tests about the meter itself patch `_meter_client` again.
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _in_memory_usage_meter(monkeypatch):
+    import fakeredis
+    from cutsell_worker import usage_limits
+    meter = fakeredis.FakeRedis()
+    monkeypatch.setattr(usage_limits, "_meter_client", lambda client=None: client if client is not None else meter)
+    yield meter
