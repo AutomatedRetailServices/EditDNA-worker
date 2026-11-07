@@ -1,6 +1,6 @@
 # CutSell — before the paid launch (Product Owner decisions, kept here so nothing is lost)
 
-Last updated 6 Nov 2026.
+Last updated 7 Nov 2026.
 
 ## Decided by the Product Owner
 - **Free trial: 3 days** (PO 5 Nov 2026). After the trial the person pays to keep cutting.
@@ -30,6 +30,12 @@ Last updated 6 Nov 2026.
    per component, repo private, 2FA, provider spend caps).
 
 ## Already done
+- 7 Nov 2026 (live at a674c64): security 8 (oversized multipart upload deleted and refused), 9 (monthly minutes
+  meter fails closed; counted in Redis because Render has NO database), 13 (API + worker packages pinned to the
+  versions in production), 14 (Modal deploy tools/actions pinned; App Store key only in its 2 steps — ships with
+  the next TestFlight build from build/apple-signup); probe door /v1/auth/probe-session (GitHub OIDC of this repo,
+  3-hour non-sliding session) so CUTSELL_GUEST_SIGNUP=0 no longer breaks the iPhone probes.
+  Pending PO: delete the 20 Video00 test-video artifacts + 3 Yaskira frame artifacts on GitHub (public repo).
 - 6 Nov 2026 (server LIVE at 6e2a2b9; app = build 73 on TestFlight, also soft Record/Upload): product AI skipped when
   the product is picked, photo step off; complete account deletion (every project, every record, every storage
   drawer in both buckets, AI answers; "partial" never reported as deleted); AI answers remembered 30 days per
