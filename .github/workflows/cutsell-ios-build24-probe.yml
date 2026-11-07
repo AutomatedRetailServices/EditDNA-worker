@@ -29,6 +29,7 @@ concurrency:
 
 permissions:
   contents: write
+  id-token: write   # GitHub identity token for the probe door (7 Nov)
 
 jobs:
   probe:
@@ -100,16 +101,18 @@ jobs:
           done
           ls -la c*.mp4
 
-      # 7 Nov 2026: a 3-hour test account through the key-protected probe door (the guest door closes).
+      # 7 Nov 2026: a 3-hour test account through the probe door, proven with GitHub's own identity token for
+      # this repository (no shared secret; the guest door closes).
       - name: Session for the probe user
-        env:
-          PROBE_KEY: ${{ secrets.CUTSELL_PROBE_KEY }}
         run: |
           python3 - <<'PYX'
           import json, os, urllib.request
+          ask = urllib.request.Request(os.environ["ACTIONS_ID_TOKEN_REQUEST_URL"] + "&audience=cutsell-probe",
+                                       headers={"Authorization": "Bearer " + os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]})
+          oidc = json.load(urllib.request.urlopen(ask, timeout=60))["value"]
+          print("::add-mask::" + oidc)
           r = urllib.request.Request("https://cutsell-api.onrender.com/v1/auth/probe-session", method="POST", data=None,
-                                     headers={"content-type": "application/json",
-                                              "X-CutSell-Probe-Key": os.environ.get("PROBE_KEY", "")})
+                                     headers={"content-type": "application/json", "X-CutSell-Probe-OIDC": oidc})
           s = json.load(urllib.request.urlopen(r, timeout=120))
           print("::add-mask::" + s["access_token"])
           with open(os.environ["GITHUB_ENV"], "a") as f: f.write(f"PROBE_TOKEN={s['access_token']}\nPROBE_USER={s['user_id']}\n")
