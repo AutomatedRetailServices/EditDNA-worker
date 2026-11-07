@@ -78,6 +78,47 @@ def create_mobile_session(request: Request):
         raise HTTPException(status_code=503, detail=str(exc)) from None
 
 
+PROBE_SESSION_TTL_SEC = 3 * 3600
+
+
+GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com"
+PROBE_OIDC_AUDIENCE = "cutsell-probe"
+
+
+def _verify_probe_oidc(token: str) -> dict:
+    """A GitHub Actions identity token (OIDC) minted by a workflow of OUR repository. No shared secret exists:
+    GitHub signs it, we check the signature, the audience and the repository (a fork has another name)."""
+    import jwt
+    from jwt import PyJWKClient
+    repo = os.environ.get("CUTSELL_PROBE_REPO", "AutomatedRetailServices/EditDNA-worker").strip()
+    key = PyJWKClient(f"{GITHUB_OIDC_ISSUER}/.well-known/jwks").get_signing_key_from_jwt(token)
+    claims = jwt.decode(token, key.key, algorithms=["RS256"], audience=PROBE_OIDC_AUDIENCE, issuer=GITHUB_OIDC_ISSUER,
+                        options={"require": ["exp", "iat", "iss", "aud", "repository"]})
+    if str(claims.get("repository") or "") != repo:
+        raise PermissionError("probe token from another repository")
+    return claims
+
+
+@router.post("/probe-session")
+def create_probe_session(request: Request):
+    """The iPhone UI test probes (GitHub) get a fresh test account here, never through the guest door (which closes
+    with CUTSELL_GUEST_SIGNUP=0). They prove who they are with GitHub's own identity token for this repository
+    (header X-CutSell-Probe-OIDC). The session lives 3 hours and is never extended (7 Nov 2026)."""
+    token = (request.headers.get("x-cutsell-probe-oidc") or "").strip()
+    try:
+        if not token:
+            raise PermissionError("missing probe token")
+        claims = _verify_probe_oidc(token)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Not Found") from None
+    try:
+        session = create_session(ttl_sec=PROBE_SESSION_TTL_SEC)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    capture_operational_event("auth.probe.created", workflow=str(claims.get("workflow") or "")[:80])
+    return session
+
+
 def _bearer_token(request: Request) -> str | None:
     auth = request.headers.get("authorization") or ""
     if auth.lower().startswith("bearer "):

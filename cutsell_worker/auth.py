@@ -49,7 +49,8 @@ def session_index_key(user_id: str) -> str:
     return f"cutsell:v1:sessions:{_user_scope(user_id)}"
 
 
-def create_session(*, user_id: str | None = None, client=None) -> dict[str, Any]:
+def create_session(*, user_id: str | None = None, client=None, ttl_sec: int | None = None) -> dict[str, Any]:
+    """ttl_sec: a short, non-sliding life (the iPhone test probes, 7 Nov); None = the normal 90-day sliding one."""
     target = _redis_client(client)
     resolved_user_id = str(user_id or f"usr_{uuid4().hex}")
     if not resolved_user_id.startswith("usr_"):
@@ -61,23 +62,26 @@ def create_session(*, user_id: str | None = None, client=None) -> dict[str, Any]
         "user_id": resolved_user_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
+    life = int(ttl_sec) if ttl_sec else SESSION_TTL_SEC
+    if ttl_sec:
+        record["fixed_ttl"] = True
     encoded = json.dumps(record, separators=(",", ":"))
     # Real Redis clients use a pipeline so the session and revocation index are
     # written together. Minimal test doubles/legacy clients may only implement
     # setex/get; keep that compatibility without affecting production behavior.
     if hasattr(target, "pipeline"):
         pipe = target.pipeline()
-        pipe.setex(key, SESSION_TTL_SEC, encoded)
+        pipe.setex(key, life, encoded)
         pipe.sadd(session_index_key(resolved_user_id), key)
-        pipe.expire(session_index_key(resolved_user_id), SESSION_TTL_SEC)
+        pipe.expire(session_index_key(resolved_user_id), life)
         pipe.execute()
     else:
-        target.setex(key, SESSION_TTL_SEC, encoded)
+        target.setex(key, life, encoded)
     return {
         "user_id": resolved_user_id,
         "access_token": token,
         "token_type": "bearer",
-        "expires_in": SESSION_TTL_SEC,
+        "expires_in": life,
     }
 
 
@@ -141,7 +145,7 @@ def resolve_session(token: str, *, client=None) -> dict[str, Any]:
         raise PermissionError("invalid auth session")
     # Sliding expiry: a session in use never runs out, so an active guest does not lose
     # their projects 90 days after first opening the app.
-    if hasattr(target, "expire"):
+    if hasattr(target, "expire") and not record.get("fixed_ttl"):
         try:
             target.expire(session_key(value), SESSION_TTL_SEC)
             target.expire(session_index_key(str(record["user_id"])), SESSION_TTL_SEC)

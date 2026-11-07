@@ -9,7 +9,7 @@ from cutsell_worker.auth import resolve_session
 from cutsell_worker.jobs import fetch_job_snapshot
 from cutsell_worker.usage_limits import check_processing_allowance
 
-PUBLIC_PATHS = {"/v1/healthz", "/v1/auth/session", "/v1/auth/apple"}
+PUBLIC_PATHS = {"/v1/healthz", "/v1/auth/session", "/v1/auth/apple", "/v1/auth/probe-session"}
 MAX_JSON_BODY = 8 * 1024 * 1024
 
 # D-269 Stage 1: the ONE explicit, unambiguously-named way to disable auth

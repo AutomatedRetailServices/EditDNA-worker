@@ -173,3 +173,45 @@ def test_new_guest_accounts_stop_when_the_switch_is_off(monkeypatch):
     assert r.status_code == 403 and r.json()["detail"] == "sign_in_with_apple_required"
     monkeypatch.delenv("CUTSELL_GUEST_SIGNUP")
     assert auth_routes.guest_signup_open()
+
+
+def test_probe_sessions_need_a_github_identity_of_this_repo_and_live_three_hours(monkeypatch):
+    """7 Nov 2026: the iPhone test probes get accounts without the guest door; 404 without a valid GitHub token."""
+    import fakeredis
+    from cutsell_worker import auth as _auth
+    redis = fakeredis.FakeRedis()
+    monkeypatch.setattr(_auth, "_redis_client", lambda client=None: redis)
+    monkeypatch.setenv("CUTSELL_GUEST_SIGNUP", "0")
+
+    def fake_verify(token):
+        if token != "good":
+            raise PermissionError("bad")
+        return {"repository": "AutomatedRetailServices/EditDNA-worker", "workflow": "probe"}
+    monkeypatch.setattr(auth_routes, "_verify_probe_oidc", fake_verify)
+    app = FastAPI()
+    app.include_router(auth_routes.router)
+    c = TestClient(app)
+    assert c.post("/v1/auth/probe-session").status_code == 404
+    assert c.post("/v1/auth/probe-session", headers={"X-CutSell-Probe-OIDC": "forged"}).status_code == 404
+    r = c.post("/v1/auth/probe-session", headers={"X-CutSell-Probe-OIDC": "good"})
+    assert r.status_code == 200 and r.json()["expires_in"] == 3 * 3600
+    token = r.json()["access_token"]
+    assert 0 < redis.ttl(_auth.session_key(token)) <= 3 * 3600
+    _auth.resolve_session(token, client=redis)            # use does not stretch it to 90 days
+    assert redis.ttl(_auth.session_key(token)) <= 3 * 3600
+
+
+def test_probe_identity_from_another_repository_is_refused(monkeypatch):
+    import jwt as _jwt
+    from types import SimpleNamespace
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    monkeypatch.setattr("jwt.PyJWKClient.get_signing_key_from_jwt",
+                        lambda self, t: SimpleNamespace(key=key.public_key()))
+    def mint(repo):
+        import time
+        return _jwt.encode({"iss": auth_routes.GITHUB_OIDC_ISSUER, "aud": "cutsell-probe", "repository": repo,
+                            "iat": int(time.time()), "exp": int(time.time()) + 300}, key, algorithm="RS256")
+    assert auth_routes._verify_probe_oidc(mint("AutomatedRetailServices/EditDNA-worker"))["repository"]
+    with pytest.raises(PermissionError):
+        auth_routes._verify_probe_oidc(mint("someone/EditDNA-worker"))
