@@ -7,8 +7,9 @@ Last updated 7 Nov 2026.
 - **Sign in with Apple for everyone, starting in testing** (PO 6 Nov 2026, replaces the 5 Nov "guest in testing"
   decision). Build 74: first open shows "Continue with Apple"; saved guest sessions keep working and move their
   videos into the Apple account on sign-in. Server: CUTSELL_APPLE_CLIENT_ID=ai.cutsell.app is set on Render.
-  Still to do: set CUTSELL_GUEST_SIGNUP=0 once testers have build 74, and give the iPhone UI probes a non-guest
-  way to get a session first (they call /v1/auth/session today).
+  7 Nov: CUTSELL_GUEST_SIGNUP=0 is set (new guest accounts refused, 403). Build 76: a phone still on a guest
+  account must sign in with Apple once after updating; its videos move to the Apple account. Older builds keep
+  their guest session until they update. iPhone probes use /v1/auth/probe-session (GitHub OIDC).
 - **When CutSell is paid:** paying needs an account (Sign in with Apple), so every subscription belongs to one person.
 - **Account deletion = everything, nothing recoverable** (PO 6 Nov 2026).
 - **Product AI:** when the creator picks brand + product in the app, the AI is never asked; when she picks nothing,
