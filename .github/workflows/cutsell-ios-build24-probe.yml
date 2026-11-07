@@ -100,12 +100,16 @@ jobs:
           done
           ls -la c*.mp4
 
+      # 7 Nov 2026: a 3-hour test account through the key-protected probe door (the guest door closes).
       - name: Session for the probe user
+        env:
+          PROBE_KEY: ${{ secrets.CUTSELL_PROBE_KEY }}
         run: |
           python3 - <<'PYX'
           import json, os, urllib.request
-          r = urllib.request.Request("https://cutsell-api.onrender.com/v1/auth/session", method="POST", data=None,
-                                     headers={"content-type": "application/json"})
+          r = urllib.request.Request("https://cutsell-api.onrender.com/v1/auth/probe-session", method="POST", data=None,
+                                     headers={"content-type": "application/json",
+                                              "X-CutSell-Probe-Key": os.environ.get("PROBE_KEY", "")})
           s = json.load(urllib.request.urlopen(r, timeout=120))
           print("::add-mask::" + s["access_token"])
           with open(os.environ["GITHUB_ENV"], "a") as f: f.write(f"PROBE_TOKEN={s['access_token']}\nPROBE_USER={s['user_id']}\n")
