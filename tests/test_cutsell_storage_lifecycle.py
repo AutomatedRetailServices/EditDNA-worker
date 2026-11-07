@@ -117,3 +117,41 @@ def test_opening_a_cut_marks_its_files_used_and_says_if_a_copy_was_removed(monke
     out = TestClient(api.app).get("/v1/projects/p1/draft", params={"user_id": "u1"}).json()
     assert [s["available"] for s in out["sources"]] == [True, False]
     assert touched == ["s3://b/k1.mp4", "s3://b/k1.m4a", "s3://b/k2.mp4"]
+
+
+def test_daily_cleanup_looks_only_at_the_iphone_video_copies_after_24_hours(monkeypatch):
+    """PO 7 Nov 2026: 24 h after the last use, only the copies the iPhone can upload again; report only at first."""
+    import fakeredis
+    now = 1_800_000_000.0
+    p = upload_prefix()
+    u = "0" * 16 + "/" + "1" * 16 + "/"
+    copy_old = p + u + "a" * 32 + "-IMG_1.MOV"
+    copy_used = p + u + "b" * 32 + "-IMG_2.mov"
+    copy_new = p + u + "c" * 32 + "-IMG_3.mp4"
+    keep = [p + u + "d" * 32 + "-voice.m4a",                  # voice file
+            p + u + "clean/v2/source-abc.m4a",                 # clean audio
+            p + u + "timeline/asset1.mov",                     # editor media
+            p + u + "mix-001-A-B.mp4",                         # a Mix video (no original in Photos)
+            p + u + "mix/clean-x.mov"]
+    objects = {copy_old: (500, _ts(2, now)), copy_used: (400, _ts(5, now)), copy_new: (300, _ts(0.5, now))}
+    objects.update({k: (999, _ts(30, now)) for k in keep})
+    s3 = FakeS3(objects)
+    r = fakeredis.FakeRedis()
+    monkeypatch.delenv("CUTSELL_STORAGE_KEEP_HOURS", raising=False)
+    monkeypatch.delenv("CUTSELL_STORAGE_LIFECYCLE_DELETE", raising=False)
+    sl.touch([f"s3://b/{copy_used}"], r, now=now - 3600)        # used an hour ago
+    report = sl.daily(s3, "b", r, now=now)
+    assert report["mode"] == "report_only" and report["removed"] == 0 and s3.deleted == []
+    assert report["copies"] == 3 and report["unused"] == 1 and report["unused_bytes"] == 500
+    assert json.loads(r.get(sl.REPORT_KEY))["unused"] == 1
+    monkeypatch.setenv("CUTSELL_STORAGE_LIFECYCLE_DELETE", "1")
+    assert sl.daily(s3, "b", r, now=now)["removed"] == 1 and s3.deleted == [copy_old]
+
+
+def test_any_server_use_of_a_file_counts_as_use(monkeypatch, tmp_path):
+    from cutsell_worker import storage
+    seen = []
+    monkeypatch.setattr(sl, "touch", lambda uris, client=None, now=None: seen.extend(uris))
+    monkeypatch.setattr("cutsell_worker.storage_routing.download", lambda b, k, d, client=None: d)
+    storage.download_source("s3://b/cutsell/uploads/x/y/z.mov", str(tmp_path / "z.mov"))
+    assert seen == ["s3://b/cutsell/uploads/x/y/z.mov"]

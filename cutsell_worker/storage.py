@@ -19,6 +19,9 @@ def download_source(uri: str, destination: str, *, client=None) -> str:
     from .storage_routing import download
 
     bucket, key = parse_s3_uri(uri)
+    # 7 Nov: any server use of a stored file (cut, Mix, clean voice, export) counts as a use for the daily cleanup.
+    from .storage_lifecycle import touch
+    touch([uri])
     path = Path(destination)
     path.parent.mkdir(parents=True, exist_ok=True)
     return download(bucket, key, str(path), client=client)

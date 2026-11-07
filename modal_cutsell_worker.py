@@ -149,3 +149,15 @@ def sweep() -> dict:
     for _ in range(started):
         drain_queue.spawn()
     return {"waiting": waiting, "started": started}
+
+
+@app.function(
+    image=image, secrets=[secret], cpu=0.25, memory=512, timeout=900,
+    schedule=modal.Cron("17 8 * * *"),          # once a day, ~3-4 am New York
+)
+def storage_cleanup() -> dict:
+    """PO 7 Nov 2026: the iPhone's video copies unused for 24 hours. Report only until
+    CUTSELL_STORAGE_LIFECYCLE_DELETE=1 is set in the Modal secret (the Product Owner's final OK)."""
+    from cutsell_worker import storage_lifecycle
+    from cutsell_worker.storage_routing import current_bucket, default_client
+    return storage_lifecycle.daily(default_client(), current_bucket())

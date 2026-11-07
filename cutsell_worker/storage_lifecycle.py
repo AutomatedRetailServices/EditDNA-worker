@@ -22,7 +22,34 @@ from typing import Any, Iterable
 from .uploads import scoped_upload_prefix, upload_prefix
 
 LAST_USED_KEY = "cutsell:storage:last_used"
+REPORT_KEY = "cutsell:storage:last_report"
 KEEP_DAYS = 3
+
+
+def keep_hours() -> float:
+    """PO 7 Nov 2026: 24 hours after the last use (CUTSELL_STORAGE_KEEP_HOURS)."""
+    try:
+        return max(1.0, float(os.environ.get("CUTSELL_STORAGE_KEEP_HOURS", "24")))
+    except ValueError:
+        return 24.0
+
+
+_VIDEO_SUFFIXES = (".mp4", ".mov", ".m4v", ".qt")
+
+
+def is_source_copy(key: str) -> bool:
+    """Only the light video copy the iPhone uploaded ({32 hex}-{name}.mov/.mp4 directly in the project folder):
+    the one thing the iPhone can upload again from Photos. Never the voice file, clean audio (clean/), timeline
+    media (timeline/), Mix videos (mix-..., mix/) or anything else: those cannot be restored from the phone."""
+    import re
+    prefix = upload_prefix()
+    if not key.startswith(prefix):
+        return False
+    parts = key[len(prefix):].split("/")
+    if len(parts) != 3:                 # user16 / project16 / file -- no subfolders
+        return False
+    name = parts[2].lower()
+    return bool(re.match(r"^[0-9a-f]{32}-", name)) and name.endswith(_VIDEO_SUFFIXES)
 _LOG = logging.getLogger("cutsell.storage_lifecycle")
 
 
@@ -60,9 +87,12 @@ def touch(uris: Iterable[str], client=None, *, now: float | None = None) -> None
         _LOG.warning("storage_touch_failed %s", exc.__class__.__name__)
 
 
-def candidates(s3, bucket: str, client=None, *, now: float | None = None, keep_days: int = KEEP_DAYS) -> dict[str, Any]:
-    """Report only: the app's uploaded files not used for `keep_days` (last use, else the upload date)."""
+def candidates(s3, bucket: str, client=None, *, now: float | None = None, keep_days: float | None = None,
+               only_source_copies: bool = False) -> dict[str, Any]:
+    """Report only: the app's uploaded files not used for `keep_days` (last use, else the upload date).
+    only_source_copies: the daily cleanup looks only at the iPhone's video copies (`is_source_copy`)."""
     now = time.time() if now is None else now
+    keep_days = KEEP_DAYS if keep_days is None else keep_days
     limit = now - keep_days * 86400
     target = _redis(client)
     prefix = upload_prefix()
@@ -70,6 +100,8 @@ def candidates(s3, bucket: str, client=None, *, now: float | None = None, keep_d
     for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
         for obj in page.get("Contents", []):
             key, size = obj["Key"], int(obj["Size"])
+            if only_source_copies and not is_source_copy(key):
+                continue
             out["bucket_files"] += 1
             out["bucket_bytes"] += size
             used = None
@@ -109,3 +141,26 @@ def restore_target(*, uri: str, user_id: str, project_id: str, bucket: str) -> s
     if not key.startswith(scoped_upload_prefix(user_id=user_id, project_id=project_id)):
         raise PermissionError("source does not belong to this project")
     return key
+
+
+def daily(s3, bucket: str, client=None, *, now: float | None = None) -> dict[str, Any]:
+    """The daily cleanup (PO 7 Nov 2026). Reports the iPhone video copies unused for `keep_hours()`, and deletes them
+    only when CUTSELL_STORAGE_LIFECYCLE_DELETE=1 (off at first: report only). The report is kept in Redis (numbers
+    only, no names) so the Product Owner can see what it would remove."""
+    import json
+    now = time.time() if now is None else now
+    found = candidates(s3, bucket, client, now=now, keep_days=keep_hours() / 24.0, only_source_copies=True)
+    deleting = os.environ.get("CUTSELL_STORAGE_LIFECYCLE_DELETE", "0").strip() == "1"
+    removed = remove(s3, bucket, [k for k in found["keys"] if is_source_copy(k)], confirm=deleting)
+    report = {"at": dt.datetime.fromtimestamp(now, tz=dt.timezone.utc).isoformat(), "keep_hours": keep_hours(),
+              "copies": found["bucket_files"], "copies_bytes": found["bucket_bytes"],
+              "unused": found["old_files"], "unused_bytes": found["old_bytes"],
+              "mode": "delete" if deleting else "report_only", "removed": removed}
+    try:
+        target = _redis(client)
+        if target is not None:
+            target.set(REPORT_KEY, json.dumps(report))
+    except Exception as exc:
+        _LOG.warning("storage_report_store_failed %s", exc.__class__.__name__)
+    _LOG.info("storage_daily %s", report)
+    return report
