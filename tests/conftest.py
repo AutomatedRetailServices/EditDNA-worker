@@ -30,9 +30,15 @@ import pytest  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
-def _in_memory_usage_meter(monkeypatch):
+def _in_memory_usage_meter():
+    # Patched by hand, not with the shared `monkeypatch` fixture: using it here would change the teardown order
+    # of other tests' fixtures that also use monkeypatch.
     import fakeredis
     from cutsell_worker import usage_limits
     meter = fakeredis.FakeRedis()
-    monkeypatch.setattr(usage_limits, "_meter_client", lambda client=None: client if client is not None else meter)
-    yield meter
+    original = usage_limits._meter_client
+    usage_limits._meter_client = lambda client=None: client if client is not None else meter
+    try:
+        yield meter
+    finally:
+        usage_limits._meter_client = original
