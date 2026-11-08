@@ -1,6 +1,6 @@
 # CutSell — before the paid launch (Product Owner decisions, kept here so nothing is lost)
 
-Last updated 7 Nov 2026.
+Last updated 8 Nov 2026.
 
 ## Decided by the Product Owner
 - **Free trial: 3 days** (PO 5 Nov 2026). After the trial the person pays to keep cutting.
@@ -48,3 +48,29 @@ Last updated 7 Nov 2026.
   creator (same video, same cut, no repeat cost); privacy policy and AI notice say words only; soft Create bubbles.
 - 5 Nov 2026: spend limits on every door that queues paid work (real video length checked before Deepgram /
   Claude; hourly ceilings; Bulk counted by the server) — commit 01db5be, live.
+
+
+## Security review (4 Nov 2026) — PAUSED by the PO on 8 Nov 2026; resume only when she says so
+Done (12 of 27): 1 spend limits · 2 guest accounts closed (Sign in with Apple) · 3 product AI words only ·
+4 full account deletion (Apple revoke waits for her Sign in with Apple key) · 8 oversized uploads refused ·
+9 monthly meter fails closed (Redis; Render has no database) · 11 daily cleanup of iPhone copies after 24 h
+(REPORT ONLY until CUTSELL_STORAGE_LIFECYCLE_DELETE=1 in the Modal secret, after her OK) · 13 packages pinned ·
+14 App Store key only in its steps, deploy tools pinned · 15 test tokens masked, probe sessions 3 h.
+Remaining, in the order proposed to the PO:
+- 🔴 5 GitHub secrets into Environments (guide for the PO, ~15 min).
+- 🟠 6 + 7 one key per component for Redis and AWS/R2, then rotate (code by Claude, new keys by the PO).
+- 🟠 10 move timeline prepare/export off the API server · 12 payments (StoreKit 2, at paid launch).
+- 🟡 16 kill switch · 17 tell the creator when a job dies · 18 health alerts · 19 never process/charge the same
+  video twice · 20 rate limits on other routes · 21 check uploads are real videos · 22 + 27 remove unused keys and
+  the old EditDNA service · 23 + 24 pin ffmpeg and the TikTok SDK · 25 privacy policy (remove DRAFT, add TikTok
+  and Sentry, professional contact) · 26 push notifications route missing on the server.
+- PO accounts: 2FA everywhere · provider spend caps · Sign in with Apple key · R2 not public / S3 versioning off.
+- PO decisions: reinstall / new iPhone loses the "which Photos video" link (fix with a server copy, or accept) ·
+  turn on deletion of the 24 h copies after the report and a real "Restoring video…" test · old GitHub artifacts
+  (20 Video00 test videos + 3 Yaskira frame sets) left to expire on their own.
+- Proposed next batch (no cost, nothing visible): 10, 16, 17, 19, 21, 26.
+- App changes waiting for the next build (branch build/apple-signup, after build 76): dated deletion warning for
+  a canceled subscription, privacy text on subscription end, Week Plan reminders removed when the account is gone,
+  probe via GitHub identity, App Store key only in its steps, TestFlight check tools in their own environment.
+- Known (not security): the Monday-Sunday Week Plan mode can come out empty on a Sunday; check whether the app
+  still uses that mode.
