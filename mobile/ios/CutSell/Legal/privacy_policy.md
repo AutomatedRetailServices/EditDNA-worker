@@ -45,7 +45,7 @@ You are asked to agree to this before your first cut is processed. Nothing is pr
 
 ## How long we keep it
 
-We keep your videos, edits and exports while your account exists, so you can come back to your cuts. You can delete a cut at any time. The AI's answer for a video is kept for up to 30 days, so the same video gives the same cut again. When you delete your account, we delete everything in it from our servers: your cuts, the media you uploaded, your exports, your products, Mixes and plans, and the AI's answers, including any copies kept in our older storage. Copies inside our automatic server backups expire on their own within 30 days.
+We keep your videos, edits and exports while your account exists, so you can come back to your cuts. You can delete a cut at any time. The AI's answer for a video is kept for up to 30 days, so the same video gives the same cut again. When you delete your account, we delete everything in it from our servers: your cuts, the media you uploaded, your exports, your products, Mixes and plans, and the AI's answers, including any copies kept in our older storage. Copies inside our automatic server backups expire on their own within 30 days. If you cancel a paid subscription, you keep CutSell until the end of the period you already paid for (or the end of your free trial); on that date everything in your account is deleted in the same way and cannot be recovered. The app shows you that date beforehand so you can export what you want to keep. If you subscribe again before that date, nothing is deleted.
 
 ## Delete your account
 
