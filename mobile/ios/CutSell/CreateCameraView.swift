@@ -36,8 +36,9 @@ struct CreateCameraView: View {
     var previewMode = false
     /// Teleprompter: the product (and Mix section) this recording is for.
     var scriptContext: TeleprompterContext? = nil
-    /// Clon (beta; was Split clone, PO 27 Oct): the "Clon" control, only on the Create tab's Record camera.
-    var allowsSplit = false
+    /// Clon AR (beta, PO 8 Nov 2026): the "Clon" control, only on the Create tab's Record camera, and only on an
+    /// iPhone whose AR can cut a person out of the picture.
+    var allowsClone = false
 
     @StateObject private var camera = CameraController()
     @State private var gate: Gate = .checking
@@ -51,8 +52,11 @@ struct CreateCameraView: View {
     @State private var editingScript = false
     @State private var countingDown = false
     @State private var railTop: CGFloat = 0
-    @State private var showingSplit = false
-    @State private var splitVideo: LocalVideo?
+    @State private var showingClone = false
+    @State private var cloneVideo: LocalVideo?
+    /// "Recording stopped — no voice for 1 min" / "We didn't hear any voice": shown before the video goes on.
+    @State private var notice: String?
+    @State private var noticeVideo: LocalVideo?
 
     var body: some View {
         ZStack {
@@ -106,14 +110,14 @@ struct CreateCameraView: View {
             prompter.context = scriptContext ?? TeleprompterContext()
             if prompter.openSheetNext { prompter.openSheetNext = false; editingScript = true }
         }
-        .fullScreenCover(isPresented: $showingSplit, onDismiss: {
+        .fullScreenCover(isPresented: $showingClone, onDismiss: {
             if !previewMode { camera.startSession() }
-            // The joined video goes on exactly like a recording made here.
-            if let video = splitVideo { splitVideo = nil; onRecorded(video) }
+            // The Clon video goes on exactly like a recording made here (product, upload, engine).
+            if let video = cloneVideo { cloneVideo = nil; onRecorded(video) }
         }) {
-            SplitCloneView(onClose: { showingSplit = false }, onUse: { video in
-                splitVideo = video
-                showingSplit = false
+            CloneFlowView(onClose: { showingClone = false }, onUse: { video in
+                cloneVideo = video
+                showingClone = false
             })
         }
         .fullScreenCover(isPresented: $recordingFailed) {
@@ -157,13 +161,26 @@ struct CreateCameraView: View {
                 .padding(.top, 4)
 
                 if camera.isRecording || elapsed > 0 {
-                    Text(L10n.tr("\(timeString(elapsed)) / \(preset.title)"))
-                        .font(.system(size: 15, weight: .bold, design: .monospaced))
+                    if autoPauseActive {
+                        autoPauseBadge.padding(.top, 8)
+                    } else {
+                        Text(L10n.tr("\(timeString(elapsed)) / \(preset.title)"))
+                            .font(.system(size: 15, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(Color.black.opacity(0.45), in: Capsule())
+                            .padding(.top, 8)
+                    }
+                }
+                if camera.brollOn && !camera.isRecording {
+                    Text(L10n.tr("Auto-pause off for B-roll"))
+                        .font(CS.inter(12, .semibold))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 7)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
                         .background(Color.black.opacity(0.45), in: Capsule())
                         .padding(.top, 8)
+                        .accessibilityIdentifier("brollNotice")
                 }
 
                 HStack {
@@ -224,6 +241,58 @@ struct CreateCameraView: View {
                     beginRecording()
                 }
             }
+            if let notice {
+                noticeCard(notice)
+            }
+        }
+    }
+
+    /// Auto-pause is recording right now (on, and not B-roll).
+    private var autoPauseActive: Bool { camera.isRecording && camera.autoPauseOn && !camera.brollOn }
+
+    /// "● REC 0:12" in red while the voice is kept, "Waiting for voice…" in grey in between (PO 8 Nov 2026).
+    /// The counter shows only the time kept.
+    private var autoPauseBadge: some View {
+        HStack(spacing: 8) {
+            if camera.live.saving {
+                Circle().fill(Color(fixed: 0xE5484D)).frame(width: 9, height: 9)
+                Text(verbatim: "REC").font(CS.inter(14, .heavy)).foregroundStyle(Color(fixed: 0xE5484D))
+            } else {
+                Text(L10n.tr("Waiting for voice…")).font(CS.inter(14, .semibold)).foregroundStyle(Color(fixed: 0xB8BECB))
+            }
+            Text(verbatim: "\(timeString(camera.live.savedSeconds)) / \(preset.title)")
+                .font(.system(size: 15, weight: .bold, design: .monospaced))
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .background(Color.black.opacity(0.45), in: Capsule())
+        .accessibilityIdentifier("autoPauseBadge")
+    }
+
+    private func noticeCard(_ text: String) -> some View {
+        ZStack {
+            Color.black.opacity(0.45).ignoresSafeArea()
+            VStack(spacing: 16) {
+                Text(L10n.tr(text))
+                    .font(CS.inter(16, .bold))
+                    .foregroundStyle(Color(fixed: 0x0B1020))
+                    .multilineTextAlignment(.center)
+                Button {
+                    let video = noticeVideo
+                    notice = nil; noticeVideo = nil
+                    if let video { onRecorded(video) }
+                } label: {
+                    Text(L10n.tr("OK")).font(CS.inter(15, .bold)).foregroundStyle(.white)
+                        .frame(maxWidth: .infinity).frame(height: 48)
+                        .background(Color(fixed: 0x1769FF), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("autoPauseNoticeOK")
+            }
+            .padding(22)
+            .background(Color(fixed: 0xFFFFFF), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .padding(.horizontal, 32)
         }
     }
 
@@ -265,14 +334,23 @@ struct CreateCameraView: View {
             .buttonStyle(.plain)
             .accessibilityValue(camera.mirrorOn ? "On" : "Off")
             .accessibilityIdentifier("cameraMirror")
-            if allowsSplit {
+            toggleButton(title: "Auto-pause", system: "waveform", on: camera.autoPauseOn && !camera.brollOn,
+                         id: "cameraAutoPause") {
+                camera.autoPauseOn.toggle()
+                if camera.autoPauseOn { camera.brollOn = false }
+                Task { await camera.applyAutoPauseChoice() }
+            }
+            toggleButton(title: "B-roll", system: "film", on: camera.brollOn, id: "cameraBroll") {
+                camera.brollOn.toggle()
+            }
+            if allowsClone && (previewMode || CloneSupport.isSupported) {
                 Button {
                     if torchOn { camera.setTorch(false); torchOn = false }
                     if !previewMode { camera.stopSession() }
-                    showingSplit = true
+                    showingClone = true
                 } label: {
                     VStack(spacing: 4) {
-                        // Clon (beta, PO 29 Oct; was "Split"): two people + a small BETA tag.
+                        // Clon (beta): two people + a small BETA tag.
                         Image(systemName: "person.2.fill")
                             .font(.system(size: 24, weight: .regular))
                             .foregroundStyle(.white)
@@ -287,7 +365,7 @@ struct CreateCameraView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(camera.isRecording)
-                .accessibilityIdentifier("cameraSplit")
+                .accessibilityIdentifier("cameraClone")
             }
             scriptRailButtons
         }
@@ -353,6 +431,28 @@ struct CreateCameraView: View {
         }
         .frame(width: 62)
         .padding(.trailing, 8)
+    }
+
+    /// Auto-pause / B-roll: an SF icon + label, cyan when on (like Mirror).
+    private func toggleButton(title: String, system: String, on: Bool, id: String,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: system)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(on ? CS.cyan : .white)
+                    .frame(width: 36, height: 36)
+                Text(L10n.tr(title))
+                    .font(CS.inter(13, .semibold))
+                    .lineLimit(1).minimumScaleFactor(0.7)
+                    .foregroundStyle(on ? CS.cyan : .white)
+            }
+            .frame(width: 62)
+        }
+        .buttonStyle(.plain)
+        .disabled(camera.isRecording)
+        .accessibilityValue(on ? "On" : "Off")
+        .accessibilityIdentifier(id)
     }
 
     private func controlButton(title: String, image: String, size: CGSize, action: @escaping () -> Void) -> some View {
@@ -502,12 +602,17 @@ struct CreateCameraView: View {
                 Task {
                     let seconds = (try? await AVURLAsset(url: url).load(.duration).seconds) ?? elapsed
                     elapsed = 0
-                    onRecorded(LocalVideo(
-                        url: url,
-                        name: "Recorded clip",
-                        duration: max(0, seconds),
-                        contentType: "video/quicktime"
-                    ))
+                    let video = LocalVideo(url: url, name: "Recorded clip", duration: max(0, seconds),
+                                           contentType: "video/quicktime")
+                    // Auto-pause notices (PO 8 Nov 2026): what was kept is kept; the notice comes first.
+                    if camera.autoStoppedNotice {
+                        camera.autoStoppedNotice = false
+                        notice = "Recording stopped — no voice for 1 min"; noticeVideo = video
+                    } else if let outcome = camera.lastOutcome, !outcome.heardVoice, camera.autoPauseOn, !camera.brollOn {
+                        notice = "We didn't hear any voice"; noticeVideo = video
+                    } else {
+                        onRecorded(video)
+                    }
                 }
             case .failure:
                 elapsed = 0
@@ -523,7 +628,8 @@ struct CreateCameraView: View {
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
             Task { @MainActor in
                 elapsed += 0.1
-                if elapsed >= limit {
+                let used = autoPauseActive ? camera.live.savedSeconds : elapsed
+                if used >= limit {
                     elapsed = limit
                     stopTimer()
                     if camera.isRecording { camera.stopRecording() }

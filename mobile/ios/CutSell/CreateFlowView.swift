@@ -127,7 +127,7 @@ struct CreateFlowView: View {
                     onBack: { showingCamera = false },
                     onUpload: { afterCamera = .gallery; showingCamera = false },
                     onRecorded: { recorded = $0 },
-                    allowsSplit: true
+                    allowsClone: true
                 )
                 BottomSheetOverlay(isPresented: Binding(
                     get: { recorded != nil },

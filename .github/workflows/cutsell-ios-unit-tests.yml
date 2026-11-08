@@ -1,0 +1,81 @@
+name: CutSell iOS unit tests
+
+# Clon AR + auto-pause + B-roll (PO 8 Nov 2026): compiles the app for the simulator and runs the unit tests in
+# mobile/ios/CutSellUnitTests (synthetic data made inside the tests, nothing stored in the repo). AR, camera and
+# microphone need a real iPhone; this checks the geometry, timing, sound and joining rules.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [feature/clon-ar-autopausa]
+    paths:
+      - 'mobile/ios/**'
+      - '.github/workflows/cutsell-ios-unit-tests.yml'
+
+concurrency:
+  group: cutsell-ios-unit-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: macos-15-intel
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0
+
+      - name: Select the newest Xcode
+        run: |
+          latest="$(ls -d /Applications/Xcode*.app | grep -vi beta | sort -V | tail -1)"
+          sudo xcode-select -s "$latest"
+          xcodebuild -version
+
+      - name: Add the unit test target (CI only)
+        working-directory: mobile/ios
+        run: |
+          brew install xcodegen >/dev/null
+          cat >> project.yml <<'YML'
+            CutSellUnitTests:
+              type: bundle.unit-test
+              platform: iOS
+              sources:
+                - CutSellUnitTests
+              dependencies:
+                - target: CutSell
+              settings:
+                base:
+                  PRODUCT_BUNDLE_IDENTIFIER: ai.cutsell.app.unittests
+                  GENERATE_INFOPLIST_FILE: YES
+                  TEST_HOST: "$(BUILT_PRODUCTS_DIR)/CutSell.app/CutSell"
+                  BUNDLE_LOADER: "$(TEST_HOST)"
+          schemes:
+            CutSellUnitTests:
+              build:
+                targets:
+                  CutSell: all
+                  CutSellUnitTests: [test]
+              test:
+                config: Debug
+                targets:
+                  - CutSellUnitTests
+          YML
+          xcodegen generate
+
+      - name: Build for the simulator and run the unit tests
+        working-directory: mobile/ios
+        run: |
+          udid="$(xcrun simctl list devices available --json | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)["devices"]
+          c=sorted((r,x["name"],x["udid"]) for r,v in d.items() if "iOS" in r for x in v if x["name"].startswith("iPhone"))
+          print(c[-1][2])')"
+          set +e
+          xcodebuild test -project CutSell.xcodeproj -scheme CutSellUnitTests -sdk iphonesimulator \
+            -destination "id=$udid" -derivedDataPath build CODE_SIGNING_ALLOWED=NO > "$RUNNER_TEMP/test.log" 2>&1
+          status=$?
+          grep -E "error:" "$RUNNER_TEMP/test.log" | sort -u | head -20 | while IFS= read -r l; do echo "::error title=build::$(echo "$l" | sed 's#.*/mobile/ios/##' | cut -c1-300)"; done
+          grep -E "Test Case .*(passed|failed)|Executed [0-9]+ test" "$RUNNER_TEMP/test.log" | tail -40
+          grep -E "XCTAssert|error: -\[" "$RUNNER_TEMP/test.log" | head -20 | while IFS= read -r l; do echo "::error title=test::$(echo "$l" | cut -c1-300)"; done
+          exit $status

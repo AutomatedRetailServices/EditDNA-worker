@@ -161,22 +161,10 @@ struct DesignScreenshotRoot: View {
                 project: Self.sampleProjects[0], onBack: {}, onReview: {}
             )
             .background(CS.wiPage.ignoresSafeArea())
-        case "split_selftest":
-            SplitSelfTestView()
-        case "camera_split":
-            CreateCameraView(onBack: {}, onUpload: {}, onRecorded: { _ in }, previewMode: true, allowsSplit: true)
-        case "split_setup":
-            SplitCloneView(onClose: {}, onUse: { _ in }, previewStep: .setup)
-        case "split_part1":
-            SplitCloneView(onClose: {}, onUse: { _ in }, previewStep: .part1)
-        case "split_part1_ready":
-            SplitCloneView(onClose: {}, onUse: { _ in }, previewStep: .part1Ready)
-        case "split_part2":
-            SplitCloneView(onClose: {}, onUse: { _ in }, previewStep: .part2)
-        case "split_joining":
-            SplitCloneView(onClose: {}, onUse: { _ in }, previewStep: .joining)
-        case "split_result":
-            SplitCloneView(onClose: {}, onUse: { _ in }, previewStep: .result)
+        case "camera_clone":
+            CreateCameraView(onBack: {}, onUpload: {}, onRecorded: { _ in }, previewMode: true, allowsClone: true)
+        case "clone_start":
+            CloneStartView(onClose: {}, onStart: {})
         case "create_probe":
             CreateProbe()
         case "app_probe":
