@@ -63,6 +63,9 @@ final class AccountProfile: ObservableObject {
     static let shared = AccountProfile()
     @Published var name: String = UserDefaults.standard.string(forKey: "cutsell.account.name") ?? ""
     @Published var email: String = UserDefaults.standard.string(forKey: "cutsell.account.email") ?? ""
+    /// PO 8 Nov 2026: while a canceled subscription runs out, the server sends the dated "everything will be
+    /// deleted" warning; the app shows it on Create and in You until she pays again or the date arrives.
+    @Published var deletionWarning: String?
 
     func remember(name: String?, email: String?) {
         if let name, !name.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -84,10 +87,13 @@ final class AccountProfile: ObservableObject {
     /// Name / email the server has for this account (silently nothing if it can't answer).
     func refresh(session: CutSellSession?) async {
         guard let session, session.isAppleAccount else { return }
-        struct Me: Decodable { let email: String?; let name: String? }
+        struct Subscription: Decodable { let state: String?; let warning: String?; let warning_es: String? }
+        struct Me: Decodable { let email: String?; let name: String?; let subscription: Subscription? }
         if let me: Me = try? await APIClient.shared.request("/v1/account/me",
                                                              query: [URLQueryItem(name: "user_id", value: session.userID)]) {
             remember(name: me.name, email: me.email)
+            let spanish = L10n.shared.code == "es"
+            deletionWarning = (spanish ? me.subscription?.warning_es : nil) ?? me.subscription?.warning
         }
     }
 
@@ -133,6 +139,9 @@ struct YouView: View {
                     WIHeader { EmptyView() }
                     WIScreenTitle(title: "Profile").padding(.top, 2)
                     accountCard.padding(.top, 14)
+                    if let warning = profile.deletionWarning {
+                        DeletionWarningBanner(text: warning).padding(.top, 12)
+                    }
                     usageCard.padding(.top, 12)
                     VStack(spacing: 0) {
                         row("WIClock", "Your results", "Videos edited, video time and hours saved", .stats)

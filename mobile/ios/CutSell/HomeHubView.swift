@@ -38,6 +38,10 @@ struct HomeHubView: View {
                     HomeLogoHero()
                         .padding(.top, 6)
 
+                    if let warning = account.deletionWarning {
+                        DeletionWarningBanner(text: warning).padding(.horizontal, 16).padding(.top, 8)
+                    }
+
                     // 3) Greeting + the two-tone question, centred.
                     Text(firstName.isEmpty ? L10n.tr("Hi there 👋") : L10n.tr("Hi \(firstName) 👋"))
                         .font(CS.inter(15, .medium))
@@ -102,7 +106,7 @@ struct HomeHubView: View {
         }
         .wiStatusBarCover()
         // The account name for "Hi {name} 👋" (people who signed in before it was kept on this iPhone).
-        .task { if account.name.isEmpty { await account.refresh(session: appState.session) } }
+        .task { await account.refresh(session: appState.session) }   // also brings the subscription warning (8 Nov)
         .safeAreaInset(edge: .bottom) { CSTabBar(current: .create, select: selectTab) }
         .task(id: recent.filter { Project.processingStates.contains($0.state) }.map(\.id)) {
             for project in recent where Project.processingStates.contains(project.state) {
@@ -535,5 +539,26 @@ enum PlanMeter {
         formatter.dateFormat = "yyyy-MM"
         let month = formatter.string(from: now)
         return projects.filter { ($0.createdAt ?? $0.updatedAt ?? "").hasPrefix(month) }.count
+    }
+}
+
+
+/// PO 8 Nov 2026: a canceled subscription -- everything is deleted on the date, nothing can be recovered.
+struct DeletionWarningBanner: View {
+    let text: String
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(Color(fixed: 0xD92D20))
+            Text(text)
+                .font(CS.inter(13, .semibold))
+                .foregroundStyle(Color(fixed: 0x7A271A))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(fixed: 0xFEF3F2)))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color(fixed: 0xFDA29B), lineWidth: 1))
+        .accessibilityIdentifier("deletionWarning")
     }
 }
