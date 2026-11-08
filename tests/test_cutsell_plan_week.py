@@ -274,6 +274,9 @@ def test_the_api_marks_a_video_personal_and_takes_it_out_of_the_week(monkeypatch
     from cutsell_app import plan_routes
     monkeypatch.setattr(plan_routes, "_caption_missing", lambda user, view: None)
     _library()
+    # Every day of the week, late time: on a Sunday the week still has a day left to fill (the test ran empty
+    # on Sundays only).
+    post_plan.set_prefs("u1", {"days": [0, 1, 2, 3, 4, 5, 6], "per_day": 1})
     app = FastAPI()
     app.include_router(plan_routes.router)
     client = TestClient(app)
