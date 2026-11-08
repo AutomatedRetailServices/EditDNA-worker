@@ -42,7 +42,13 @@ def get_me(user_id: str):
         email = _email(user_id)
     except Exception:
         email = None
-    return {"user_id": user_id, "email": email, "name": name or None}
+    try:
+        from cutsell_worker.subscription_lifecycle import status as subscription_status
+        subscription = subscription_status(user_id)
+    except Exception:
+        subscription = {"state": "unknown"}
+    # 8 Nov: while a canceled subscription runs out, the app shows `subscription.warning` with the deletion date.
+    return {"user_id": user_id, "email": email, "name": name or None, "subscription": subscription}
 
 
 class NameRequest(BaseModel):

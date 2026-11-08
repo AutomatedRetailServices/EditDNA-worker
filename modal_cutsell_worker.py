@@ -158,6 +158,9 @@ def sweep() -> dict:
 def storage_cleanup() -> dict:
     """PO 7 Nov 2026: the iPhone's video copies unused for 24 hours. Report only until
     CUTSELL_STORAGE_LIFECYCLE_DELETE=1 is set in the Modal secret (the Product Owner's final OK)."""
-    from cutsell_worker import storage_lifecycle
+    from cutsell_worker import storage_lifecycle, subscription_lifecycle
     from cutsell_worker.storage_routing import current_bucket, default_client
-    return storage_lifecycle.daily(default_client(), current_bucket())
+    copies = storage_lifecycle.daily(default_client(), current_bucket())
+    # 8 Nov: accounts whose subscription really ended are deleted in full (no subscriptions exist yet: no-op).
+    ended = subscription_lifecycle.purge_ended()
+    return {"copies": copies, "subscriptions": ended}

@@ -12,6 +12,11 @@ Last updated 7 Nov 2026.
   their guest session until they update. iPhone probes use /v1/auth/probe-session (GitHub OIDC).
 - **When CutSell is paid:** paying needs an account (Sign in with Apple), so every subscription belongs to one person.
 - **Account deletion = everything, nothing recoverable** (PO 6 Nov 2026).
+- **Subscription ends = everything deleted, nothing recoverable** (PO 8 Nov 2026). Following Apple, a canceled
+  subscription keeps working until the end of the period already paid (or the end of the 3-day trial); on that date
+  the full account deletion runs. Before it, the app shows the dated warning (Create + You). Paying again before the
+  date cancels it. Built in `cutsell_worker/subscription_lifecycle.py` (daily run inside the Modal storage_cleanup);
+  dormant until payments exist: the StoreKit / App Store Server Notifications handler only calls `record(...)`.
 - **Product AI:** when the creator picks brand + product in the app, the AI is never asked; when she picks nothing,
   the AI guesses from the words only — no photos (PO 6 Nov 2026).
 

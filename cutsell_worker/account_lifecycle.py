@@ -292,6 +292,10 @@ def delete_account_data(*, user_id: str, redis_client=None, s3_client=None,
         pipe.delete(key)
     for key in _scan(redis_client, f"cutsell:v1:usage-month:{_scope20(user_id)}:*"):   # month meter (7 Nov)
         pipe.delete(key)
+    from .subscription_lifecycle import ENDING_INDEX, _key as subscription_key       # subscription state (8 Nov)
+    pipe.delete(subscription_key(user_id))
+    if hasattr(pipe, "zrem"):
+        pipe.zrem(ENDING_INDEX, user_id)
     pipe.execute()
 
     durable = {"status": "not_configured"}

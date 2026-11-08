@@ -11,7 +11,9 @@ def test_name_round_trip(monkeypatch):
     monkeypatch.setattr(routes, "_email", lambda user_id: "swanny@example.com" if user_id == "u1" else None)
     monkeypatch.setenv("CUTSELL_AUTH_DISABLED", "1")
     client = TestClient(api.app)
-    assert client.get("/v1/account/me", params={"user_id": "u1"}).json() == {"user_id": "u1", "email": "swanny@example.com", "name": None}
+    body = client.get("/v1/account/me", params={"user_id": "u1"}).json()
+    assert {k: body[k] for k in ("user_id", "email", "name")} == {"user_id": "u1", "email": "swanny@example.com", "name": None}
+    assert body["subscription"]["state"] in ("none", "unknown")   # 8 Nov: no payments yet
     got = client.put("/v1/account/me", json={"user_id": "u1", "name": "  Swanny   S "}).json()
     assert got["name"] == "Swanny S" and got["email"] == "swanny@example.com"
     assert client.get("/v1/account/me", params={"user_id": "u2"}).json()["name"] is None   # per account
