@@ -22,6 +22,8 @@ final class AutoPauseRecorder: NSObject, @unchecked Sendable {
         var autoStopped: Bool
         var originalBytes: Int64
         var finalBytes: Int64
+        /// B-roll stretches of the final video (also written in its metadata, `ai.cutsell.broll`).
+        var broll: [AutoPausePlan.Range] = []
     }
 
     let videoOutput = AVCaptureVideoDataOutput()
@@ -105,28 +107,31 @@ final class AutoPauseRecorder: NSObject, @unchecked Sendable {
         guard let writer, let url else { throw CameraController.CameraError.recordingFailed }
         if writer.status == .writing { await writer.finishWriting() }
         guard writer.status == .completed else { throw writer.error ?? CameraController.CameraError.recordingFailed }
-        let (voice, presence, duration, stopped, broll) = queue.sync {
+        let (voice, presence, duration, stopped, brollOn) = queue.sync {
             (self.voiceRanges(), AutoPausePlan.presence(samples: self.presenceSamples, duration: self.lastPTS),
              self.lastPTS, self.autoStopped, self.brollMode)
         }
         let asset = AVURLAsset(url: url)
         let total = (try? await asset.load(.duration).seconds) ?? duration
-        let keep = AutoPausePlan.keep(voice: voice, presence: presence, duration: total, brollMode: broll)
+        let keep = AutoPausePlan.keep(voice: voice, presence: presence, duration: total, brollMode: brollOn)
         let kept = AutoPausePlan.savedSeconds(keep)
         let originalBytes = Self.size(url)
-        // Nothing (or almost nothing) to remove: the recording is used as it is.
-        if keep.count == 1, keep[0].start < 0.05, keep[0].end > total - 0.05 {
+        let broll = AutoPausePlan.brollRanges(keep: keep, presence: presence, duration: total, brollMode: brollOn)
+        // Nothing to remove and no B-roll to mark: the recording is used as it is.
+        if keep.count == 1, keep[0].start < 0.05, keep[0].end > total - 0.05, broll.isEmpty {
             return Outcome(url: url, recordedSeconds: total, keptSeconds: total, heardVoice: !voice.isEmpty,
                            autoStopped: stopped, originalBytes: originalBytes, finalBytes: originalBytes)
         }
-        let out = try await Self.join(asset: asset, ranges: keep)
+        let out = try await Self.join(asset: asset, ranges: keep, broll: broll)
         try? FileManager.default.removeItem(at: url)
         return Outcome(url: out, recordedSeconds: total, keptSeconds: kept, heardVoice: !voice.isEmpty,
-                       autoStopped: stopped, originalBytes: originalBytes, finalBytes: Self.size(out))
+                       autoStopped: stopped, originalBytes: originalBytes, finalBytes: Self.size(out), broll: broll)
     }
 
     /// Joins the kept parts into one .mov without re-encoding (passthrough).
-    static func join(asset: AVURLAsset, ranges: [AutoPausePlan.Range]) async throws -> URL {
+    static let brollMetadataKey = "ai.cutsell.broll"
+
+    static func join(asset: AVURLAsset, ranges: [AutoPausePlan.Range], broll: [AutoPausePlan.Range] = []) async throws -> URL {
         let composition = AVMutableComposition()
         let videoTracks = try await asset.loadTracks(withMediaType: .video)
         let audioTracks = try await asset.loadTracks(withMediaType: .audio)
@@ -151,6 +156,14 @@ final class AutoPauseRecorder: NSObject, @unchecked Sendable {
         }
         export.outputURL = out
         export.outputFileType = .mov
+        if !broll.isEmpty {
+            // B-roll stretches marked in the file (the engine does not read them yet).
+            let item = AVMutableMetadataItem()
+            item.keySpace = .quickTimeMetadata
+            item.key = brollMetadataKey as NSString
+            item.value = AutoPausePlan.metadataText(broll) as NSString
+            export.metadata = [item]
+        }
         await export.export()
         guard export.status == .completed else { throw export.error ?? CameraController.CameraError.recordingFailed }
         return out

@@ -98,6 +98,27 @@ enum AutoPausePlan {
 
     static func savedSeconds(_ ranges: [Range]) -> Double { ranges.reduce(0) { $0 + $1.length } }
 
+    /// The B-roll stretches (no person on camera, or B-roll mode) as times of the FINAL, joined video. Written into
+    /// the video's metadata (`ai.cutsell.broll`, "start-end;start-end" in seconds).
+    static func brollRanges(keep: [Range], presence: [Range], duration: Double, brollMode: Bool) -> [Range] {
+        if brollMode { return [Range(start: 0, end: savedSeconds(keep))] }
+        let absent = subtract([Range(start: 0, end: duration)], merged(presence))
+        var out: [Range] = []
+        var offset = 0.0
+        for k in keep {
+            for a in absent {
+                let s = max(k.start, a.start), e = min(k.end, a.end)
+                if e - s > 0.05 { out.append(Range(start: offset + s - k.start, end: offset + e - k.start)) }
+            }
+            offset += k.length
+        }
+        return merged(out)
+    }
+
+    static func metadataText(_ ranges: [Range]) -> String {
+        ranges.map { String(format: "%.2f-%.2f", $0.start, $0.end) }.joined(separator: ";")
+    }
+
     /// Auto-stop: 1 minute without voice while a person is on camera (B-roll moments do not count).
     static func shouldAutoStop(now: Double, lastVoice: Double?, recordingStart: Double = 0,
                                presence: [Range], brollMode: Bool) -> Bool {

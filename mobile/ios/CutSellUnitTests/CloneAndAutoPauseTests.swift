@@ -227,6 +227,36 @@ final class BrollTests: XCTestCase {
         XCTAssertEqual(AutoPausePlan.savedSeconds(keep), 1.6 + 10 + 1.6, accuracy: 0.45)
     }
 
+    /// B-roll stretches are marked with the times of the final, joined video.
+    func testBrollStretchesAreMarkedInTheFinalTimeline() {
+        let samples = stride(from: 0.0, to: 30, by: 0.2).map { (time: $0, present: !($0 >= 10 && $0 < 20)) }
+        let presence = AutoPausePlan.presence(samples: samples, duration: 30)
+        let keep = AutoPausePlan.keep(voice: [R(start: 1, end: 2), R(start: 25, end: 26)], presence: presence,
+                                      duration: 30, brollMode: false)
+        let broll = AutoPausePlan.brollRanges(keep: keep, presence: presence, duration: 30, brollMode: false)
+        XCTAssertEqual(broll.count, 1)
+        XCTAssertEqual(broll[0].start, 1.6, accuracy: 0.21)       // after the first kept phrase (1.6 s)
+        XCTAssertEqual(broll[0].end, 11.6, accuracy: 0.21)
+        XCTAssertEqual(AutoPausePlan.metadataText([R(start: 1.6, end: 11.6)]), "1.60-11.60")
+        let whole = AutoPausePlan.brollRanges(keep: [R(start: 0, end: 40)], presence: [], duration: 40, brollMode: true)
+        assertRanges(whole, [R(start: 0, end: 40)])
+    }
+
+    /// The marks are written into the joined video's metadata.
+    func testBrollMarksAreWrittenInTheFile() async throws {
+        let source = try await SyntheticVideo.make(seconds: 3)
+        defer { try? FileManager.default.removeItem(at: source) }
+        let out = try await AutoPauseRecorder.join(asset: AVURLAsset(url: source), ranges: [R(start: 0, end: 2)],
+                                                   broll: [R(start: 0.5, end: 1.5)])
+        defer { try? FileManager.default.removeItem(at: out) }
+        let items = try await AVURLAsset(url: out).load(.metadata)
+        var found: String?
+        for item in items where (item.key as? String) == AutoPauseRecorder.brollMetadataKey {
+            found = try await item.load(.stringValue)
+        }
+        XCTAssertEqual(found, "0.50-1.50")
+    }
+
     func testBrollButtonKeepsEverything() {
         let everyone = [R(start: 0, end: 100)]
         assertRanges(AutoPausePlan.keep(voice: [R(start: 1, end: 2)], presence: everyone, duration: 100,
