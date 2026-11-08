@@ -34,6 +34,7 @@ final class AppState: ObservableObject {
                     try await start(with: saved)
                     return
                 } catch APIError.http(let code, _) where code == 401 {
+                    PostReminders.shared.schedule(nil)        // nothing stays scheduled for an account that is gone
                     // The saved session expired or was revoked on the server. Sessions in use no
                     // longer expire (the server extends them on every request), so this is rare.
                     KeychainStore.clear()
@@ -108,6 +109,9 @@ final class AppState: ObservableObject {
         session = nil
         projects = []
         await api.setSession(nil)
+        // PO 8 Nov: an account that is gone (deleted, subscription ended, logged out) leaves nothing scheduled:
+        // every Week Plan "Time to post" reminder on this iPhone is removed.
+        PostReminders.shared.schedule(nil)
     }
 
     func refreshProjects() async throws {
@@ -178,6 +182,7 @@ final class AppState: ObservableObject {
 
     func clearSession() {
         KeychainStore.clear()
+        PostReminders.shared.schedule(nil)
         session = nil
         projects = []
         Task { await api.setSession(nil) }
