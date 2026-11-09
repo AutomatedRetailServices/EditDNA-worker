@@ -1,13 +1,21 @@
+import AVFoundation
 import Foundation
 
-/// Auto-pause by voice + B-roll (PO 8 Nov 2026), the rules only (unit-tested with synthetic timelines).
+/// The two Record modes (PO 9 Nov 2026): the user says what she is recording, the app never guesses (no face or
+/// person detection anywhere).
+/// - Talk (default): auto-pause by voice; silences longer than 0.7 s are not saved.
+/// - B-roll: everything is recorded, nothing is cut, no 1-minute auto-stop; the clip is marked B-roll.
+enum CaptureMode: String, CaseIterable, Identifiable {
+    case talk, broll
+    var id: String { rawValue }
+    var title: String { self == .talk ? "Talk" : "B-roll" }
+}
+
+/// Auto-pause by voice (Talk mode), the rules only (unit-tested with synthetic timelines).
 ///
-/// What is kept:
-/// - every moment with voice, plus 0.3 s before it (the first word is never cut) and 0.3 s after it;
-/// - pauses of 0.7 s or less, whole (natural breathing between phrases);
-/// - every moment with NO person on camera (B-roll: the product, the room), voice or not;
-/// - everything, when B-roll mode is on or when no voice was heard at all.
-/// What is dropped: silence longer than 0.7 s while a person is on camera (minus the 0.3 s margins).
+/// What is kept: every moment with voice, plus 0.3 s before it (the first word is never cut) and 0.3 s after it,
+/// and pauses of 0.7 s or less, whole (natural breathing between phrases). Everything when no voice was heard.
+/// What is dropped: silence longer than 0.7 s (minus the 0.3 s margins).
 enum AutoPausePlan {
     static let silence: Double = 0.7
     static let margin: Double = 0.3
@@ -18,6 +26,9 @@ enum AutoPausePlan {
         var end: Double
         var length: Double { max(0, end - start) }
     }
+
+    /// Whether this recording uses auto-pause: Talk mode with the Auto-pause switch on. Never in B-roll.
+    static func applies(mode: CaptureMode, autoPauseOn: Bool) -> Bool { mode == .talk && autoPauseOn }
 
     /// Merges sorted / unsorted ranges that touch or overlap.
     static func merged(_ ranges: [Range]) -> [Range] {
@@ -30,23 +41,12 @@ enum AutoPausePlan {
         return out
     }
 
-    /// Ranges with a person / face on camera, from samples taken ~5 times a second (each sample covers the time
-    /// until the next one).
-    static func presence(samples: [(time: Double, present: Bool)], duration: Double) -> [Range] {
-        var out: [Range] = []
-        for (i, s) in samples.enumerated() where s.present {
-            let end = i + 1 < samples.count ? samples[i + 1].time : duration
-            out.append(Range(start: s.time, end: end))
-        }
-        return merged(out)
-    }
-
-    /// The parts of the recording to keep.
-    static func keep(voice: [Range], presence: [Range], duration: Double, brollMode: Bool) -> [Range] {
+    /// The parts of the recording to keep. B-roll: all of it.
+    static func keep(mode: CaptureMode = .talk, voice: [Range], duration: Double) -> [Range] {
         guard duration > 0 else { return [] }
         let whole = [Range(start: 0, end: duration)]
         let voiced = merged(voice).map { Range(start: max(0, $0.start), end: min(duration, $0.end)) }
-        if brollMode || voiced.isEmpty { return whole }
+        if mode == .broll || voiced.isEmpty { return whole }
         // Silent gaps (before the first voice, between voices, after the last voice).
         var gaps: [Range] = []
         var cursor = 0.0
@@ -66,16 +66,7 @@ enum AutoPausePlan {
             let end = g.end - (leadsVoice ? margin : 0)
             if end > start { dropped.append(Range(start: start, end: end)) }
         }
-        // Silence is dropped only where a person is on camera (no person = B-roll = kept).
-        let present = merged(presence)
-        var cut: [Range] = []
-        for d in dropped {
-            for p in present {
-                let s = max(d.start, p.start), e = min(d.end, p.end)
-                if e > s { cut.append(Range(start: s, end: e)) }
-            }
-        }
-        return subtract(whole, merged(cut))
+        return subtract(whole, merged(dropped))
     }
 
     static func subtract(_ base: [Range], _ remove: [Range]) -> [Range] {
@@ -98,45 +89,57 @@ enum AutoPausePlan {
 
     static func savedSeconds(_ ranges: [Range]) -> Double { ranges.reduce(0) { $0 + $1.length } }
 
-    /// The B-roll stretches (no person on camera, or B-roll mode) as times of the FINAL, joined video. Written into
-    /// the video's metadata (`ai.cutsell.broll`, "start-end;start-end" in seconds).
-    static func brollRanges(keep: [Range], presence: [Range], duration: Double, brollMode: Bool) -> [Range] {
-        if brollMode { return [Range(start: 0, end: savedSeconds(keep))] }
-        let absent = subtract([Range(start: 0, end: duration)], merged(presence))
-        var out: [Range] = []
-        var offset = 0.0
-        for k in keep {
-            for a in absent {
-                let s = max(k.start, a.start), e = min(k.end, a.end)
-                if e - s > 0.05 { out.append(Range(start: offset + s - k.start, end: offset + e - k.start)) }
-            }
-            offset += k.length
-        }
-        return merged(out)
+    /// Auto-stop: 1 minute without voice (Talk only; never in B-roll).
+    static func shouldAutoStop(mode: CaptureMode = .talk, now: Double, lastVoice: Double?,
+                               recordingStart: Double = 0) -> Bool {
+        guard mode == .talk else { return false }
+        return now - (lastVoice ?? recordingStart) >= autoStopAfter
     }
 
-    static func metadataText(_ ranges: [Range]) -> String {
-        ranges.map { String(format: "%.2f-%.2f", $0.start, $0.end) }.joined(separator: ";")
-    }
-
-    /// Auto-stop: 1 minute without voice while a person is on camera (B-roll moments do not count).
-    static func shouldAutoStop(now: Double, lastVoice: Double?, recordingStart: Double = 0,
-                               presence: [Range], brollMode: Bool) -> Bool {
-        guard !brollMode else { return false }
-        let since = lastVoice ?? recordingStart
-        guard now - since >= autoStopAfter else { return false }
-        // The whole silent minute had a person on camera.
-        let window = Range(start: now - autoStopAfter, end: now)
-        let covered = merged(presence).reduce(0.0) { acc, p in
-            acc + max(0, min(p.end, window.end) - max(p.start, window.start))
-        }
-        return covered >= autoStopAfter - 0.5
-    }
-
-    /// The badge while recording: voice now (or within the 0.3 s tail), or no person on camera -> "REC".
-    static func isSavingNow(now: Double, lastVoice: Double?, personOnCamera: Bool, brollMode: Bool) -> Bool {
-        if brollMode || !personOnCamera { return true }
+    /// The badge while recording: voice now (or within the 0.7 s pause) -> "REC", otherwise "Waiting for voice…".
+    static func isSavingNow(mode: CaptureMode = .talk, now: Double, lastVoice: Double?) -> Bool {
+        if mode == .broll { return true }
         guard let lastVoice else { return false }
         return now - lastVoice <= silence
+    }
+}
+
+/// How a clip is marked as B-roll: in the video file itself (QuickTime metadata) and in the source metadata sent
+/// with the cut (`clip_type: "broll"`), for clips recorded in B-roll mode and gallery clips the user marked.
+enum ClipMark {
+    static let fileKey = "ai.cutsell.cliptype"
+    static let sourceKey = "clip_type"
+    static let broll = "broll"
+
+    static func fileItem() -> AVMetadataItem {
+        let item = AVMutableMetadataItem()
+        item.keySpace = .quickTimeMetadata
+        item.key = fileKey as NSString
+        item.value = broll as NSString
+        return item
+    }
+
+    /// Reads the mark back from a video file.
+    static func isBroll(file url: URL) async -> Bool {
+        let items = (try? await AVURLAsset(url: url).load(.metadata)) ?? []
+        for item in items where (item.key as? String) == fileKey || item.identifier?.rawValue.hasSuffix(fileKey) == true {
+            if (try? await item.load(.stringValue)) == broll { return true }
+        }
+        return false
+    }
+
+    /// Adds `clip_type: "broll"` to a source's metadata when the clip is B-roll.
+    static func sourceMetadata(_ base: [String: String]?, broll isBroll: Bool) -> [String: String]? {
+        guard isBroll else { return base }
+        var out = base ?? [:]
+        out[sourceKey] = broll
+        return out
+    }
+
+    /// Gallery: the clips the user marked B-roll (by Photos id) carry the mark.
+    static func marked(_ video: LocalVideo, assetID: String, brollIDs: Set<String>) -> LocalVideo {
+        var out = video
+        out.isBroll = brollIDs.contains(assetID)
+        return out
     }
 }

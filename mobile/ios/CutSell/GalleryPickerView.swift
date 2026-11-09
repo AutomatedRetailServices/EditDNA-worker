@@ -298,8 +298,9 @@ struct GalleryPreview {
 
 struct GalleryPickerView: View {
     let onCancel: () -> Void
-    /// Called after "Choose your style": the mode, the videos in selection order and the style.
-    let onCreate: (CreateMode, [PHAsset], StyleChoice) -> Void
+    /// Called after "Choose your style": the mode, the videos in selection order, the style and the ids of the
+    /// videos the user marked B-roll (PO 9 Nov 2026).
+    let onCreate: (CreateMode, [PHAsset], StyleChoice, Set<String>) -> Void
     var preview: GalleryPreview?
     /// The mode chip tapped on the Home Hub.
     var initialMode: CreateMode = .single
@@ -312,6 +313,8 @@ struct GalleryPickerView: View {
     @StateObject private var library = GalleryLibrary()
     @State private var mode: CreateMode = .single
     @State private var selection: [String] = []
+    /// Selected videos marked B-roll (one toggle per clip, on its tile). Not offered in Mix (pickTitle).
+    @State private var brollIDs: Set<String> = []
     @State private var showingStyle = false
     @State private var showingLimitedCard = false
     @State private var problem: CreateProblem?
@@ -333,7 +336,7 @@ struct GalleryPickerView: View {
                 StyleSheetView(ctaTitle: mode.ctaTitle(selection.count)) { style in
                     showingStyle = false
                     let chosen = selection.compactMap { id in library.assets.first { $0.localIdentifier == id } }
-                    onCreate(mode, chosen, style)
+                    onCreate(mode, chosen, style, brollIDs.intersection(selection))
                 }
             }
             if showingLimitedCard {
@@ -414,6 +417,7 @@ struct GalleryPickerView: View {
                     LazyVGrid(columns: columns, spacing: 6) {
                         ForEach(Array(preview.durations.enumerated()), id: \.offset) { index, duration in
                             GalleryPreviewTile(index: index, duration: duration, badge: badge(forID: "preview-\(index)"))
+                                .overlay(alignment: .bottomLeading) { brollChip("preview-\(index)") }
                         }
                     }
                     .padding(.horizontal, 4)
@@ -437,6 +441,7 @@ struct GalleryPickerView: View {
                             )
                             .onTapGesture { toggle(asset) }
                             .accessibilityIdentifier("galleryTile")
+                            .overlay(alignment: .bottomLeading) { brollChip(asset.localIdentifier) }
                         }
                     }
                     .padding(.horizontal, 4)
@@ -501,7 +506,7 @@ struct GalleryPickerView: View {
                           isEnabled: !selection.isEmpty) {
                 if pickTitle != nil {
                     let chosen = selection.compactMap { id in library.assets.first { $0.localIdentifier == id } }
-                    onCreate(mode, chosen, StyleChoice())
+                    onCreate(mode, chosen, StyleChoice(), [])
                 } else {
                     showingStyle = true
                 }
@@ -519,6 +524,32 @@ struct GalleryPickerView: View {
         badge(forID: asset.localIdentifier)
     }
 
+    /// "B-roll" toggle on a selected clip's tile (product, hands, place): that clip is not cut for silence.
+    @ViewBuilder
+    private func brollChip(_ id: String) -> some View {
+        if pickTitle == nil, selection.contains(id) {
+            let on = brollIDs.contains(id)
+            Button {
+                if on { brollIDs.remove(id) } else { brollIDs.insert(id) }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: on ? "checkmark" : "film").font(.system(size: 10, weight: .bold))
+                    Text(verbatim: "B-roll").font(CS.inter(11, .bold))
+                }
+                .foregroundStyle(on ? Color.white : Color(fixed: 0x0B1020))
+                .padding(.horizontal, 8).frame(height: 24)
+                .background(Capsule().fill(on ? Color(fixed: 0x1769FF) : Color(fixed: 0xFFFFFF)))
+                .overlay(Capsule().stroke(Color(fixed: 0xE6E9EF), lineWidth: on ? 0 : 1))
+                .padding(6)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L10n.tr("B-roll"))
+            .accessibilityValue(on ? "On" : "Off")
+            .accessibilityIdentifier("galleryBrollToggle")
+        }
+    }
+
     private func badge(forID id: String) -> GalleryTile.Badge {
         guard let index = selection.firstIndex(of: id) else { return .none }
         return mode == .bulk ? .check : .number(index + 1)
@@ -528,6 +559,7 @@ struct GalleryPickerView: View {
         let id = asset.localIdentifier
         if let index = selection.firstIndex(of: id) {
             selection.remove(at: index)
+            brollIDs.remove(id)
             return
         }
         if CreateLimits.sizeAndLengthLimitsOn, asset.duration > CreateLimits.maxDurationSeconds + 0.5 {

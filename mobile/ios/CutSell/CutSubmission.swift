@@ -344,7 +344,7 @@ final class CutSubmitter: ObservableObject {
                     uri: result.sourceURI,
                     sourceOrder: index,
                     durationSec: video.duration,
-                    metadata: Self.metadata(tags, album: video.albumHint)
+                    metadata: ClipMark.sourceMetadata(Self.metadata(tags, album: video.albumHint), broll: video.isBroll)
                 ))
             }
 
@@ -431,7 +431,7 @@ extension CutSubmitter {
             let voiceURI = try await VoiceUpload.upload(fileURL: voices[index], projectID: projectID, session: session, order: index)
             try? FileManager.default.removeItem(at: voices[index])
             sources.append(SourceInput(originalName: video.url.lastPathComponent, uri: starts[index].sourceURI,
-                                       sourceOrder: index, durationSec: video.duration, metadata: ["audio_uri": voiceURI].merging(Self.metadata(tags, album: video.albumHint) ?? [:]) { own, _ in own }))
+                                       sourceOrder: index, durationSec: video.duration, metadata: ClipMark.sourceMetadata(["audio_uri": voiceURI].merging(Self.metadata(tags, album: video.albumHint) ?? [:]) { own, _ in own }, broll: video.isBroll)))
         }
         CutSellDiagnostics.log("stage_timing", ["stage": "audio_upload", "seconds": String(format: "%.1f", Date().timeIntervalSince(voiceStarted))])
         stage("Cutting your video…")

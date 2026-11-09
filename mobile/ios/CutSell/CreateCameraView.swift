@@ -190,19 +190,6 @@ struct CreateCameraView: View {
                         .onChange(of: g.frame(in: .global).minY) { _, y in railTop = y }
                 })
                 .padding(.top, camera.isRecording || elapsed > 0 ? 6 : 20)
-                // Floats over the rail's top (does not push the buttons down).
-                .overlay(alignment: .top) {
-                    if camera.brollOn && !camera.isRecording {
-                        Text(L10n.tr("Auto-pause off for B-roll"))
-                            .font(CS.inter(12, .semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 12).padding(.vertical, 6)
-                            .background(Color.black.opacity(0.45), in: Capsule())
-                            .padding(.top, 2)
-                            .accessibilityIdentifier("brollNotice")
-                    }
-                }
-
                 Spacer(minLength: 0)
 
                 if let error = camera.errorMessage {
@@ -216,6 +203,8 @@ struct CreateCameraView: View {
                         .padding(.bottom, 12)
                 }
 
+                modeChips
+                    .padding(.bottom, 6)
                 durationChips
                     .padding(.bottom, 12)
 
@@ -250,7 +239,7 @@ struct CreateCameraView: View {
     }
 
     /// Auto-pause is recording right now (on, and not B-roll).
-    private var autoPauseActive: Bool { camera.isRecording && camera.autoPauseOn && !camera.brollOn }
+    private var autoPauseActive: Bool { camera.isRecording && camera.usesAutoPause }
 
     /// "● REC 0:12" in red while the voice is kept, "Waiting for voice…" in grey in between (PO 8 Nov 2026).
     /// The counter shows only the time kept.
@@ -347,15 +336,13 @@ struct CreateCameraView: View {
             .buttonStyle(.plain)
             .accessibilityValue(camera.mirrorOn ? "On" : "Off")
             .accessibilityIdentifier("cameraMirror")
-            toggleButton(title: "Auto-pause", system: "waveform", on: camera.autoPauseOn && !camera.brollOn,
-                         id: "cameraAutoPause") {
+            // Auto-pause belongs to Talk; in B-roll it is off and greyed out (B-roll records everything).
+            toggleButton(title: "Auto-pause", system: "waveform", on: camera.usesAutoPause, id: "cameraAutoPause") {
                 camera.autoPauseOn.toggle()
-                if camera.autoPauseOn { camera.brollOn = false }
                 Task { await camera.applyAutoPauseChoice() }
             }
-            toggleButton(title: "B-roll", system: "film", on: camera.brollOn, id: "cameraBroll") {
-                camera.brollOn.toggle()
-            }
+            .disabled(camera.brollOn || camera.isRecording)
+            .opacity(camera.brollOn ? 0.45 : 1)
             if allowsClone && (previewMode || CloneSupport.isSupported) {
                 Button {
                     if torchOn { camera.setTorch(false); torchOn = false }
@@ -481,6 +468,39 @@ struct CreateCameraView: View {
             .frame(width: 62)
         }
         .buttonStyle(.plain)
+    }
+
+    /// Talk (default) / B-roll (PO 9 Nov 2026), in the style of the duration chips. The user says what she is
+    /// recording: Talk = auto-pause by voice; B-roll = everything is recorded and marked B-roll.
+    private var modeChips: some View {
+        HStack(spacing: 0) {
+            ForEach(CaptureMode.allCases) { item in
+                let isSelected = item == camera.mode
+                Button {
+                    guard camera.mode != item else { return }
+                    camera.mode = item
+                    Task { await camera.applyAutoPauseChoice() }
+                } label: {
+                    Text(L10n.tr(item.title))
+                        .font(CS.inter(isSelected ? 15 : 14, isSelected ? .bold : .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: isSelected ? 84 : 70, height: 34)
+                        .background {
+                            if isSelected {
+                                Capsule().fill(Color(fixed: 0x1769FF))
+                            } else {
+                                Capsule().fill(Color.black.opacity(0.35))
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 5)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .accessibilityIdentifier(item == .talk ? "cameraModeTalk" : "cameraModeBroll")
+            }
+        }
+        .disabled(camera.isRecording)
+        .opacity(camera.isRecording ? 0 : 1)
     }
 
     private var durationChips: some View {
@@ -615,13 +635,14 @@ struct CreateCameraView: View {
                 Task {
                     let seconds = (try? await AVURLAsset(url: url).load(.duration).seconds) ?? elapsed
                     elapsed = 0
-                    let video = LocalVideo(url: url, name: "Recorded clip", duration: max(0, seconds),
+                    var video = LocalVideo(url: url, name: "Recorded clip", duration: max(0, seconds),
                                            contentType: "video/quicktime")
+                    video.isBroll = camera.brollOn          // B-roll mode: the clip goes to the cut marked B-roll
                     // Auto-pause notices (PO 8 Nov 2026): what was kept is kept; the notice comes first.
                     if camera.autoStoppedNotice {
                         camera.autoStoppedNotice = false
                         notice = "Recording stopped — no voice for 1 min"; noticeVideo = video
-                    } else if let outcome = camera.lastOutcome, !outcome.heardVoice, camera.autoPauseOn, !camera.brollOn {
+                    } else if camera.usesAutoPause, let outcome = camera.lastOutcome, !outcome.heardVoice {
                         notice = "We didn't hear any voice"; noticeVideo = video
                     } else {
                         onRecorded(video)

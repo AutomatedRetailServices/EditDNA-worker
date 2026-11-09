@@ -160,8 +160,8 @@ struct CreateFlowView: View {
         }) { route in
             GalleryPickerView(
                 onCancel: { showingGallery = false },
-                onCreate: { mode, assets, style in
-                    jobAfterGallery = CreateJob(mode: mode, source: .library(assets), style: style)
+                onCreate: { mode, assets, style, broll in
+                    jobAfterGallery = CreateJob(mode: mode, source: .library(assets), style: style, brollAssetIDs: broll)
                     showingGallery = false
                 },
                 initialMode: route.mode,
@@ -524,7 +524,7 @@ struct CreateFlowView: View {
                 if current.mode == .combine {
                     var videos: [LocalVideo] = []
                     for (index, asset) in assets.enumerated() {
-                        videos.append(try await export(asset, index: index, count: assets.count))
+                        videos.append(try await export(asset, index: index, count: assets.count, broll: current.brollAssetIDs))
                     }
                     let thumbnail = await prepareScreen(for: videos)
                     let projectID = try await submitter.submit(
@@ -549,7 +549,7 @@ struct CreateFlowView: View {
                         submitter.queueItem = item
                         ProcessingQueue.shared.update(item, state: .uploading(0))
                         do {
-                            let video = try await export(asset, index: index, count: count)
+                            let video = try await export(asset, index: index, count: count, broll: current.brollAssetIDs)
                             let thumbnail = await prepareScreen(for: [video])
                             let lower = Double(index) / Double(count)
                             let projectID = try await submitter.submit(
@@ -566,7 +566,7 @@ struct CreateFlowView: View {
                             CutSellDiagnostics.log("clip_cut_failed", Retry.fields(error, ["source_order": String(index), "of": String(count)]))
                             markFailed(item, error: error,
                                        retryJob: CreateJob(mode: .single, source: .library([asset]), style: current.style,
-                                                           promoting: current.promoting))
+                                                           brollAssetIDs: current.brollAssetIDs, promoting: current.promoting))
                         }
                         startedInJob = index + 1
                     }
@@ -590,10 +590,10 @@ struct CreateFlowView: View {
         return videos.count > 1 ? "\(base) +\(videos.count - 1)" : base
     }
 
-    private func export(_ asset: PHAsset, index: Int, count: Int) async throws -> LocalVideo {
+    private func export(_ asset: PHAsset, index: Int, count: Int, broll: Set<String> = []) async throws -> LocalVideo {
         var video = try await exportFromPhotos(asset, index: index, count: count)
         video.albumHint = GalleryExport.albumName(of: asset)
-        return video
+        return ClipMark.marked(video, assetID: asset.localIdentifier, brollIDs: broll)
     }
 
     private func exportFromPhotos(_ asset: PHAsset, index: Int, count: Int) async throws -> LocalVideo {
@@ -647,6 +647,8 @@ struct CreateJob: Identifiable {
     let mode: CreateMode
     let source: Source
     let style: StyleChoice
+    /// Gallery videos the user marked B-roll (Photos ids; PO 9 Nov 2026).
+    var brollAssetIDs: Set<String> = []
     /// What she is promoting, chosen before this job (captured when the job is made).
     var promoting: PromotingChoice.Pick? = PromotingChoice.current
 }

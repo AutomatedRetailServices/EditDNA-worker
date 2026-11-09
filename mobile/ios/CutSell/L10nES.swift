@@ -6,7 +6,7 @@ enum L10nES {
         "We didn't hear any voice": "No escuchamos ninguna voz",
         "Recording stopped — no voice for 1 min": "La grabación se detuvo: 1 min sin voz",
         "Waiting for voice…": "Esperando tu voz…",
-        "Auto-pause off for B-roll": "Auto-pausa apagada para B-roll",
+        "Talk": "Hablar",
         "B-roll": "B-roll",
         "Auto-pause": "Auto-pausa",
         "We couldn't create your clones. Try again.": "No pudimos crear tus clones. Inténtalo de nuevo.",

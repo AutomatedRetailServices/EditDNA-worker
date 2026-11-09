@@ -462,7 +462,7 @@ struct MixSetupView: View {
             let left = MixCenter.maxClips - (sections.first { $0.id == ref.id }?.clips.count ?? 0)
             GalleryPickerView(
                 onCancel: { picking = nil },
-                onCreate: { _, assets, _ in
+                onCreate: { _, assets, _, _ in
                     picking = nil
                     Task { await add(assets, to: ref.id) }
                 },

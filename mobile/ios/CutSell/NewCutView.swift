@@ -286,4 +286,6 @@ struct LocalVideo: Identifiable, Hashable {
     var expectedBytes: Int64? = nil
     /// The Photos album the video was picked from (e.g. "CeraVe"): a free hint for its brand / product.
     var albumHint: String? = nil
+    /// B-roll (PO 9 Nov 2026): recorded in B-roll mode, or marked B-roll in the gallery. Sent as clip_type "broll".
+    var isBroll = false
 }

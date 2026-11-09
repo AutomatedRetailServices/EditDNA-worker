@@ -32,8 +32,10 @@ final class CameraController: NSObject, ObservableObject {
         didSet { UserDefaults.standard.set(autoPauseOn, forKey: Self.autoPauseKey) }
     }
     static let autoPauseKey = "cutsell.camera.autopause"
-    /// B-roll: auto-pause off for this recording, everything is kept.
-    @Published var brollOn = false
+    /// Talk (default) or B-roll (PO 9 Nov 2026): the user says what she is recording, nothing is guessed.
+    /// B-roll: auto-pause off, everything is kept, no auto-stop, the clip is marked B-roll.
+    @Published var mode: CaptureMode = .talk
+    var brollOn: Bool { mode == .broll }
     /// While recording with auto-pause: "● REC" or "Waiting for voice…", and the seconds kept so far.
     @Published private(set) var live = AutoPauseRecorder.Live()
     /// The last auto-pause recording: what it kept (for the "no voice" / "stopped" notices and diagnostics).
@@ -65,7 +67,6 @@ final class CameraController: NSObject, ObservableObject {
         }
         do {
             try await configure(position: .back)
-            usingPauseOutputs = autoPauseOn
             isConfigured = true
             startSession()
         } catch {
@@ -115,13 +116,13 @@ final class CameraController: NSObject, ObservableObject {
         }
     }
 
-    /// Auto-pause on (and not B-roll) uses the auto-pause recorder; otherwise the movie file, as before.
-    var usesAutoPause: Bool { autoPauseOn && !brollOn }
+    /// Talk with Auto-pause on uses the auto-pause recorder; otherwise (B-roll, or Auto-pause off) the movie file.
+    var usesAutoPause: Bool { AutoPausePlan.applies(mode: mode, autoPauseOn: autoPauseOn) }
 
-    /// Switches the session's outputs when Auto-pause is turned on / off (never while recording).
+    /// Switches the session's outputs when Auto-pause or the mode changes (never while recording).
     func applyAutoPauseChoice() async {
         guard isConfigured, !isRecording else { return }
-        let wanted = autoPauseOn
+        let wanted = usesAutoPause
         guard wanted != usingPauseOutputs else { return }
         let session = self.session, movie = self.movieOutput
         let video = pauseRecorder.videoOutput, audio = pauseRecorder.audioOutput
@@ -177,6 +178,8 @@ final class CameraController: NSObject, ObservableObject {
                 connection.isVideoMirrored = mirrorOn
             }
         }
+        // B-roll: the clip is marked in the file itself (and sent as clip_type "broll" with the cut).
+        movieOutput.metadata = brollOn ? [ClipMark.fileItem()] : []
         isRecording = true
         movieOutput.startRecording(to: url, recordingDelegate: self)
     }
@@ -198,7 +201,6 @@ final class CameraController: NSObject, ObservableObject {
             let url = try persistentMediaURL(extension: "mov")
             try? FileManager.default.removeItem(at: url)
             pauseRecorder.prepareConnections(mirrored: mirrorOn)
-            pauseRecorder.brollMode = brollOn
             pauseRecorder.onLive = { [weak self] live in self?.live = live }
             pauseRecorder.onAutoStop = { [weak self] in
                 guard let self, self.pauseRecording else { return }
@@ -232,7 +234,6 @@ final class CameraController: NSObject, ObservableObject {
                 "final_mb": String(format: "%.1f", Double(outcome.finalBytes) / 1_048_576),
                 "voice": outcome.heardVoice ? "yes" : "no",
                 "auto_stopped": outcome.autoStopped ? "yes" : "no",
-                "broll": brollOn ? "yes" : "no",
             ])
             callback?(.success(outcome.url))
         } catch {
@@ -242,6 +243,9 @@ final class CameraController: NSObject, ObservableObject {
     }
 
     private func configure(position: AVCaptureDevice.Position) async throws {
+        // Talk + Auto-pause -> the auto-pause outputs; B-roll or Auto-pause off -> the movie file (also after Flip).
+        let autoPause = usesAutoPause
+        defer { usingPauseOutputs = autoPause }
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             sessionQueue.async { [weak self] in
                 guard let self else {
@@ -273,7 +277,6 @@ final class CameraController: NSObject, ObservableObject {
                     }
                 }
 
-                let autoPause = UserDefaults.standard.object(forKey: CameraController.autoPauseKey) as? Bool ?? true
                 Self.installOutputs(session: self.session, movie: self.movieOutput, video: self.pauseRecorder.videoOutput,
                                     audio: self.pauseRecorder.audioOutput, autoPause: autoPause)
                 let ready = autoPause ? self.session.outputs.contains(self.pauseRecorder.videoOutput)

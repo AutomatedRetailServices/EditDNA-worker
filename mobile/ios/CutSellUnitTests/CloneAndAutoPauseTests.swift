@@ -142,45 +142,35 @@ func assertRanges(_ a: [AutoPausePlan.Range], _ b: [AutoPausePlan.Range], file: 
 
 final class AutoPauseTests: XCTestCase {
     private typealias R = AutoPausePlan.Range
-    private let everyone = [R(start: 0, end: 600)]                     // a person on camera the whole time
 
-    /// b) The 0.3 s before the voice is kept: the first word is never cut.
+    /// The 0.3 s before the voice is kept: the first word is never cut.
     func testTheFirstWordIsNeverCut() {
-        let keep = AutoPausePlan.keep(voice: [R(start: 2, end: 3)], presence: everyone, duration: 5, brollMode: false)
+        let keep = AutoPausePlan.keep(mode: .talk, voice: [R(start: 2, end: 3)], duration: 5)
         XCTAssertEqual(keep.count, 1)
         XCTAssertEqual(keep[0].start, 1.7, accuracy: 1e-9)
         XCTAssertEqual(keep[0].end, 3.3, accuracy: 1e-9)
     }
 
     func testShortPausesAreKeptWhole() {
-        let keep = AutoPausePlan.keep(voice: [R(start: 1, end: 2), R(start: 2.7, end: 4)], presence: everyone,
-                                      duration: 6, brollMode: false)
+        let keep = AutoPausePlan.keep(mode: .talk, voice: [R(start: 1, end: 2), R(start: 2.7, end: 4)], duration: 6)
         assertRanges(keep, [R(start: 0.7, end: 4.3)])
     }
 
-    func testLongSilenceIsNotSaved() {
-        let keep = AutoPausePlan.keep(voice: [R(start: 1, end: 2), R(start: 10, end: 11)], presence: everyone,
-                                      duration: 12, brollMode: false)
-        assertRanges(keep, [R(start: 0.7, end: 2.3), R(start: 9.7, end: 11.3)])
-        XCTAssertEqual(AutoPausePlan.savedSeconds(keep), 3.2, accuracy: 1e-9)
-    }
-
     func testAutoStopsAfterOneMinuteWithoutVoice() {
-        XCTAssertFalse(AutoPausePlan.shouldAutoStop(now: 59, lastVoice: nil, presence: everyone, brollMode: false))
-        XCTAssertTrue(AutoPausePlan.shouldAutoStop(now: 60, lastVoice: nil, presence: everyone, brollMode: false))
-        XCTAssertFalse(AutoPausePlan.shouldAutoStop(now: 90, lastVoice: 40, presence: everyone, brollMode: false))
-        XCTAssertTrue(AutoPausePlan.shouldAutoStop(now: 100.5, lastVoice: 40, presence: everyone, brollMode: false))
+        XCTAssertFalse(AutoPausePlan.shouldAutoStop(mode: .talk, now: 59, lastVoice: nil))
+        XCTAssertTrue(AutoPausePlan.shouldAutoStop(mode: .talk, now: 60, lastVoice: nil))
+        XCTAssertFalse(AutoPausePlan.shouldAutoStop(mode: .talk, now: 90, lastVoice: 40))
+        XCTAssertTrue(AutoPausePlan.shouldAutoStop(mode: .talk, now: 100.5, lastVoice: 40))
     }
 
     func testNoVoiceAtAllKeepsTheWholeVideo() {
-        assertRanges(AutoPausePlan.keep(voice: [], presence: everyone, duration: 20, brollMode: false),
-                     [R(start: 0, end: 20)])
+        assertRanges(AutoPausePlan.keep(mode: .talk, voice: [], duration: 20), [R(start: 0, end: 20)])
     }
 
     func testTheBadgeSaysRecOrWaiting() {
-        XCTAssertTrue(AutoPausePlan.isSavingNow(now: 5, lastVoice: 4.6, personOnCamera: true, brollMode: false))
-        XCTAssertFalse(AutoPausePlan.isSavingNow(now: 5, lastVoice: 3, personOnCamera: true, brollMode: false))
-        XCTAssertTrue(AutoPausePlan.isSavingNow(now: 5, lastVoice: 3, personOnCamera: false, brollMode: false))
+        XCTAssertTrue(AutoPausePlan.isSavingNow(mode: .talk, now: 5, lastVoice: 4.6))
+        XCTAssertFalse(AutoPausePlan.isSavingNow(mode: .talk, now: 5, lastVoice: 3))
+        XCTAssertTrue(AutoPausePlan.isSavingNow(mode: .broll, now: 5, lastVoice: nil))
     }
 
     /// The kept parts are joined into one file without re-encoding (a synthetic 4 s video with sound).
@@ -199,74 +189,6 @@ final class AutoPauseTests: XCTestCase {
         let size = try await asset.loadTracks(withMediaType: .video).first!.load(.naturalSize)
         XCTAssertEqual(size, CGSize(width: 192, height: 108))         // same size: not re-encoded
     }
-}
-
-final class BrollTests: XCTestCase {
-    private typealias R = AutoPausePlan.Range
-
-    /// c) No person and no voice (the product, the room): nothing is cut, and no auto-stop.
-    func testNoPersonNoVoiceIsNeverCut() {
-        let samples = stride(from: 0.0, to: 120, by: 0.2).map { (time: $0, present: false) }
-        let presence = AutoPausePlan.presence(samples: samples, duration: 120)
-        assertRanges(AutoPausePlan.keep(voice: [R(start: 50, end: 51)], presence: presence, duration: 120,
-                                        brollMode: false), [R(start: 0, end: 120)])
-        XCTAssertFalse(AutoPausePlan.shouldAutoStop(now: 120, lastVoice: nil, presence: presence, brollMode: false))
-    }
-
-    /// A person on camera in a long silence IS cut; when the person leaves, the shot of the product is kept.
-    func testPersonInLongSilenceIsCutButTheProductShotIsKept() {
-        // Person 0-10 s, product only 10-20 s, person again 20-30 s; voice at 1-2 and 25-26.
-        let samples = stride(from: 0.0, to: 30, by: 0.2).map { (time: $0, present: !($0 >= 10 && $0 < 20)) }
-        let presence = AutoPausePlan.presence(samples: samples, duration: 30)
-        let keep = AutoPausePlan.keep(voice: [R(start: 1, end: 2), R(start: 25, end: 26)], presence: presence,
-                                      duration: 30, brollMode: false)
-        XCTAssertEqual(keep.count, 3, "\(keep)")
-        XCTAssertEqual(keep[0].start, 0.7, accuracy: 1e-6)
-        XCTAssertEqual(keep[0].end, 2.3, accuracy: 1e-6)
-        XCTAssertEqual(keep[1].start, 10, accuracy: 0.21)      // the product shot (no person) stays whole
-        XCTAssertEqual(keep[1].end, 20, accuracy: 0.21)
-        XCTAssertEqual(keep[2].start, 24.7, accuracy: 1e-6)    // the second phrase with its 0.3 s margins
-        XCTAssertEqual(keep[2].end, 26.3, accuracy: 1e-6)
-        XCTAssertEqual(AutoPausePlan.savedSeconds(keep), 1.6 + 10 + 1.6, accuracy: 0.45)
-    }
-
-    /// B-roll stretches are marked with the times of the final, joined video.
-    func testBrollStretchesAreMarkedInTheFinalTimeline() {
-        let samples = stride(from: 0.0, to: 30, by: 0.2).map { (time: $0, present: !($0 >= 10 && $0 < 20)) }
-        let presence = AutoPausePlan.presence(samples: samples, duration: 30)
-        let keep = AutoPausePlan.keep(voice: [R(start: 1, end: 2), R(start: 25, end: 26)], presence: presence,
-                                      duration: 30, brollMode: false)
-        let broll = AutoPausePlan.brollRanges(keep: keep, presence: presence, duration: 30, brollMode: false)
-        XCTAssertEqual(broll.count, 1)
-        XCTAssertEqual(broll[0].start, 1.6, accuracy: 0.21)       // after the first kept phrase (1.6 s)
-        XCTAssertEqual(broll[0].end, 11.6, accuracy: 0.21)
-        XCTAssertEqual(AutoPausePlan.metadataText([R(start: 1.6, end: 11.6)]), "1.60-11.60")
-        let whole = AutoPausePlan.brollRanges(keep: [R(start: 0, end: 40)], presence: [], duration: 40, brollMode: true)
-        assertRanges(whole, [R(start: 0, end: 40)])
-    }
-
-    /// The marks are written into the joined video's metadata.
-    func testBrollMarksAreWrittenInTheFile() async throws {
-        executionTimeAllowance = 180           // real video encoding is slow on the CI simulator
-        let source = try await SyntheticVideo.make(seconds: 3)
-        defer { try? FileManager.default.removeItem(at: source) }
-        let out = try await AutoPauseRecorder.join(asset: AVURLAsset(url: source), ranges: [R(start: 0, end: 2)],
-                                                   broll: [R(start: 0.5, end: 1.5)])
-        defer { try? FileManager.default.removeItem(at: out) }
-        let items = try await AVURLAsset(url: out).load(.metadata)
-        var found: String?
-        for item in items where (item.key as? String) == AutoPauseRecorder.brollMetadataKey {
-            found = try await item.load(.stringValue)
-        }
-        XCTAssertEqual(found, "0.50-1.50")
-    }
-
-    func testBrollButtonKeepsEverything() {
-        let everyone = [R(start: 0, end: 100)]
-        assertRanges(AutoPausePlan.keep(voice: [R(start: 1, end: 2)], presence: everyone, duration: 100,
-                                        brollMode: true), [R(start: 0, end: 100)])
-        XCTAssertFalse(AutoPausePlan.shouldAutoStop(now: 100, lastVoice: nil, presence: everyone, brollMode: true))
-    }
 
     /// The voice path is the same for the back and the front camera: the microphone's 16-bit and float sound give
     /// the same level.
@@ -282,7 +204,70 @@ final class BrollTests: XCTestCase {
     }
 }
 
-/// PO 9 Nov: with all the rail buttons (Flip … Auto-pause, B-roll, Clon, Script, Speed) the Record camera must
+/// PO 9 Nov 2026: two clear modes, nothing guessed (no face / person detection).
+final class BrollModeTests: XCTestCase {
+    private typealias R = AutoPausePlan.Range
+
+    /// a) A clip recorded in B-roll mode with no voice is NOT trimmed, and B-roll never auto-stops.
+    func testBrollClipWithoutVoiceIsNotTrimmed() {
+        assertRanges(AutoPausePlan.keep(mode: .broll, voice: [], duration: 120), [R(start: 0, end: 120)])
+        // Even with a little sound and long silences: B-roll keeps everything.
+        assertRanges(AutoPausePlan.keep(mode: .broll, voice: [R(start: 50, end: 51)], duration: 120),
+                     [R(start: 0, end: 120)])
+        XCTAssertFalse(AutoPausePlan.shouldAutoStop(mode: .broll, now: 600, lastVoice: nil))
+        XCTAssertFalse(AutoPausePlan.applies(mode: .broll, autoPauseOn: true))    // auto-pause OFF in B-roll
+    }
+
+    /// b) A clip recorded in Talk mode with a long silence IS trimmed.
+    func testTalkClipWithLongSilenceIsTrimmed() {
+        let keep = AutoPausePlan.keep(mode: .talk, voice: [R(start: 1, end: 2), R(start: 10, end: 11)], duration: 12)
+        assertRanges(keep, [R(start: 0.7, end: 2.3), R(start: 9.7, end: 11.3)])
+        XCTAssertEqual(AutoPausePlan.savedSeconds(keep), 3.2, accuracy: 1e-9)
+        XCTAssertTrue(AutoPausePlan.applies(mode: .talk, autoPauseOn: true))
+        XCTAssertFalse(AutoPausePlan.applies(mode: .talk, autoPauseOn: false))    // switch off = Record as before
+    }
+
+    /// c) Gallery clips the user marked B-roll are marked in their metadata (sent with the cut); the others not.
+    func testGalleryClipsMarkedBrollCarryTheMark() throws {
+        let file = URL(fileURLWithPath: "/tmp/clip.mov")
+        let video = LocalVideo(url: file, name: "clip.mov", duration: 8, contentType: "video/quicktime")
+        let marked = ClipMark.marked(video, assetID: "A", brollIDs: ["A", "C"])
+        let plain = ClipMark.marked(video, assetID: "B", brollIDs: ["A", "C"])
+        XCTAssertTrue(marked.isBroll)
+        XCTAssertFalse(plain.isBroll)
+        let meta = ClipMark.sourceMetadata(["album_hint": "CeraVe"], broll: marked.isBroll)
+        XCTAssertEqual(meta?["clip_type"], "broll")
+        XCTAssertEqual(meta?["album_hint"], "CeraVe")
+        XCTAssertNil(ClipMark.sourceMetadata(nil, broll: plain.isBroll))
+        // What goes to the server: the source's JSON carries clip_type "broll".
+        let source = SourceInput(originalName: "clip.mov", uri: "s3://x/clip.mov", sourceOrder: 0, durationSec: 8,
+                                 metadata: ClipMark.sourceMetadata(nil, broll: true))
+        let json = String(data: try JSONEncoder().encode(source), encoding: .utf8) ?? ""
+        XCTAssertTrue(json.contains("\"clip_type\":\"broll\""), json)
+    }
+
+    /// The B-roll mark written into a video file is read back (same item the camera writes in B-roll mode).
+    func testBrollMarkIsWrittenInTheFile() async throws {
+        executionTimeAllowance = 180           // real video encoding is slow on the CI simulator
+        let source = try await SyntheticVideo.make(seconds: 2)
+        defer { try? FileManager.default.removeItem(at: source) }
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("broll-\(UUID().uuidString).mov")
+        defer { try? FileManager.default.removeItem(at: out) }
+        let export = try XCTUnwrap(AVAssetExportSession(asset: AVURLAsset(url: source),
+                                                        presetName: AVAssetExportPresetPassthrough))
+        export.outputURL = out
+        export.outputFileType = .mov
+        export.metadata = [ClipMark.fileItem()]
+        await export.export()
+        XCTAssertEqual(export.status, .completed, "\(String(describing: export.error))")
+        let isBroll = await ClipMark.isBroll(file: out)
+        XCTAssertTrue(isBroll)
+        let plain = await ClipMark.isBroll(file: source)
+        XCTAssertFalse(plain)
+    }
+}
+
+/// PO 9 Nov: with all the rail buttons (Flip … Auto-pause, Clon, Script, Speed) and the Talk / B-roll chips the Record camera must
 /// still fit the phone, or "Choose your style" slides up only part way (its Create button hidden below the screen).
 @MainActor
 final class CameraLayoutTests: XCTestCase {

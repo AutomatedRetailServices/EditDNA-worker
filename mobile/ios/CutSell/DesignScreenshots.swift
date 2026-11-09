@@ -263,7 +263,7 @@ struct DesignScreenshotRoot: View {
     private static var mockProductID: String { CatalogStore.shared.allProducts.first?.product.productID ?? "prod_cerave_hydrating" }
 
     private func gallery(_ preview: GalleryPreview) -> some View {
-        GalleryPickerView(onCancel: {}, onCreate: { _, _, _ in }, preview: preview)
+        GalleryPickerView(onCancel: {}, onCreate: { _, _, _, _ in }, preview: preview)
     }
 
     private static let sampleProjects: [Project] = (0..<15).map { index in
