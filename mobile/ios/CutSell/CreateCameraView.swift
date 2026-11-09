@@ -173,16 +173,6 @@ struct CreateCameraView: View {
                             .padding(.top, 8)
                     }
                 }
-                if camera.brollOn && !camera.isRecording {
-                    Text(L10n.tr("Auto-pause off for B-roll"))
-                        .font(CS.inter(12, .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12).padding(.vertical, 6)
-                        .background(Color.black.opacity(0.45), in: Capsule())
-                        .padding(.top, 8)
-                        .accessibilityIdentifier("brollNotice")
-                }
-
                 HStack {
                     Spacer()
                     // Hidden while recording (Figma 645:23 / 626:361); back between clips.
@@ -200,8 +190,20 @@ struct CreateCameraView: View {
                         .onChange(of: g.frame(in: .global).minY) { _, y in railTop = y }
                 })
                 .padding(.top, camera.isRecording || elapsed > 0 ? 6 : 20)
+                // Floats over the rail's top (does not push the buttons down).
+                .overlay(alignment: .top) {
+                    if camera.brollOn && !camera.isRecording {
+                        Text(L10n.tr("Auto-pause off for B-roll"))
+                            .font(CS.inter(12, .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .background(Color.black.opacity(0.45), in: Capsule())
+                            .padding(.top, 2)
+                            .accessibilityIdentifier("brollNotice")
+                    }
+                }
 
-                Spacer()
+                Spacer(minLength: 0)
 
                 if let error = camera.errorMessage {
                     Text(L10n.tr(error))
@@ -299,8 +301,19 @@ struct CreateCameraView: View {
     /// Screen y of the rail's row → how far down the column goes to clear the script frame (+ its hint, 34 pt).
     private var railOffset: CGFloat { max(0, prompter.frame.maxY + 34 - railTop) }
 
+    /// The rail shrinks its spacing when all its buttons (Flip … Clon, Script, Speed) do not fit the screen, so the
+    /// camera never grows taller than the screen (that pushed the "Choose your style" sheet off the bottom).
     private var controlsColumn: some View {
-        VStack(spacing: prompter.isOn && prompter.hasScript ? 10 : 24) {
+        let roomy: CGFloat = prompter.isOn && prompter.hasScript ? 10 : 24
+        return ViewThatFits(in: .vertical) {
+            controlsColumn(spacing: roomy)
+            controlsColumn(spacing: min(roomy, 12))
+            controlsColumn(spacing: 4)
+        }
+    }
+
+    private func controlsColumn(spacing: CGFloat) -> some View {
+        VStack(spacing: spacing) {
             controlButton(title: "Flip", image: "IconFlip", size: CGSize(width: 42, height: 34)) {
                 Task {
                     if torchOn { camera.setTorch(false); torchOn = false }
@@ -440,12 +453,12 @@ struct CreateCameraView: View {
             VStack(spacing: 4) {
                 Image(systemName: system)
                     .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(on ? CS.cyan : .white)
+                    .foregroundStyle(on ? Color(fixed: 0x1769FF) : .white)
                     .frame(width: 36, height: 36)
                 Text(L10n.tr(title))
                     .font(CS.inter(13, .semibold))
                     .lineLimit(1).minimumScaleFactor(0.7)
-                    .foregroundStyle(on ? CS.cyan : .white)
+                    .foregroundStyle(on ? Color(fixed: 0x1769FF) : .white)
             }
             .frame(width: 62)
         }

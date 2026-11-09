@@ -131,11 +131,16 @@ struct DesignScreenshotRoot: View {
             NavigationStack { PlanDayView(day: PlanDay.iso.string(from: Date())) }
                 .task { try? await PlanWeekStore.shared.build(session: nil) }
         case "camera_style":
-            ZStack {
-                CreateCameraView(onBack: {}, onUpload: {}, onRecorded: { _ in }, previewMode: true)
-                BottomSheetOverlay(isPresented: .constant(true)) {
-                    StyleSheetView(ctaTitle: CreateMode.single.ctaTitle(1)) { _ in }
+            // Same layout as the real Record flow (CreateFlowView): all rail buttons incl. Clon, screen-bound.
+            GeometryReader { screen in
+                ZStack {
+                    CreateCameraView(onBack: {}, onUpload: {}, onRecorded: { _ in }, previewMode: true, allowsClone: true)
+                        .frame(width: screen.size.width, height: screen.size.height)
+                    BottomSheetOverlay(isPresented: .constant(true)) {
+                        StyleSheetView(ctaTitle: CreateMode.single.ctaTitle(1)) { _ in }
+                    }
                 }
+                .frame(width: screen.size.width, height: screen.size.height)
             }
             .preferredColorScheme(.dark)
         case "mix_setup":

@@ -122,6 +122,7 @@ struct CreateFlowView: View {
             }
             afterCamera = nil
         }) {
+            GeometryReader { screen in
             ZStack {
                 CreateCameraView(
                     onBack: { showingCamera = false },
@@ -129,6 +130,8 @@ struct CreateFlowView: View {
                     onRecorded: { recorded = $0 },
                     allowsClone: true
                 )
+                // Never taller than the screen, so the sheet below always slides up completely.
+                .frame(width: screen.size.width, height: screen.size.height)
                 BottomSheetOverlay(isPresented: Binding(
                     get: { recorded != nil },
                     set: { if !$0, let video = recorded { recorded = nil; discardRecording(video) } }
@@ -140,6 +143,8 @@ struct CreateFlowView: View {
                         showingCamera = false
                     }
                 }
+            }
+            .frame(width: screen.size.width, height: screen.size.height)
             }
         }
         // Build 24: the gallery is presented from an item that carries the mode, so the Bulk / Combine chip
