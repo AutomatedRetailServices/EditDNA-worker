@@ -284,12 +284,16 @@ enum SyntheticVideo {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("synthetic-\(UUID().uuidString).mov")
         let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
         let video = AVAssetWriterInput(mediaType: .video, outputSettings: [
-            AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 192, AVVideoHeightKey: 108])
+            AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 192, AVVideoHeightKey: 108,
+            AVVideoCompressionPropertiesKey: [AVVideoAllowFrameReorderingKey: false]])
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: video, sourcePixelBufferAttributes: [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
             kCVPixelBufferWidthKey as String: 192, kCVPixelBufferHeightKey as String: 108])
         let audio = AVAssetWriterInput(mediaType: .audio, outputSettings: [
             AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 48_000, AVNumberOfChannelsKey: 1])
+        // Live mode, like the camera: the writer does not hold one track back waiting for the other.
+        video.expectsMediaDataInRealTime = true
+        audio.expectsMediaDataInRealTime = true
         writer.add(video); writer.add(audio)
         writer.startWriting()
         writer.startSession(atSourceTime: .zero)
