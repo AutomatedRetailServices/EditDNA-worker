@@ -296,9 +296,18 @@ enum SyntheticVideo {
         let frames = Int(seconds * 30)
         let total = Int(seconds * 48_000)
         var written = 0
+        let deadline = Date().addingTimeInterval(30)
+        // Waits for the writer; fails instead of hanging if the writer broke or got stuck.
+        func ready(_ input: AVAssetWriterInput) async throws {
+            while !input.isReadyForMoreMediaData {
+                if writer.status == .failed { throw writer.error ?? CloneRender.RenderError.writer }
+                if Date() > deadline { throw CloneRender.RenderError.writer }
+                try await Task.sleep(nanoseconds: 1_000_000)
+            }
+        }
         // Pictures and sound interleaved (the writer waits for both).
         for i in 0..<frames {
-            while !video.isReadyForMoreMediaData { try await Task.sleep(nanoseconds: 1_000_000) }
+            try await ready(video)
             var buffer: CVPixelBuffer?
             CVPixelBufferPoolCreatePixelBuffer(nil, adaptor.pixelBufferPool!, &buffer)
             let shade = CIImage(color: CIColor(red: CGFloat(i % 30) / 30, green: 0.4, blue: 0.6))
@@ -307,7 +316,7 @@ enum SyntheticVideo {
             adaptor.append(buffer!, withPresentationTime: CMTime(value: CMTimeValue(i), timescale: 30))
             let upTo = min(total, (i + 1) * 1_600)
             while written < upTo {
-                while !audio.isReadyForMoreMediaData { try await Task.sleep(nanoseconds: 1_000_000) }
+                try await ready(audio)
                 let n = min(1_600, upTo - written)
                 let chunk = (written..<(written + n)).map { Float(sin(Double($0) * 0.05)) * 0.3 }
                 audio.append(CloneRender.sampleBuffer(chunk, at: written)!)

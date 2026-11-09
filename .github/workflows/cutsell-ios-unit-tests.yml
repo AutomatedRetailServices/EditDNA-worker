@@ -22,7 +22,7 @@ permissions:
 jobs:
   unit:
     runs-on: macos-15-intel
-    timeout-minutes: 90
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0
 
@@ -71,11 +71,16 @@ jobs:
           d=json.load(sys.stdin)["devices"]
           c=sorted((r,x["name"],x["udid"]) for r,v in d.items() if "iOS" in r for x in v if x["name"].startswith("iPhone"))
           print(c[-1][2])')"
+          echo "simulator: $udid"
+          common=(-project CutSell.xcodeproj -scheme CutSellUnitTests -sdk iphonesimulator -destination "id=$udid" -derivedDataPath build CODE_SIGNING_ALLOWED=NO)
           set +e
-          xcodebuild test -project CutSell.xcodeproj -scheme CutSellUnitTests -sdk iphonesimulator \
-            -destination "id=$udid" -derivedDataPath build CODE_SIGNING_ALLOWED=NO > "$RUNNER_TEMP/test.log" 2>&1
-          status=$?
-          grep -E "error:" "$RUNNER_TEMP/test.log" | sort -u | head -20 | while IFS= read -r l; do echo "::error title=build::$(echo "$l" | sed 's#.*/mobile/ios/##' | cut -c1-300)"; done
-          grep -E "Test Case .*(passed|failed)|Executed [0-9]+ test" "$RUNNER_TEMP/test.log" | tail -40
-          grep -E "XCTAssert|error: -\[" "$RUNNER_TEMP/test.log" | head -20 | while IFS= read -r l; do echo "::error title=test::$(echo "$l" | cut -c1-300)"; done
-          exit $status
+          # 1) Compile (app + tests). Progress lines are shown live so a stall is visible.
+          xcodebuild build-for-testing "${common[@]}" 2>&1 | tee "$RUNNER_TEMP/build.log" | grep -E --line-buffered "error:|\*\* BUILD|^Ld "
+          bstatus=${PIPESTATUS[0]}
+          grep -E "error:" "$RUNNER_TEMP/build.log" | sort -u | head -25 | while IFS= read -r l; do echo "::error title=build::$(echo "$l" | sed 's#.*/mobile/ios/##' | cut -c1-300)"; done
+          [ "$bstatus" = 0 ] || exit "$bstatus"
+          # 2) Run the tests, each one limited to 2 minutes.
+          xcodebuild test-without-building "${common[@]}" -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 120 2>&1 | tee "$RUNNER_TEMP/test.log" | grep -E --line-buffered "Test Case|Executed [0-9]+ test|error:|\*\* TEST"
+          tstatus=${PIPESTATUS[0]}
+          grep -E "error: -\[|XCTAssert" "$RUNNER_TEMP/test.log" | head -25 | while IFS= read -r l; do echo "::error title=test::$(echo "$l" | cut -c1-300)"; done
+          exit "$tstatus"
