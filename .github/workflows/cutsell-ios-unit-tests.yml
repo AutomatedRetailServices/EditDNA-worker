@@ -80,7 +80,7 @@ jobs:
           grep -E "error:" "$RUNNER_TEMP/build.log" | sort -u | head -25 | while IFS= read -r l; do echo "::error title=build::$(echo "$l" | sed 's#.*/mobile/ios/##' | cut -c1-300)"; done
           [ "$bstatus" = 0 ] || exit "$bstatus"
           # 2) Run the tests, each one limited to 2 minutes.
-          xcodebuild test-without-building "${common[@]}" -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 120 2>&1 | tee "$RUNNER_TEMP/test.log" | grep -E --line-buffered "Test Case|Executed [0-9]+ test|error:|\*\* TEST"
+          xcodebuild test-without-building "${common[@]}" -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 240 2>&1 | tee "$RUNNER_TEMP/test.log" | grep -E --line-buffered "Test Case|Executed [0-9]+ test|error:|\*\* TEST"
           tstatus=${PIPESTATUS[0]}
           grep -E "error: -\[|XCTAssert" "$RUNNER_TEMP/test.log" | head -25 | while IFS= read -r l; do echo "::error title=test::$(echo "$l" | cut -c1-300)"; done
           exit "$tstatus"

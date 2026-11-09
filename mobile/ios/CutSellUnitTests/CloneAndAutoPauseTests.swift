@@ -183,6 +183,7 @@ final class AutoPauseTests: XCTestCase {
 
     /// The kept parts are joined into one file without re-encoding (a synthetic 4 s video with sound).
     func testKeptPartsAreJoinedIntoOneVideo() async throws {
+        executionTimeAllowance = 180           // real video encoding is slow on the CI simulator
         let source = try await SyntheticVideo.make(seconds: 4)
         defer { try? FileManager.default.removeItem(at: source) }
         let out = try await AutoPauseRecorder.join(asset: AVURLAsset(url: source),
@@ -244,6 +245,7 @@ final class BrollTests: XCTestCase {
 
     /// The marks are written into the joined video's metadata.
     func testBrollMarksAreWrittenInTheFile() async throws {
+        executionTimeAllowance = 180           // real video encoding is slow on the CI simulator
         let source = try await SyntheticVideo.make(seconds: 3)
         defer { try? FileManager.default.removeItem(at: source) }
         let out = try await AutoPauseRecorder.join(asset: AVURLAsset(url: source), ranges: [R(start: 0, end: 2)],
