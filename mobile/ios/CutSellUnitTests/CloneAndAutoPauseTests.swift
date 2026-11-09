@@ -2,6 +2,8 @@ import AVFoundation
 import CoreImage
 import simd
 import XCTest
+import SwiftUI
+import UIKit
 @testable import CutSell
 
 /// Clon AR + auto-pause + B-roll (PO 8 Nov 2026). Every input is synthetic and made here; nothing is stored in the
@@ -277,6 +279,27 @@ final class BrollTests: XCTestCase {
         let pcm16 = try XCTUnwrap(AutoPauseRecorder.pcmBuffer(from: int16))
         XCTAssertEqual(AutoPauseRecorder.rmsDB(pcm), AutoPauseRecorder.rmsDB(pcm16), accuracy: 0.2)
         XCTAssertGreaterThan(AutoPauseRecorder.rmsDB(pcm), -26)            // loud enough to count as voice
+    }
+}
+
+/// PO 9 Nov: with all the rail buttons (Flip … Auto-pause, B-roll, Clon, Script, Speed) the Record camera must
+/// still fit the phone, or "Choose your style" slides up only part way (its Create button hidden below the screen).
+@MainActor
+final class CameraLayoutTests: XCTestCase {
+    private func height(on size: CGSize) -> CGFloat {
+        let host = UIHostingController(rootView: CreateCameraView(onBack: {}, onUpload: {}, onRecorded: { _ in },
+                                                                  previewMode: true, allowsClone: true))
+        return host.sizeThatFits(in: size).height
+    }
+
+    func testCameraFitsABigIPhone() {
+        let screen = CGSize(width: 440, height: 956)          // Pro Max
+        XCTAssertLessThanOrEqual(height(on: screen), screen.height + 0.5)
+    }
+
+    func testCameraFitsTheSmallestIPhone() {
+        let screen = CGSize(width: 375, height: 667)          // iPhone SE
+        XCTAssertLessThanOrEqual(height(on: screen), screen.height + 0.5)
     }
 }
 
