@@ -39,6 +39,10 @@ struct CreateCameraView: View {
     /// Clon AR (beta, PO 8 Nov 2026): the "Clon" control, only on the Create tab's Record camera, and only on an
     /// iPhone whose AR can cut a person out of the picture.
     var allowsClone = false
+    /// B-roll after STOP (PO 10 Nov 2026, Figma E1-E4): the Record camera of the Create tab offers "+ B-roll". When
+    /// it is on, STOP opens the B-roll camera, then "Ready to edit"; Continue hands over the talking part and the
+    /// shots. nil = no switch (other cameras).
+    var onRecordedWithBroll: ((LocalVideo, [LocalVideo]) -> Void)? = nil
 
     @StateObject private var camera = CameraController()
     @State private var gate: Gate = .checking
@@ -57,6 +61,15 @@ struct CreateCameraView: View {
     /// "Recording stopped — no voice for 1 min" / "We didn't hear any voice": shown before the video goes on.
     @State private var notice: String?
     @State private var noticeVideo: LocalVideo?
+    /// "+ B-roll" / "✓ B-roll after" (off by default).
+    @State private var brollAfter = false
+    /// The B-roll camera (E3) is showing; the talking part is kept in `talkVideo`.
+    @State private var inBrollCamera = false
+    @State private var talkVideo: LocalVideo?
+    @State private var talkUsedAutoPause = false
+    @State private var shots: [LocalVideo] = []
+    @State private var showingBrollSummary = false
+    @State private var pickingBrollClips = false
 
     var body: some View {
         ZStack {
@@ -120,6 +133,30 @@ struct CreateCameraView: View {
                 showingClone = false
             })
         }
+        .fullScreenCover(isPresented: $showingBrollSummary) {
+            if let talkVideo {
+                BrollSummaryView(
+                    talk: talkVideo, silencesRemoved: talkUsedAutoPause, shots: $shots,
+                    onBack: { showingBrollSummary = false },
+                    onAddMore: { showingBrollSummary = false },
+                    onContinue: {
+                        let talk = talkVideo, taken = shots
+                        showingBrollSummary = false
+                        leaveBrollCamera()
+                        onRecordedWithBroll?(talk, taken)
+                    }
+                )
+            }
+        }
+        .sheet(isPresented: $pickingBrollClips) {
+            BrollClipsPicker(onPicked: { urls in
+                pickingBrollClips = false
+                Task {
+                    for url in urls { shots.append(await LocalVideo.brollClip(url: url)) }
+                }
+            }, onCancel: { pickingBrollClips = false })
+            .ignoresSafeArea()
+        }
         .fullScreenCover(isPresented: $recordingFailed) {
             CreateProblemView(
                 problem: .couldNotAdd,
@@ -145,7 +182,7 @@ struct CreateCameraView: View {
                     // 23 Oct (PO): no logo on the camera screen.
                     HStack {
                         Button {
-                            onBack()
+                            if inBrollCamera { leaveBrollCamera() } else { onBack() }
                         } label: {
                             Image("IconBack")
                                 .resizable()
@@ -157,10 +194,23 @@ struct CreateCameraView: View {
                         Spacer()
                     }
                     .padding(.leading, 11)
+                    // E3: green "B-roll" label, top centre.
+                    if inBrollCamera { BrollCameraLabel() }
                 }
                 .padding(.top, 4)
 
-                if camera.isRecording || elapsed > 0 {
+                if inBrollCamera {
+                    // E3: "● Shot 3 · 0:03" while a shot records (top left).
+                    HStack {
+                        if camera.isRecording {
+                            BrollShotPill(text: BrollAfterStop.shotPill(taken: shots.count, seconds: elapsed))
+                        }
+                        Spacer()
+                    }
+                    .frame(height: 30)
+                    .padding(.leading, 20)
+                    .padding(.top, 10)
+                } else if camera.isRecording || elapsed > 0 {
                     if autoPauseActive {
                         autoPauseBadge.padding(.top, 8)
                     } else {
@@ -177,7 +227,10 @@ struct CreateCameraView: View {
                     Spacer()
                     // Hidden while recording (Figma 645:23 / 626:361); back between clips.
                     // With the script on, the column starts under the script frame and its hint (Figma 1151:2835).
-                    if !camera.isRecording {
+                    if inBrollCamera {
+                        // E3: Flip, Flash, Grid, Mirror only (no Auto-pause, Clon, Script); shown while recording.
+                        brollColumn
+                    } else if !camera.isRecording {
                         controlsColumn
                             .padding(.top, prompter.isOn && prompter.hasScript ? railOffset : 0)
                     } else if prompter.isOn && prompter.hasScript {
@@ -189,7 +242,7 @@ struct CreateCameraView: View {
                         .onAppear { railTop = g.frame(in: .global).minY }
                         .onChange(of: g.frame(in: .global).minY) { _, y in railTop = y }
                 })
-                .padding(.top, camera.isRecording || elapsed > 0 ? 6 : 20)
+                .padding(.top, inBrollCamera ? -14 : (camera.isRecording || elapsed > 0 ? 6 : 20))
                 Spacer(minLength: 0)
 
                 if let error = camera.errorMessage {
@@ -203,19 +256,44 @@ struct CreateCameraView: View {
                         .padding(.bottom, 12)
                 }
 
-                modeChips
-                    .padding(.bottom, 6)
-                durationChips
-                    .padding(.bottom, 12)
+                if inBrollCamera {
+                    // E3: no durations; what this camera does, then the shots taken.
+                    Text(L10n.tr("Auto-pause off · records everything"))
+                        .font(CS.inter(12, .medium))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .frame(maxWidth: .infinity)
+                    BrollShotsStrip(shots: shots, onRemove: { index in
+                        guard shots.indices.contains(index), !camera.isRecording else { return }
+                        shots.remove(at: index)
+                    }, onAdd: {
+                        if !camera.isRecording { toggleRecording() }
+                    })
+                    .padding(.bottom, 14)
+                } else {
+                    if onRecordedWithBroll != nil {
+                        // E1 / E1b: "+ B-roll" / "✓ B-roll after" (hidden while recording).
+                        BrollAfterSwitch(isOn: $brollAfter)
+                            .disabled(camera.isRecording)
+                            .opacity(camera.isRecording ? 0 : 1)
+                            .padding(.bottom, 12)
+                    }
+                    durationChips
+                        .padding(.bottom, 12)
+                }
 
                 ZStack {
                     recordButton
                     HStack {
                         uploadButton
                         Spacer()
+                        if inBrollCamera {
+                            BrollDoneButton { if !camera.isRecording { showingBrollSummary = true } }
+                                .disabled(camera.isRecording)
+                                .padding(.trailing, 20)
+                        }
                     }
                     .padding(.leading, 22)
-                    .offset(y: 14)
+                    .offset(y: inBrollCamera ? 0 : 14)
                 }
                 .padding(.bottom, 26)
             }
@@ -272,7 +350,7 @@ struct CreateCameraView: View {
                 Button {
                     let video = noticeVideo
                     notice = nil; noticeVideo = nil
-                    if let video { onRecorded(video) }
+                    if let video { finishTalk(video) }
                 } label: {
                     Text(L10n.tr("OK")).font(CS.inter(15, .bold)).foregroundStyle(.white)
                         .frame(maxWidth: .infinity).frame(height: 48)
@@ -470,39 +548,6 @@ struct CreateCameraView: View {
         .buttonStyle(.plain)
     }
 
-    /// Talk (default) / B-roll (PO 9 Nov 2026), in the style of the duration chips. The user says what she is
-    /// recording: Talk = auto-pause by voice; B-roll = everything is recorded and marked B-roll.
-    private var modeChips: some View {
-        HStack(spacing: 0) {
-            ForEach(CaptureMode.allCases) { item in
-                let isSelected = item == camera.mode
-                Button {
-                    guard camera.mode != item else { return }
-                    camera.mode = item
-                    Task { await camera.applyAutoPauseChoice() }
-                } label: {
-                    Text(L10n.tr(item.title))
-                        .font(CS.inter(isSelected ? 15 : 14, isSelected ? .bold : .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: isSelected ? 84 : 70, height: 34)
-                        .background {
-                            if isSelected {
-                                Capsule().fill(Color(fixed: 0x1769FF))
-                            } else {
-                                Capsule().fill(Color.black.opacity(0.35))
-                            }
-                        }
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 5)
-                .accessibilityAddTraits(isSelected ? .isSelected : [])
-                .accessibilityIdentifier(item == .talk ? "cameraModeTalk" : "cameraModeBroll")
-            }
-        }
-        .disabled(camera.isRecording)
-        .opacity(camera.isRecording ? 0 : 1)
-    }
-
     private var durationChips: some View {
         HStack(spacing: 0) {
             ForEach(RecordingPreset.allCases) { item in
@@ -538,7 +583,10 @@ struct CreateCameraView: View {
                 Circle().fill(CS.accentGradient).frame(width: 90, height: 90)
                     .shadow(color: Color(hex: 0x1769FF, opacity: 0.45), radius: 9)
                 Circle().fill(CS.background).frame(width: 78, height: 78)
-                if camera.isRecording {
+                if camera.isRecording && inBrollCamera {
+                    // E3: a shot is recording (red #E5484D).
+                    Circle().fill(Color(fixed: 0xE5484D)).frame(width: 64, height: 64)
+                } else if camera.isRecording {
                     RoundedRectangle(cornerRadius: 8).fill(Color(hex: 0xFF2E5E)).frame(width: 32, height: 32)
                 } else {
                     Circle().fill(.white).frame(width: 64, height: 64)
@@ -554,7 +602,7 @@ struct CreateCameraView: View {
     }
 
     private var uploadButton: some View {
-        Button(action: onUpload) {
+        Button(action: { if inBrollCamera { pickingBrollClips = true } else { onUpload() } }) {
             VStack(spacing: 8) {
                 Image("IconUpload")
                     .resizable()
@@ -637,7 +685,12 @@ struct CreateCameraView: View {
                     elapsed = 0
                     var video = LocalVideo(url: url, name: "Recorded clip", duration: max(0, seconds),
                                            contentType: "video/quicktime")
-                    video.isBroll = camera.brollOn          // B-roll mode: the clip goes to the cut marked B-roll
+                    video.isBroll = camera.brollOn          // B-roll camera: the shot goes to the cut marked B-roll
+                    if inBrollCamera {
+                        // E3: each tap = one short shot, kept as it is.
+                        shots.append(BrollAfterStop.shot(video))
+                        return
+                    }
                     // Auto-pause notices (PO 8 Nov 2026): what was kept is kept; the notice comes first.
                     if camera.autoStoppedNotice {
                         camera.autoStoppedNotice = false
@@ -645,7 +698,7 @@ struct CreateCameraView: View {
                     } else if camera.usesAutoPause, let outcome = camera.lastOutcome, !outcome.heardVoice {
                         notice = "We didn't hear any voice"; noticeVideo = video
                     } else {
-                        onRecorded(video)
+                        finishTalk(video)
                     }
                 }
             case .failure:
@@ -654,7 +707,75 @@ struct CreateCameraView: View {
             }
         }
         // `record` sets isRecording only when the recording really started.
-        if camera.isRecording { startTimer(limit: TimeInterval(preset.rawValue)) }
+        if camera.isRecording { startTimer(limit: inBrollCamera ? 600 : TimeInterval(preset.rawValue)) }
+    }
+
+    /// After STOP on the Record camera: "Choose your style" (switch off), or the B-roll camera (switch on).
+    private func finishTalk(_ video: LocalVideo) {
+        guard onRecordedWithBroll != nil,
+              BrollAfterStop.afterStop(brollAfter: brollAfter) == .brollCamera else {
+            onRecorded(video)
+            return
+        }
+        talkUsedAutoPause = camera.usesAutoPause
+        talkVideo = BrollAfterStop.talk(video)
+        shots = []
+        enterBrollCamera()
+    }
+
+    private func enterBrollCamera() {
+        if prompter.isOn { prompter.isOn = false }
+        elapsed = 0
+        inBrollCamera = true
+        camera.mode = .broll                       // Auto-pause off, everything recorded, file marked B-roll
+        Task { await camera.applyAutoPauseChoice() }
+    }
+
+    /// Back on the Record camera (Continue, or "‹" on the B-roll camera, which leaves the talking part unused).
+    private func leaveBrollCamera() {
+        inBrollCamera = false
+        talkVideo = nil
+        shots = []
+        elapsed = 0
+        camera.mode = .talk
+        Task { await camera.applyAutoPauseChoice() }
+    }
+
+    /// E3: Flip, Flash, Grid, Mirror (Flip waits while a shot records).
+    private var brollColumn: some View {
+        VStack(spacing: 24) {
+            controlButton(title: "Flip", image: "IconFlip", size: CGSize(width: 42, height: 34)) {
+                Task {
+                    if torchOn { camera.setTorch(false); torchOn = false }
+                    await camera.flipCamera()
+                }
+            }
+            .disabled(camera.isRecording)
+            controlButton(title: "Flash", image: torchOn ? "IconFlashOn" : "IconFlash", size: CGSize(width: 34, height: 38)) {
+                torchOn.toggle()
+                camera.setTorch(torchOn)
+            }
+            .disabled(!camera.hasTorch && !previewMode)
+            .opacity(camera.hasTorch || previewMode ? 1 : 0.5)
+            controlButton(title: "Grid", image: "IconGrid", size: CGSize(width: 38, height: 38)) { showGrid.toggle() }
+            Button {
+                camera.mirrorOn.toggle()
+            } label: {
+                VStack(spacing: 4) {
+                    Image("IconMirror").renderingMode(.template).resizable()
+                        .foregroundStyle(camera.mirrorOn ? CS.cyan : .white)
+                        .frame(width: 36, height: 36)
+                    Text(L10n.tr("Mirror"))
+                        .font(CS.inter(13, .semibold))
+                        .lineLimit(1).minimumScaleFactor(0.75)
+                        .foregroundStyle(camera.mirrorOn ? CS.cyan : .white)
+                }
+                .frame(width: 62)
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(width: 62)
+        .padding(.trailing, 8)
     }
 
     private func startTimer(limit: TimeInterval) {

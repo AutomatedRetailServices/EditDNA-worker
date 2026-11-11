@@ -288,4 +288,7 @@ struct LocalVideo: Identifiable, Hashable {
     var albumHint: String? = nil
     /// B-roll (PO 9 Nov 2026): recorded in B-roll mode, or marked B-roll in the gallery. Sent as clip_type "broll".
     var isBroll = false
+    /// B-roll after STOP (PO 10 Nov 2026): the talking part of a recording that has B-roll shots. Sent as
+    /// clip_type "primary" (the voice the engine edits; the "broll" clips go over it).
+    var isPrimaryVoice = false
 }

@@ -110,6 +110,7 @@ enum ClipMark {
     static let fileKey = "ai.cutsell.cliptype"
     static let sourceKey = "clip_type"
     static let broll = "broll"
+    static let primary = "primary"
 
     static func fileItem() -> AVMetadataItem {
         let item = AVMutableMetadataItem()
@@ -129,10 +130,11 @@ enum ClipMark {
     }
 
     /// Adds `clip_type: "broll"` to a source's metadata when the clip is B-roll.
-    static func sourceMetadata(_ base: [String: String]?, broll isBroll: Bool) -> [String: String]? {
-        guard isBroll else { return base }
+    static func sourceMetadata(_ base: [String: String]?, broll isBroll: Bool, primary isPrimary: Bool = false)
+        -> [String: String]? {
+        guard isBroll || isPrimary else { return base }
         var out = base ?? [:]
-        out[sourceKey] = broll
+        out[sourceKey] = isBroll ? broll : primary
         return out
     }
 

@@ -7,7 +7,7 @@ name: CutSell iOS unit tests
 on:
   workflow_dispatch: {}
   push:
-    branches: [feature/clon-ar-autopausa]
+    branches: [feature/clon-ar-autopausa, feature/broll-after-stop]
     paths:
       - 'mobile/ios/**'
       - '.github/workflows/cutsell-ios-unit-tests.yml'

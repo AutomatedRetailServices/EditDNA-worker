@@ -17,6 +17,8 @@ struct CreateFlowView: View {
     @State private var showingGallery = false
     @State private var galleryMode: CreateMode = .single
     @State private var recorded: LocalVideo?
+    /// B-roll after STOP (PO 10 Nov 2026): the shots that go with `recorded` (empty = a normal recording).
+    @State private var recordedShots: [LocalVideo] = []
     @State private var job: CreateJob?
     /// Chosen in the gallery; started once the gallery has finished closing.
     @State private var jobAfterGallery: CreateJob?
@@ -127,19 +129,28 @@ struct CreateFlowView: View {
                 CreateCameraView(
                     onBack: { showingCamera = false },
                     onUpload: { afterCamera = .gallery; showingCamera = false },
-                    onRecorded: { recorded = $0 },
-                    allowsClone: true
+                    onRecorded: { recordedShots = []; recorded = $0 },
+                    allowsClone: true,
+                    onRecordedWithBroll: { talk, shots in recordedShots = shots; recorded = talk }
                 )
                 // Never taller than the screen, so the sheet below always slides up completely.
                 .frame(width: screen.size.width, height: screen.size.height)
                 BottomSheetOverlay(isPresented: Binding(
                     get: { recorded != nil },
-                    set: { if !$0, let video = recorded { recorded = nil; discardRecording(video) } }
+                    set: { if !$0, let video = recorded {
+                        recorded = nil
+                        discardRecording(video)
+                        recordedShots.forEach(discardRecording)
+                        recordedShots = []
+                    } }
                 )) {
                     StyleSheetView(ctaTitle: CreateMode.single.ctaTitle(1)) { style in
                         guard let video = recorded else { return }
                         recorded = nil
-                        afterCamera = .job(CreateJob(mode: .single, source: .recorded(video), style: style))
+                        let shots = recordedShots
+                        recordedShots = []
+                        afterCamera = .job(CreateJob(mode: .single, source: .recorded(video), style: style,
+                                                     brollShots: shots))
                         showingCamera = false
                     }
                 }
@@ -227,7 +238,10 @@ struct CreateFlowView: View {
                         secondaryAction: {
                             failure = nil
                             job = nil
-                            if case .recorded(let video) = current.source { discardRecording(video) }
+                            if case .recorded(let video) = current.source {
+                                discardRecording(video)
+                                current.brollShots.forEach(discardRecording)
+                            }
                         }
                     )
                 }
@@ -515,8 +529,12 @@ struct CreateFlowView: View {
             switch current.source {
             case .recorded(let video):
                 let thumbnail = await prepareScreen(for: [video])
+                // B-roll after STOP: one project = the voice (clip_type "primary") + the shots (clip_type "broll").
+                let videos = current.brollShots.isEmpty
+                    ? [video] : BrollAfterStop.uploadVideos(talk: video, shots: current.brollShots)
                 let projectID = try await submitter.submit(
-                    videos: [video], title: Self.cutTitle([video]), mode: CutSubmitter.singleMode,
+                    videos: videos, title: Self.cutTitle([video]),
+                    mode: videos.count > 1 ? CutSubmitter.multipleMode : CutSubmitter.singleMode,
                     audioOverlap: current.style.overlapAudio, autoZoom: current.style.autoZoom, resumeProjectID: nil, appState: appState
                 )
                 startTracking(projectID: projectID, videos: [video], thumbnail: thumbnail)
@@ -649,6 +667,8 @@ struct CreateJob: Identifiable {
     let style: StyleChoice
     /// Gallery videos the user marked B-roll (Photos ids; PO 9 Nov 2026).
     var brollAssetIDs: Set<String> = []
+    /// B-roll after STOP (PO 10 Nov 2026): shots recorded / picked after the talking part (tagged "broll").
+    var brollShots: [LocalVideo] = []
     /// What she is promoting, chosen before this job (captured when the job is made).
     var promoting: PromotingChoice.Pick? = PromotingChoice.current
 }

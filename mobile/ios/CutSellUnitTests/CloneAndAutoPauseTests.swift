@@ -272,8 +272,10 @@ final class BrollModeTests: XCTestCase {
 @MainActor
 final class CameraLayoutTests: XCTestCase {
     private func height(on size: CGSize) -> CGFloat {
+        // The Create tab's Record camera, with the "+ B-roll" switch (PO 10 Nov 2026).
         let host = UIHostingController(rootView: CreateCameraView(onBack: {}, onUpload: {}, onRecorded: { _ in },
-                                                                  previewMode: true, allowsClone: true))
+                                                                  previewMode: true, allowsClone: true,
+                                                                  onRecordedWithBroll: { _, _ in }))
         return host.sizeThatFits(in: size).height
     }
 
@@ -285,6 +287,79 @@ final class CameraLayoutTests: XCTestCase {
     func testCameraFitsTheSmallestIPhone() {
         let screen = CGSize(width: 375, height: 667)          // iPhone SE
         XCTAssertLessThanOrEqual(height(on: screen), screen.height + 0.5)
+    }
+}
+
+/// B-roll after STOP (PO 10 Nov 2026, Figma E1–E4).
+final class BrollAfterStopTests: XCTestCase {
+    private func video(_ name: String) -> LocalVideo {
+        LocalVideo(url: URL(fileURLWithPath: "/tmp/\(name).mov"), name: name, duration: 24,
+                   contentType: "video/quicktime")
+    }
+
+    /// a) Switch off: after STOP → "Choose your style", and the recording goes as before (one video, no tag).
+    func testSwitchOffKeepsTodaysFlow() {
+        XCTAssertEqual(BrollAfterStop.afterStop(brollAfter: false), .chooseStyle)
+        let plain = video("talk")
+        XCTAssertFalse(plain.isBroll)
+        XCTAssertFalse(plain.isPrimaryVoice)
+        XCTAssertNil(ClipMark.sourceMetadata(nil, broll: plain.isBroll, primary: plain.isPrimaryVoice))
+        XCTAssertEqual(CreateJob(mode: .single, source: .recorded(plain), style: StyleChoice()).brollShots.count, 0)
+    }
+
+    /// b) Switch on: after STOP → the B-roll camera.
+    func testSwitchOnOpensTheBrollCamera() {
+        XCTAssertEqual(BrollAfterStop.afterStop(brollAfter: true), .brollCamera)
+    }
+
+    /// c) The shots are tagged "broll", the talking part "primary"; one project, voice first.
+    func testShotsAreTaggedBroll() throws {
+        let videos = BrollAfterStop.uploadVideos(talk: video("talk"), shots: [video("a"), video("b")])
+        XCTAssertEqual(videos.count, 3)
+        XCTAssertEqual(videos.map(\.name), ["talk", "a", "b"])
+        let tags = videos.map { ClipMark.sourceMetadata(nil, broll: $0.isBroll, primary: $0.isPrimaryVoice)?["clip_type"] }
+        XCTAssertEqual(tags, ["primary", "broll", "broll"])
+        // The same tag as the gallery's per-clip "B-roll" switch.
+        let gallery = ClipMark.marked(video("g"), assetID: "G", brollIDs: ["G"])
+        XCTAssertEqual(ClipMark.sourceMetadata(nil, broll: gallery.isBroll)?["clip_type"], tags[1])
+        // What the server receives.
+        let source = SourceInput(originalName: "a.mov", uri: "s3://x/a.mov", sourceOrder: 1, durationSec: 3,
+                                 metadata: ClipMark.sourceMetadata(["album_hint": "CeraVe"], broll: videos[1].isBroll,
+                                                                   primary: videos[1].isPrimaryVoice))
+        let json = String(data: try JSONEncoder().encode(source), encoding: .utf8) ?? ""
+        XCTAssertTrue(json.contains("\"clip_type\":\"broll\""), json)
+        XCTAssertTrue(json.contains("\"album_hint\":\"CeraVe\""), json)
+    }
+
+    /// c) A clip picked with Upload on the B-roll camera is a B-roll shot too.
+    func testPickedClipIsBroll() async throws {
+        executionTimeAllowance = 180
+        let url = try await SyntheticVideo.make(seconds: 2)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let clip = await LocalVideo.brollClip(url: url)
+        XCTAssertTrue(clip.isBroll)
+        XCTAssertFalse(clip.isPrimaryVoice)
+        XCTAssertEqual(clip.duration, 2, accuracy: 0.2)
+    }
+
+    /// The texts of E3 / E4.
+    func testTexts() {
+        XCTAssertEqual(BrollAfterStop.shotPill(taken: 2, seconds: 3.4), "● Shot 3 · 0:03")
+        XCTAssertEqual(BrollAfterStop.talkingLine(seconds: 24.9), "Talking · 0:24")
+        XCTAssertEqual(BrollAfterStop.shotsTitle(3), "B-roll · 3 shots")
+        XCTAssertEqual(BrollAfterStop.shotsTitle(1), "B-roll · 1 shot")
+        XCTAssertEqual(BrollAfterStop.clock(75), "1:15")
+    }
+
+    /// The summary fits the smallest iPhone with 6 shots.
+    @MainActor
+    func testSummaryFitsTheSmallestIPhone() {
+        let shots = (0..<6).map { BrollAfterStop.shot(video("s\($0)")) }
+        let host = UIHostingController(rootView: BrollSummaryView(
+            talk: BrollAfterStop.talk(video("talk")), silencesRemoved: true, shots: .constant(shots),
+            onBack: {}, onAddMore: {}, onContinue: {}))
+        let screen = CGSize(width: 375, height: 667)
+        XCTAssertLessThanOrEqual(host.sizeThatFits(in: screen).height, screen.height + 0.5)
     }
 }
 
