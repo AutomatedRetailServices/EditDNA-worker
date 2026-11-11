@@ -8,7 +8,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
-| 79 | 2026-11-10 22:15 | ✅ subido (pedido) | feature/broll-after-stop | `5ad00288` | "+ B-roll" en Grabar: después de STOP, cámara de B-roll y "Ready to edit" |
+| 79 | 2026-11-10 22:15 | ✅ subido | feature/broll-after-stop | `5ad00288` | "+ B-roll" en Grabar: después de STOP, cámara de B-roll y "Ready to edit" |
 | 78 | 2026-11-09 13:44 | ✅ subido | feature/clon-ar-autopausa | `71ae403e` | Modos Talk / B-roll en Grabar; la cámara ya cabe en la pantalla |
 | 77 | 2026-11-08 20:52 | ✅ subido | feature/clon-ar-autopausa | `e5895e3a` | Clon AR (beta), auto-pausa por voz y B-roll en Grabar; aviso de borrado |
 | 76 | 2026-11-07 15:18 | ✅ subido | build/apple-signup | `a2bb7fd0` | Sign in with Apple para todos; los invitados deben iniciar sesión |
@@ -91,8 +91,8 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 ---
 
 ## Build 79 — 2026-11-10
-- **Resultado:** pedido a TestFlight (si la subida falla, se corrige esta línea)
-- **Rama (según el historial de git):** feature/broll-after-stop (sale de feature/clon-ar-autopausa, build 78)  ·  **Commit de la app:** `5ad00288`
+- **Resultado:** subido a TestFlight
+- **Rama (según el historial de git):** feature/broll-after-stop (sale de feature/clon-ar-autopausa, build 78)  ·  **Commit de la app:** `5ad00288`  ·  **Commit del pedido a TestFlight:** `679152ab`
 - **Qué cambió:**
   - En la cámara de Grabar se quitaron los chips Talk / B-roll. En su lugar hay un solo interruptor: "+ B-roll" (apagado, por defecto) / "✓ B-roll after" (encendido, azul 3D) con el aviso "After STOP you'll add product shots" (Figma E1 3023:324 y E1b 3024:331).
   - La parte hablada se graba siempre con Auto-pause, como antes.
@@ -103,7 +103,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
   - 28 pruebas automáticas en el simulador (nuevas: interruptor apagado = flujo de hoy, encendido = cámara de B-roll, tomas marcadas "broll", clip de galería marcado, textos, "Ready to edit" cabe en un iPhone SE).
 - **Pantallas nuevas o cambiadas:** Cámara de Grabar (interruptor B-roll), Cámara de B-roll (nueva), Ready to edit (nueva). Ver docs/design-audit/build-79/.
 - **Pendiente o con problemas:**
-  - El motor que pone el B-roll encima de la voz está solo en la rama feature/broll-after-stop-engine, **sin deploy**. Hasta que se publique, el servidor de hoy une los clips B-roll al final del video y les corta silencios como a cualquier clip.
+  - El motor que pone el B-roll encima de la voz está solo en la rama feature/broll-after-stop-engine (commit `623cfd8f`), **sin deploy**. Hasta que se publique, el servidor de hoy une los clips B-roll al final del video y les corta silencios como a cualquier clip.
   - Falta probar la cámara de B-roll en un iPhone real.
   - "‹" en la cámara de B-roll vuelve a la cámara de Grabar y descarta lo grabado (Figma no lo define; queda por confirmar).
 
