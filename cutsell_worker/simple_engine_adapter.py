@@ -209,19 +209,28 @@ def process_with_simple_engine(
     broll_ask: Optional[Callable[[list], "tuple[str, dict]"]] = None,
     broll_frames: Optional[Callable[[str, float], list]] = None,
     broll_motion: Optional[Callable[[str], list]] = None,
+    pending_broll: Optional[set] = None,
 ) -> ProcessingResult:
     """`transcribe` and `llm` are injectable for tests; production uses Deepgram and Anthropic.
     B-roll (PO 9-10 Nov 2026, broll_overlay.py): sources marked metadata.clip_type "broll" are never cut and never
     enter the voice timeline; they are placed over the voice as `media_overlays`. `broll_*` are injectable for tests.
-    A request with no B-roll source runs exactly as before."""
+    A request with no B-roll source runs exactly as before.
+    B-roll v2: a B-roll photo (JPEG) counts 0 s for the usage meter and is never heard. `pending_broll` = B-roll
+    sources whose file is not on storage yet (audio-first flow: the app sends no audio for B-roll): no local file is
+    needed for them; they are placed from their declared length without being looked at."""
     notify = progress or (lambda stage, percent: None)
     transcribe = transcribe or _asr.transcribe_words
     sources = sorted(request.sources, key=lambda item: int(item.source_order))
     if not sources:
         raise ValueError("at least one source is required")
+    pending_broll = set(pending_broll or ())
 
     durations: dict[str, float] = {}
     for source in sources:
+        if _broll.is_photo_source(source) or (source.source_asset_id in pending_broll and _broll.is_broll(source)):
+            # never probed for length: a photo counts 0 minutes; a pending clip is measured when it arrives
+            durations[source.source_asset_id] = 0.0 if _broll.is_photo_source(source) else float(source.duration_sec or 0.0)
+            continue
         path = local_paths.get(source.source_asset_id)
         if not path:
             raise ValueError(f"missing local path for source {source.source_asset_id}")
@@ -229,13 +238,16 @@ def process_with_simple_engine(
             raise FileNotFoundError(path)
         durations[source.source_asset_id] = float(probe_media(path).duration_sec)
 
-    usage = check_processing_allowance(user_id=request.user_id, durations_sec=list(durations.values()))
+    usage = check_processing_allowance(user_id=request.user_id, durations_sec=[
+        0.0 if source.source_asset_id in pending_broll else durations[source.source_asset_id] for source in sources])
     if not usage.allowed:
         raise ValueError(f"processing denied: {usage.reason}")
 
     bulk = is_bulk(sources)
     # B-roll is never cut: only the voice sources go through the engine below (all of them when there is no B-roll).
     voice_sources, broll_sources = _broll.split_sources(sources)
+    if not voice_sources:
+        raise ValueError("at least one talking video is required")
     engine_moments: list = []
     selected: list[DraftClip] = []
     alternates: list[DraftClip] = []

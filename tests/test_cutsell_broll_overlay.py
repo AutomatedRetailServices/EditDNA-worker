@@ -29,6 +29,8 @@ def _env(monkeypatch):
     monkeypatch.delenv("CUTSELL_BROLL_OVERLAY", raising=False)
     monkeypatch.delenv("CUTSELL_BROLL_AI", raising=False)
     monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.delenv("CUTSELL_BROLL_MATCH_MODEL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)          # never a real call from a test
 
 
 # 12 spoken lines over 40 s; line 6 talks about the texture, line 12 is the call to action
@@ -155,9 +157,9 @@ def _texture_ask(content):
     """The matcher: B2 shows the cream's texture -> the phrase "Miren la textura suave."; others: no phrase."""
     text = content[0]["text"]
     number = next(int(line.split()[0][1:]) for line in text.splitlines() if "textura" in line and line.startswith("P"))
-    clips = [{"clip": "B1", "shows": "jar on a table", "phrase": None, "frame": None},
-             {"clip": "B2", "shows": "cream spread on a hand", "phrase": number, "frame": 1},
-             {"clip": "B3", "shows": "bathroom shelf", "phrase": None, "frame": None}]
+    clips = [{"clip": "B1", "shows": "jar on a table", "uses": []},
+             {"clip": "B2", "shows": "cream spread on a hand", "uses": [{"phrase": number, "at": 0.83}]},
+             {"clip": "B3", "shows": "bathroom shelf", "uses": []}]
     return json.dumps({"clips": clips, "cta_phrase": None}), {"input_tokens": 3000, "output_tokens": 300}
 
 
@@ -220,7 +222,7 @@ def test_broll_lands_on_top_obeying_every_rule_and_the_match(media):
     texture = next(p for p in B.phrases_of(B.timeline_words(draft.selected)) if "textura" in p.text)
     b2 = next(o for o in draft.media_overlays if o.uri == media["b2"])
     assert b2.start == pytest.approx(texture.start, abs=1e-3)               # "look at the texture" -> B2
-    assert b2.source_start <= 0.83 <= b2.source_end                          # around the frame the model chose
+    assert b2.source_start <= 0.83 <= b2.source_end                          # around the second the model named
     diag = draft.diagnostics["broll_overlay"]
     assert diag["ai"]["used"] is True and diag["ai"]["frames_sent"] == 9
     assert {s["reason"] for s in diag["sources"] if s["placed"]} <= {"matched", "product", "spread"}
@@ -262,8 +264,8 @@ def test_broll_never_fails_the_cut(media, monkeypatch):
 
 def test_product_mention_places_broll_when_no_phrase_matches(media):
     request = _request(media, broll=("b1",), voice_meta={"brand": "Lumi", "product": "Piel Feliz"})
-    result = _run(media, request, ask=lambda content: ('{"clips": [{"clip": "B1", "shows": "x", "phrase": null, '
-                                                       '"frame": null}], "cta_phrase": null}', {}),
+    result = _run(media, request, ask=lambda content: ('{"clips": [{"clip": "B1", "shows": "x", "uses": []}], '
+                                                       '"cta_phrase": null}', {}),
                   keys=("voice", "b1"))
     (overlay,) = result.draft.media_overlays
     named = next(p for p in B.phrases_of(B.timeline_words(result.draft.selected)) if "piel" in p.text)
@@ -331,8 +333,14 @@ def test_a_request_of_only_broll_is_cut_as_voice():
 
 # ------------------------------------------------------------------ rules (pure)
 
-def _clip(i, duration):
-    return B.BrollClip(source=_source(f"b{i}", i, f"s3://bk/b{i}.mov", duration, "broll"), duration=duration)
+def _clip(i, duration, order=0):
+    return B.BrollClip(source=_source(f"b{i}", i, f"s3://bk/b{i}.mov", duration, "broll"), duration=duration,
+                       order=order)
+
+
+def _photo_clip(i, order=0):
+    return B.BrollClip(source=_source(f"p{i}", i, f"s3://bk/p{i}.jpg", 0.0, "broll", broll_kind="photo"),
+                       duration=0.0, kind="photo", order=order, frames=[{"t": 0.0, "jpeg_b64": "AAAA"}])
 
 
 def _phrases(n=20, step=2.0):
@@ -365,13 +373,20 @@ def test_closing_call_to_action_keeps_the_face():
 
 
 def test_parse_answer_keeps_only_valid_suggestions():
-    answer = B.parse_answer('note {"clips": [{"clip": "B1", "shows": "hand", "phrase": 3, "frame": 2}, '
-                            '{"clip": "B9", "phrase": 1}, {"clip": "B2", "phrase": 99, "frame": 7}], '
-                            '"cta_phrase": 4}', 2, 10)
-    assert answer == {"by_clip": {0: {"phrase": 3, "frame": 1, "shows": "hand"},
-                                  1: {"phrase": None, "frame": None, "shows": ""}}, "cta_phrase": 4}
+    clips = [_clip(1, 5.0), _clip(2, 20.0), _photo_clip(3)]
+    answer = B.parse_answer('note {"clips": [{"clip": "B1", "shows": "hand", "uses": [{"phrase": 3, "at": 2.0}, '
+                            '{"phrase": 4, "at": 4.0}]}, {"clip": "B9", "uses": [{"phrase": 1, "at": 0}]}, '
+                            '{"clip": "B2", "uses": [{"phrase": 99, "at": 1}, {"phrase": 5, "at": 30}, '
+                            '{"phrase": 6, "at": 3.5}, {"phrase": 6, "at": 9}, {"phrase": 7, "at": 12}, '
+                            '{"phrase": 8, "at": 16}, {"phrase": 9, "at": 18}]}, '
+                            '{"clip": "B3", "uses": [{"phrase": 2, "at": 1.5}]}], "cta_phrase": 4}', clips, 10)
+    assert answer == {"by_clip": {
+        0: {"uses": [{"phrase": 3, "at": 2.0}], "shows": "hand"},                 # a short clip: one use
+        1: {"uses": [{"phrase": 5, "at": None}, {"phrase": 6, "at": 3.5}, {"phrase": 7, "at": 12.0}], "shows": ""},
+        2: {"uses": [{"phrase": 2, "at": None}], "shows": ""}},                   # a photo: no "at"
+        "cta_phrase": 4}
     with pytest.raises(ValueError):
-        B.parse_answer("no", 1, 1)
+        B.parse_answer("no", clips, 1)
 
 
 def test_best_window_prefers_the_steady_part_and_the_chosen_frame():
@@ -402,6 +417,7 @@ def test_the_matcher_call_sends_three_frames_per_clip_and_asks_for_json(monkeypa
     text, usage = B.match_with_claude(B.build_content(phrases, [clip], product_hint="Lumi"), post=post)
     content = sent["messages"][0]["content"]
     assert sum(1 for c in content if c["type"] == "image") == 3
+    assert sent["model"] == "claude-haiku-5-5" and usage["model"] == "claude-haiku-5-5"
     assert sent["output_config"]["format"]["type"] == "json_schema" and usage["step"] == "broll_match"
     assert "PRODUCT: Lumi" in content[0]["text"] and "P1 [" in content[0]["text"]
 
@@ -451,3 +467,450 @@ def test_fallback_spread_is_even_over_the_middle_of_the_video():
     starts = [p.start for p in placed]
     targets = [B.HOOK_SEC + (cta - B.HOOK_SEC) * (k + 0.5) / 3 for k in range(3)]
     assert len(starts) == 3 and all(abs(s - t) <= 2.0 for s, t in zip(starts, targets))
+
+
+# ================================================================== B-roll v2 (PO 11 Nov 2026)
+
+def _make_photo(path: Path, size="1200x800") -> str:
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"testsrc=s={size}:d=1", "-frames:v", "1",
+                    str(path)], check=True, capture_output=True)
+    return str(path)
+
+
+@pytest.fixture(scope="module")
+def media2(tmp_path_factory, media):
+    folder = tmp_path_factory.mktemp("broll2")
+    return {**media, "long": _make_broll(folder / "long.mov", 20.0, "yellow"),
+            "photo": _make_photo(folder / "photo.jpg"), "voice2": _make_voice(folder / "voice2.mp4")}
+
+
+def _broll_source(key, order, uri, duration, *, n, keep="0", kind="video"):
+    return _source(key, order, uri, duration, "broll", broll_kind=kind, broll_order=str(n), broll_keep_order=keep)
+
+
+def _phrase_numbers(content, *needles):
+    text = content[0]["text"]
+    lines = [line for line in text.splitlines() if line.startswith("P") and "[" in line]
+    return [next(int(line.split()[0][1:]) for line in lines if needle in line) for needle in needles]
+
+
+def _picks(*uses):
+    """uses[k] = list of (needle, at) for clip B(k+1)."""
+    def ask(content):
+        clips = []
+        for k, items in enumerate(uses, start=1):
+            numbers = _phrase_numbers(content, *[n for n, _ in items]) if items else []
+            clips.append({"clip": f"B{k}", "shows": "x",
+                          "uses": [{"phrase": number, "at": at} for number, (_, at) in zip(numbers, items)]})
+        ask.content = content
+        return json.dumps({"clips": clips, "cta_phrase": None}), {"input_tokens": 100, "output_tokens": 10,
+                                                                    "model": "claude-haiku-5-5"}
+    return ask
+
+
+def _ordered_request(media, keep):
+    # broll_order differs from source_order on purpose: the creator's order is b3, b1, b2
+    sources = [_source("voice", 0, media["voice"], DURATION, "primary"),
+               _broll_source("b1", 1, media["b1"], 6.0, n=2, keep=keep),
+               _broll_source("b2", 2, media["b2"], 5.0, n=3, keep=keep),
+               _broll_source("b3", 3, media["b3"], 4.0, n=1, keep=keep)]
+    return ProcessingRequest(project_id="p1", user_id="u1", sources=tuple(sources))
+
+
+# ------------------------------------------------------------------ e) keep_order on -> 1-2-3
+
+def test_keep_order_on_shows_the_shots_in_the_creators_order_even_when_the_model_reverses_them(media):
+    # in the prompt the clips are B1=b3 (order 1), B2=b1 (order 2), B3=b2 (order 3); the model picks them backwards
+    ask = _picks([("cada mañana", 1.0)], [("absorbe", 1.0)], [("Esta crema", 1.0)])
+    result = _run(media, _ordered_request(media, "1"), ask=ask)
+    overlays = sorted(result.draft.media_overlays, key=lambda o: o.start)
+    assert [o.uri for o in overlays] == [media["b3"], media["b1"], media["b2"]]        # 1 before 2 before 3
+    assert "ORDER:" in ask.content[0]["text"]
+    diag = result.draft.diagnostics["broll_overlay"]
+    assert diag["keep_order"] is True
+    assert {s["reason"] for s in diag["sources"]} <= {"matched", "reordered"}
+    _assert_rules(result.draft, {media["b1"]: 6.1, media["b2"]: 5.1, media["b3"]: 4.1})
+
+
+def test_keep_order_on_keeps_every_pick_of_the_model_that_respects_the_order(media):
+    ask = _picks([("compré", 1.0)], [("textura", 1.0)], [("cada mañana", 1.0)])
+    result = _run(media, _ordered_request(media, "1"), ask=ask)
+    phrases = B.phrases_of(B.timeline_words(result.draft.selected))
+    starts = {o.uri: o.start for o in result.draft.media_overlays}
+    for uri, needle in ((media["b3"], "compré"), (media["b1"], "textura"), (media["b2"], "cada")):
+        assert starts[uri] == pytest.approx(next(p.start for p in phrases if needle in p.text), abs=1e-3)
+    assert {s["reason"] for s in result.draft.diagnostics["broll_overlay"]["sources"]} == {"matched"}
+
+
+@pytest.mark.parametrize("ask", [None, lambda content: ("not json", {})])
+def test_keep_order_fallback_is_an_even_spread_in_the_creators_order(media, monkeypatch, ask):
+    if ask is None:
+        monkeypatch.setenv("CUTSELL_BROLL_AI", "0")
+    result = _run(media, _ordered_request(media, "1"), ask=ask or (lambda c: pytest.fail("no call")))
+    overlays = sorted(result.draft.media_overlays, key=lambda o: o.start)
+    assert [o.uri for o in overlays] == [media["b3"], media["b1"], media["b2"]]
+    assert {s["reason"] for s in result.draft.diagnostics["broll_overlay"]["sources"]} == {"spread"}
+
+
+def test_best_ordered_assignment_is_monotonic_and_keeps_the_most_picks():
+    words, phrases = _phrases(20, 2.0)
+    starts = [p for p in phrases if p.start >= 3.0]
+    requests = [{"phrase": 15}, {"phrase": 5}, {"phrase": 10}, {"phrase": None}]
+    chosen = B.best_ordered_assignment(requests, starts, lo=3.0, hi=36.0, total=40.0, phrases=phrases)
+    picked = [starts[j].index for _, j in chosen]
+    assert [i for i, _ in chosen] == [0, 1, 2, 3] and picked == sorted(picked)
+    assert sum(1 for (i, j) in chosen if starts[j].index == requests[i]["phrase"]) == 2   # 2 of 3 picks kept
+
+
+# ------------------------------------------------------------------ f) keep_order off -> the model's order
+
+def test_keep_order_off_follows_the_models_placement_freely(media):
+    ask = _picks([("cada mañana", 1.0)], [("absorbe", 1.0)], [("compré", 1.0)])
+    result = _run(media, _ordered_request(media, "0"), ask=ask)
+    overlays = sorted(result.draft.media_overlays, key=lambda o: o.start)
+    assert [o.uri for o in overlays] == [media["b2"], media["b1"], media["b3"]]        # as the model said
+    assert result.draft.diagnostics["broll_overlay"]["keep_order"] is False
+    assert {s["reason"] for s in result.draft.diagnostics["broll_overlay"]["sources"]} == {"matched"}
+
+
+# ------------------------------------------------------------------ g) long clips
+
+def test_frame_count_rule():
+    assert [B.frame_count(d) for d in (0, 4, 9.9, 10, 12.4, 20, 25, 60)] == [0, 3, 3, 4, 5, 8, 10, 10]
+    assert B.frame_times(20.0) == [1.25, 3.75, 6.25, 8.75, 11.25, 13.75, 16.25, 18.75]   # one every 2.5 s
+    assert B.frame_times(6.0) == [1.0, 3.0, 5.0]
+    assert _clip(0, 9.0).max_uses == 1 and _clip(0, 10.0).max_uses == 2 and _clip(0, 20.0).max_uses == 3
+
+
+def _long_request(media):
+    return ProcessingRequest(project_id="p1", user_id="u1", sources=(
+        _source("voice", 0, media["voice"], DURATION, "primary"),
+        _broll_source("long", 1, media["long"], 20.0, n=1)))
+
+
+def test_long_clip_gets_more_frames_and_the_piece_around_the_named_second(media2):
+    ask = _picks([("textura", 15.0), ("cada mañana", 4.0)])
+    result = _run(media2, _long_request(media2), ask=ask, keys=("voice", "long"))
+    assert sum(1 for c in ask.content if c["type"] == "image") == 8
+    assert "may be used 3 times" in "".join(c.get("text", "") for c in ask.content)
+    pieces = sorted(result.draft.media_overlays, key=lambda o: o.start)
+    assert len(pieces) == 2 and {o.overlay_id for o in pieces} == {"ai-broll-001", "ai-broll-001-2"}
+    phrases = B.phrases_of(B.timeline_words(result.draft.selected))
+    texture = next(p for p in phrases if "textura" in p.text)
+    first, second = pieces
+    assert first.start == pytest.approx(texture.start, abs=1e-3) and first.source_start <= 15.0 <= first.source_end
+    assert second.source_start <= 4.0 <= second.source_end
+    assert first.source_end <= second.source_start or second.source_end <= first.source_start   # different parts
+
+
+def test_the_same_part_of_a_long_clip_is_never_used_twice(media2):
+    ask = _picks([("textura", 15.0), ("cada mañana", 14.5)])                         # the same part twice
+    result = _run(media2, _long_request(media2), ask=ask, keys=("voice", "long"))
+    assert len(result.draft.media_overlays) == 1
+    words, phrases = _phrases()
+    clip = _clip(0, 20.0)
+    suggestions = {0: {"uses": [{"phrase": 5, "at": 10.0}, {"phrase": 12, "at": 11.0}]}}
+    placed, _ = B.plan_placements(total=40.0, phrases=phrases, words=words, clips=[clip], suggestions=suggestions,
+                                  cta_start=35.0)
+    assert len(placed) == 1
+
+
+# ------------------------------------------------------------------ h) photos
+
+def _photo_request(media, keep="0"):
+    return ProcessingRequest(project_id="p1", user_id="u1", sources=(
+        _source("voice", 0, media["voice"], DURATION, "primary"),
+        _broll_source("b1", 1, media["b1"], 6.0, n=1, keep=keep),
+        _broll_source("photo", 2, media["photo"], 0.0, n=2, keep=keep, kind="photo")))
+
+
+def test_photo_is_one_image_and_becomes_a_ken_burns_photo_overlay(media2):
+    hearing = Hearing()
+    ask = _picks([], [("textura", None)])
+    result = _run(media2, _photo_request(media2), ask=ask, hearing=hearing, keys=("voice", "b1", "photo"))
+    assert len(hearing.heard) == 1                                       # a photo is never sent to speech-to-text
+    assert "B2: PHOTO" in "".join(c.get("text", "") for c in ask.content)
+    assert sum(1 for c in ask.content if c["type"] == "image") == 3 + 1  # 3 frames of b1 + the photo
+    photo = next(o for o in result.draft.media_overlays if o.uri == media2["photo"])
+    assert photo.kind == "photo" and photo.motion == "ken_burns"
+    assert (photo.motion_zoom_from, photo.motion_zoom_to) == (1.0, 1.08)
+    assert photo.layout == "full" and photo.fill is True and photo.mute_audio is True
+    assert photo.source_start == 0.0 and photo.source_end is None
+    assert B.MIN_SEC - 1e-6 <= photo.end - photo.start <= B.MAX_SEC + 1e-6
+    item = next(o for o in result_to_dict(result)["draft"]["media_overlays"] if o["kind"] == "photo")
+    assert {k: item[k] for k in ("motion", "motion_zoom_from", "motion_zoom_to", "layout", "fill", "mute_audio")} == {
+        "motion": "ken_burns", "motion_zoom_from": 1.0, "motion_zoom_to": 1.08, "layout": "full", "fill": True,
+        "mute_audio": True}
+    restored = draft_from_dict(json.loads(json.dumps(result_to_dict(result)))["draft"])
+    assert next(o for o in restored.media_overlays if o.kind == "photo").motion == "ken_burns"
+    assert result.draft.diagnostics["simple_engine"]["sources"][0]["source_asset_id"] == "voice"
+
+
+def test_a_video_overlay_never_carries_motion_and_still_overlays_serialize_as_before():
+    from cutsell_worker.contracts import MediaOverlay
+    from cutsell_worker.serde import _json_safe
+    still = MediaOverlay(overlay_id="o", kind="video", uri="s3://b/v.mov", start=1.0, end=3.0)
+    assert set(_json_safe(still)) == {"overlay_id", "kind", "uri", "start", "end", "x", "y", "width", "source_start",
+                                     "source_end", "mute_audio"}
+    base = {"overlay_id": "o", "uri": "s3://b/v.mov", "start": 0.0, "end": 1.0}
+    with pytest.raises(ValueError):
+        draft_from_dict({"project_id": "p", "selected": [], "media_overlays": [{**base, "kind": "video",
+                                                                                "motion": "ken_burns"}]})
+
+
+def _old_renderer():
+    root = Path(__file__).resolve().parents[1]
+    shown = subprocess.run(["git", "show", "623cfd8f:cutsell_worker/media_overlay_render.py"], cwd=root,
+                           capture_output=True, text=True)
+    if shown.returncode != 0:
+        pytest.skip("no git history")
+    name = "cutsell_worker._overlay_render_before_v2"
+    spec = importlib.util.spec_from_loader(name, loader=None)
+    module = importlib.util.module_from_spec(spec)
+    module.__package__ = "cutsell_worker"
+    sys.modules[name] = module
+    exec(compile(shown.stdout, "render_before.py", "exec"), module.__dict__)
+    return module
+
+
+def test_renderer_zooms_a_ken_burns_photo_and_leaves_every_other_overlay_byte_identical(media2, tmp_path):
+    from cutsell_worker import media_overlay_render as R
+    from cutsell_worker.contracts import MediaOverlay
+    photo = MediaOverlay(overlay_id="p", kind="photo", uri="s3://b/p.jpg", start=4.0, end=7.0, width=1.0,
+                         layout="full", fill=True, motion="ken_burns", motion_zoom_from=1.0, motion_zoom_to=1.08)
+    command = R.build_final_overlay_command(media2["voice"], str(tmp_path / "out.mp4"),
+                                            media_overlays=[R.LocalMediaOverlay(photo, media2["photo"])],
+                                            width=180, height=320)
+    graph = command[command.index("-filter_complex") + 1]
+    assert "zoompan=z='1.00000+0.08000*min(on/89,1)'" in graph and "s=180x320" in graph and "d=90" in graph
+    assert "x='iw/2-(iw/zoom/2)'" in graph and "crop=360:640" in graph            # centred, fills 9:16
+    subprocess.run(command, check=True, capture_output=True, timeout=120)
+    frames = []
+    for t in (4.1, 6.9):
+        raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(t), "-i", str(tmp_path / "out.mp4"), "-frames:v", "1",
+                              "-vf", "scale=45:80,format=gray", "-f", "rawvideo", "-"], capture_output=True).stdout
+        frames.append(raw)
+    assert frames[0] and frames[0] != frames[1]                                    # the picture moves (zoom)
+    # every overlay without motion: exactly the command of the renderer before this change
+    old = _old_renderer()
+    others = [
+        MediaOverlay(overlay_id="v", kind="video", uri="s3://b/v.mov", start=1.0, end=3.0, width=1.0, layout="full",
+                     fill=True, source_start=0.5, source_end=2.5),
+        MediaOverlay(overlay_id="s", kind="photo", uri="s3://b/s.jpg", start=2.0, end=5.0, width=1.0, layout="full",
+                     fill=True),
+        MediaOverlay(overlay_id="f", kind="photo", uri="s3://b/f.jpg", start=0.5, end=2.0, x=0.3, y=0.4, width=0.5),
+    ]
+    paths = {"v": media2["b1"], "s": media2["photo"], "f": media2["photo"]}
+    new_cmd = R.build_final_overlay_command("in.mp4", "out.mp4", width=180, height=320, media_overlays=[
+        R.LocalMediaOverlay(o, paths[o.overlay_id]) for o in others])
+    old_cmd = old.build_final_overlay_command("in.mp4", "out.mp4", width=180, height=320, media_overlays=[
+        old.LocalMediaOverlay(o, paths[o.overlay_id]) for o in others])
+    assert new_cmd == old_cmd
+
+
+def test_photo_source_is_accepted_end_to_end_by_the_upload_and_uri_checks(monkeypatch):
+    from types import SimpleNamespace
+    from cutsell_worker import overlay_uploads, uploads
+
+    class FakeS3:
+        def generate_presigned_post(self, **kw):
+            return {"url": "https://up", "fields": {}}
+
+    config = lambda: SimpleNamespace(s3_bucket="bk", aws_region="us-east-1")
+    monkeypatch.setattr(uploads, "load_runtime_config", config)
+    monkeypatch.setattr(overlay_uploads, "load_runtime_config", config)
+    monkeypatch.setattr(overlay_uploads, "is_readable_bucket", lambda bucket, current: bucket == current)
+    monkeypatch.delenv("AWS_ENDPOINT_URL_S3", raising=False)
+    signed = uploads.create_presigned_upload(project_id="p1", user_id="u1", original_name="IMG_1.jpg",
+                                             content_type="image/jpeg", size_bytes=2_000_000, client=FakeS3())
+    assert signed["source_uri"].endswith("-IMG_1.jpg") and signed["content_type"] == "image/jpeg"
+    for name, kind, size in (("IMG_1.jpg", "video/quicktime", 100), ("IMG_1.mov", "image/jpeg", 100),
+                             ("IMG_1.png", "image/png", 100), ("IMG_1.jpg", "image/jpeg", 41 * 1024 * 1024)):
+        with pytest.raises(ValueError):
+            uploads.prepare_upload_target(project_id="p1", user_id="u1", original_name=name, content_type=kind,
+                                          size_bytes=size)
+    uri = signed["source_uri"]
+    with pytest.raises(ValueError):
+        uploads.validate_product_source_uri(uri, project_id="p1", user_id="u1")       # not where a photo is unexpected
+    assert uploads.validate_product_source_uri(uri, project_id="p1", user_id="u1", allow_photo=True)
+    assert overlay_uploads.validate_overlay_uri(uri, user_id="u1", project_id="p1")[2] == "photo"
+    other = uri.replace(uploads.scoped_upload_prefix(user_id="u1", project_id="p1"),
+                        uploads.scoped_upload_prefix(user_id="u2", project_id="p1"))
+    with pytest.raises(ValueError):
+        overlay_uploads.validate_overlay_uri(other, user_id="u1", project_id="p1")
+    # the API: a JPEG only as a B-roll photo; 0 minutes for the usage meter
+    from cutsell_app.auth_middleware import _is_broll_photo
+    assert _is_broll_photo({"uri": uri, "metadata": {"clip_type": "broll", "broll_kind": "photo"}})
+    assert not _is_broll_photo({"uri": uri, "metadata": {"clip_type": "primary"}})
+    assert not _is_broll_photo({"uri": "s3://bk/x.mov", "metadata": {"clip_type": "broll"}})
+
+
+def test_submit_route_takes_a_jpeg_only_as_a_broll_photo(monkeypatch):
+    from fastapi.testclient import TestClient
+    from types import SimpleNamespace
+    import cutsell_app.main as api
+    seen = []
+    monkeypatch.setattr(api, "validate_product_source_uri", lambda uri, **kw: seen.append((uri, kw)))
+    monkeypatch.setattr(api, "enqueue_flow_b", lambda payload: SimpleNamespace(job_id="j", queue_name="q"))
+    from cutsell_app import auth_middleware
+    monkeypatch.setattr(auth_middleware, "check_processing_allowance",
+                        lambda **kw: SimpleNamespace(allowed=True, reason=""), raising=False)
+    sources = [{"original_name": "v.mov", "uri": "s3://b/v.mov", "source_order": 0, "metadata": {"clip_type": "primary"}},
+               {"original_name": "p.jpg", "uri": "s3://b/p.jpg", "source_order": 1,
+                "metadata": {"clip_type": "broll", "broll_kind": "photo", "broll_order": "1", "broll_keep_order": "1"}}]
+    request = api.FlowBSubmitRequest(project_id="p1", user_id="u1", sources=sources)
+    api.submit_flow_b(request)
+    assert [kw["allow_photo"] for _, kw in seen] == [False, True]
+
+
+def test_photo_counts_zero_minutes_in_the_cut(media2, monkeypatch):
+    from cutsell_worker import simple_engine_adapter as adapter
+    asked = []
+    monkeypatch.setattr(adapter, "check_processing_allowance",
+                        lambda **kw: asked.append(kw["durations_sec"]) or SimpleNamespaceAllowed())
+    _run(media2, _photo_request(media2), ask=_picks([], []), keys=("voice", "b1", "photo"))
+    assert asked[0][2] == 0.0 and asked[0][0] == pytest.approx(DURATION, abs=0.2)
+
+
+class SimpleNamespaceAllowed:
+    allowed = True
+    reason = ""
+
+
+def test_only_photos_and_no_voice_is_refused_clearly():
+    sources = [_source("p", 0, "p.jpg", 0, "broll", broll_kind="photo")]
+    assert B.split_sources(sources) == ([], [])
+
+
+# ------------------------------------------------------------------ i) Haiku for the images, the cut model unchanged
+
+def test_the_image_call_uses_the_broll_model_and_the_cut_model_is_unchanged(media, monkeypatch):
+    from cutsell_worker.simple_engine import llm as se_llm
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.delenv("CUTSELL_SIMPLE_ENGINE_MODEL", raising=False)
+    bodies = []
+
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {"content": [{"type": "text", "text": '{"clips": [], "cta_phrase": null}'}],
+                    "usage": {"input_tokens": 2600, "output_tokens": 300}}
+
+    post = lambda url, json=None, **kw: bodies.append(json) or Response()
+    ask = lambda content: B.match_with_claude(content, post=post)
+    result = _run(media, ask=ask)
+    assert bodies[0]["model"] == "claude-haiku-5-5"                              # default: Haiku
+    assert result.draft.diagnostics["simple_engine"]["model"] == "claude-sonnet-5-5" == se_llm.model_name()
+    ai = result.draft.diagnostics["broll_overlay"]["ai"]
+    assert ai["model"] == "claude-haiku-5-5" and ai["cost_usd"] == pytest.approx((2600 * 0.10 + 300 * 0.50) / 1e6)
+    monkeypatch.setenv("CUTSELL_BROLL_MATCH_MODEL", "claude-haiku-9-9")          # read at call time, no redeploy
+    _run(media, ask=ask)
+    assert bodies[1]["model"] == "claude-haiku-9-9" and se_llm.model_name() == "claude-sonnet-5-5"
+    monkeypatch.setenv("CUTSELL_SIMPLE_ENGINE_MODEL", "claude-sonnet-x")
+    assert B.match_model() == "claude-haiku-9-9"                                 # the two never mix
+
+
+# ------------------------------------------------------------------ b) several talking videos joined in order
+
+def test_several_primary_sources_are_joined_in_order_and_overlays_live_on_the_joined_timeline(media2):
+    hearing = Hearing()
+    request = ProcessingRequest(project_id="p1", user_id="u1", sources=(
+        _source("voice", 0, media2["voice"], DURATION, "primary"),
+        _source("voice2", 1, media2["voice2"], DURATION, "primary"),
+        _broll_source("b1", 2, media2["b1"], 6.0, n=1)))
+
+    def ask(content):
+        lines = [l for l in content[0]["text"].splitlines() if l.startswith("P") and "textura" in l]
+        second = int(lines[1].split()[0][1:])                                    # "textura" of the SECOND video
+        return json.dumps({"clips": [{"clip": "B1", "shows": "x", "uses": [{"phrase": second, "at": 1.0}]}],
+                           "cta_phrase": None}), {}
+
+    result = _run(media2, request, ask=ask, hearing=hearing, keys=("voice", "voice2", "b1"))
+    draft = result.draft
+    assert len(hearing.heard) == 2                                               # both talks heard, B-roll never
+    assert [c.source_asset_id for c in draft.selected] == sorted((c.source_asset_id for c in draft.selected),
+                                                                  key=lambda s: s != "voice")   # voice, then voice2
+    first_len = sum(c.end - c.start for c in draft.selected if c.source_asset_id == "voice")
+    (overlay,) = draft.media_overlays
+    assert first_len < overlay.start < overlay.end <= B.timeline_duration(draft.selected)
+    in_second = next(c for c in draft.selected if c.source_asset_id == "voice2" and c.text and "textura" in c.text)
+    assert overlay.start == pytest.approx(B.source_time_to_timeline(draft.selected, "voice2", in_second.words[0].start),
+                                          abs=1e-3)
+
+
+# ------------------------------------------------------------------ audio first: B-roll without audio_uri
+
+def test_broll_still_uploading_is_placed_blind_and_never_fails_the_cut(media2):
+    hearing = Hearing()
+    request = _photo_request(media2)
+    result = simple_engine_adapter.process_with_simple_engine(
+        request, {"voice": media2["voice"]}, transcribe=hearing, llm=FakeLLM(), broll_ask=_picks([], []),
+        pending_broll={"b1", "photo"})
+    assert len(hearing.heard) == 1 and result.draft.selected
+    kinds = sorted(o.kind for o in result.draft.media_overlays)
+    assert kinds == ["photo", "video"]                                           # both placed from the declared data
+    assert result.draft.diagnostics["broll_overlay"]["ai"] == {"used": False, "reason": "no_frames"}
+
+
+def test_worker_accepts_audio_first_primary_with_broll_that_has_no_audio_uri(media2, monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from cutsell_worker import worker_job
+    from cutsell_worker.simple_engine import asr as se_asr, llm as se_llm
+    voice_audio = str(tmp_path / "voice.m4a")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", media2["voice"], "-vn", "-c:a", "aac", voice_audio], check=True)
+    monkeypatch.setenv("CUTSELL_ENGINE", "simple")
+    monkeypatch.setenv("CUTSELL_BROLL_AI", "0")
+    hearing = Hearing()
+    monkeypatch.setattr(se_asr, "transcribe_words", hearing)
+    monkeypatch.setattr(se_llm, "call_anthropic", FakeLLM())
+    downloads, validated, drafts = [], [], []
+    present = {voice_audio: voice_audio, "s3://bk/up/b1.mov": media2["b1"], "s3://bk/up/photo.jpg": media2["photo"]}
+
+    def download(uri, destination, *, client=None):
+        downloads.append(uri)
+        if uri not in present:
+            raise FileNotFoundError(uri)                                          # still uploading
+        shutil.copyfile(present[uri], destination)
+        return destination
+
+    monkeypatch.setattr(worker_job, "validate_product_source_uri", lambda uri, **kw: validated.append((uri, kw)))
+    monkeypatch.setattr(worker_job, "download_source", download)
+    monkeypatch.setattr(worker_job, "resolve_sources_for_editorial_entry",
+                        lambda paths, **kw: (dict(paths), [], [], []))
+    monkeypatch.setattr(worker_job, "load_runtime_config", lambda: SimpleNamespace(asr_model="tiny"))
+    monkeypatch.setattr(worker_job, "create_initial_draft", lambda **kw: drafts.append(kw))
+    monkeypatch.setattr(worker_job, "safe_update_project", lambda **kw: {"status": "saved"})
+    monkeypatch.setattr(worker_job, "publish_notification", lambda **kw: {"notification_id": "n1"})
+    monkeypatch.setattr(worker_job, "generate_filmstrip", lambda *a, **kw: [])
+    monkeypatch.setattr(worker_job, "waveform_peaks", lambda *a, **kw: [0.0])
+    monkeypatch.setattr(worker_job, "store_timeline_assets", lambda **kw: {"status": "ok"})
+    minutes = []
+    monkeypatch.setattr(worker_job, "record_processing_minutes", lambda **kw: minutes.append(kw["minutes"]))
+    monkeypatch.setattr(worker_job, "release_processing_slot", lambda **kw: None)
+    broll_meta = lambda n, kind: {"clip_type": "broll", "broll_kind": kind, "broll_order": n, "broll_keep_order": "1"}
+    payload = {"project_id": "p1", "user_id": "u1", "sources": [
+        {"source_asset_id": "voice", "uri": "s3://bk/up/voice-not-there-yet.mov", "original_name": "v.mov",
+         "source_order": 0, "duration_sec": DURATION, "metadata": {"clip_type": "primary", "audio_uri": voice_audio}},
+        {"source_asset_id": "b1", "uri": "s3://bk/up/b1.mov", "original_name": "b1.mov", "source_order": 1,
+         "duration_sec": 6.0, "metadata": broll_meta("1", "video")},
+        {"source_asset_id": "b2", "uri": "s3://bk/up/b2-not-there-yet.mov", "original_name": "b2.mov",
+         "source_order": 2, "duration_sec": 5.0, "metadata": broll_meta("2", "video")},
+        {"source_asset_id": "photo", "uri": "s3://bk/up/photo.jpg", "original_name": "photo.jpg", "source_order": 3,
+         "duration_sec": 0.0, "metadata": broll_meta("3", "photo")}]}
+
+    result = worker_job.run_flow_b_job(payload)
+
+    assert len(hearing.heard) == 1                                               # only the primary's voice
+    assert "s3://bk/up/voice-not-there-yet.mov" not in downloads                 # the primary cut from its audio
+    assert {uri: kw.get("allow_photo") for uri, kw in validated if "up/" in uri} == {
+        "s3://bk/up/voice-not-there-yet.mov": False, "s3://bk/up/b1.mov": False,
+        "s3://bk/up/b2-not-there-yet.mov": False, "s3://bk/up/photo.jpg": True}
+    assert result["broll_pending_upload"] == ["b2"] and result["audio_first_sources"] == ["voice"]
+    overlays = sorted(result["draft"]["media_overlays"], key=lambda o: o["start"])
+    assert [o["uri"] for o in overlays] == ["s3://bk/up/b1.mov", "s3://bk/up/b2-not-there-yet.mov",
+                                            "s3://bk/up/photo.jpg"]              # 1-2-3, the pending one too
+    assert overlays[2]["kind"] == "photo" and overlays[2]["motion"] == "ken_burns"
+    assets = {s["source_asset_id"]: s["timeline_assets"]["status"] for s in drafts[0]["sources"]}
+    assert assets["photo"] == "not_applicable" and assets["b2"] == "waiting_for_video"
+    assert minutes and minutes[0] == pytest.approx((DURATION + 6.0) / 60.0, abs=0.01)   # photo 0, pending 0

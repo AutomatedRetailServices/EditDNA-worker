@@ -308,7 +308,9 @@ def _append_styled_overlay(filters: list[str], local: LocalMediaOverlay, *, inde
     rx, ry, rw, rh = overlay_region(layout, width, height)
     transparent = layout in _TRANSPARENT_PAD_LAYOUTS
     content = (0, 0, rw, rh)
-    if bool(getattr(overlay, "fill", False)):
+    if is_ken_burns(overlay):
+        filters.append(f"[{index}:v]" + ken_burns_chain(overlay, rw, rh, display_duration) + f",format=rgba[{shaped}]")
+    elif bool(getattr(overlay, "fill", False)):
         filters.append(f"{head},scale={rw}:{rh}:force_original_aspect_ratio=increase,crop={rw}:{rh},"
                        f"setsar=1,format=rgba[{shaped}]")
     else:
@@ -344,6 +346,36 @@ def _append_styled_overlay(filters: list[str], local: LocalMediaOverlay, *, inde
         base = f"ovwith{index}"
     filters.append(f"[{base}][ov{index}]overlay=x={rx}:y={ry}:{enable}:eof_action=pass[v{index}]")
     return f"v{index}"
+
+
+# --- B-roll v2: Ken Burns on photo overlays (PO 11 Nov 2026) ---------------------------------------
+
+KEN_BURNS_FPS = 30
+#: The photo is enlarged to this many times the region before zooming, so the centred crop moves in
+#: half-pixel steps of the output (no visible stair-stepping in a slow zoom).
+KEN_BURNS_OVERSAMPLE = 2
+
+
+def is_ken_burns(overlay) -> bool:
+    """A photo overlay in a region layout with motion "ken_burns". Every other overlay is drawn exactly as before."""
+    return (str(getattr(overlay, "kind", "")) == "photo"
+            and str(getattr(overlay, "motion", "") or "") == "ken_burns"
+            and str(getattr(overlay, "layout", "float") or "float") in REGION_LAYOUTS)
+
+
+def ken_burns_chain(overlay, region_w: int, region_h: int, duration: float) -> str:
+    """Filters (no input label) turning ONE frame of the photo into `duration` seconds of a slow centred zoom
+    from motion_zoom_from to motion_zoom_to, cropped to fill region_w x region_h (cover, never letterboxed).
+    zoompan holds the single frame for N output frames; zoom is linear in the output frame number `on`."""
+    z0 = float(getattr(overlay, "motion_zoom_from", 1.0) or 1.0)
+    z1 = float(getattr(overlay, "motion_zoom_to", 1.0) or 1.0)
+    frames = max(1, int(round(float(duration) * KEN_BURNS_FPS)))
+    big_w, big_h = region_w * KEN_BURNS_OVERSAMPLE, region_h * KEN_BURNS_OVERSAMPLE
+    zoom = f"{z0:.5f}+{z1 - z0:.5f}*min(on/{max(1, frames - 1)},1)"
+    return (f"trim=end_frame=1,scale={big_w}:{big_h}:force_original_aspect_ratio=increase,crop={big_w}:{big_h},"
+            f"setsar=1,zoompan=z='{zoom}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:"
+            f"s={region_w}x{region_h}:fps={KEN_BURNS_FPS},trim=duration={float(duration):.3f},"
+            f"setpts=PTS-STARTPTS,setsar=1")
 
 
 def _append_keyframed_float(filters: list[str], local: LocalMediaOverlay, *, shaped: str, index: int,

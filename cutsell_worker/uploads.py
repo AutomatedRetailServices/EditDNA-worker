@@ -63,6 +63,19 @@ ALLOWED_VOICE_OVER_CONTENT_TYPES = {
 }
 
 
+# B-roll v2 (PO 11 Nov 2026): a B-roll PHOTO source (metadata.clip_type "broll", broll_kind "photo") is a JPEG the
+# iPhone uploads like a video source, into the SAME scoped prefix. Its own small extension/type/size allowlist: a
+# photo name never accepts a video type and a video name never accepts an image type. Source URIs accept a photo only
+# where the caller says a photo is expected (`allow_photo`); every other reader (mix, audio clean...) is unchanged.
+ALLOWED_PHOTO_SOURCE_EXTENSIONS = {".jpg", ".jpeg"}
+ALLOWED_PHOTO_SOURCE_CONTENT_TYPES = {"image/jpeg", "application/octet-stream"}
+MAX_PHOTO_UPLOAD_BYTES = 40 * 1024 * 1024
+
+
+def is_photo_uri(uri: str) -> bool:
+    return Path(str(uri or "")).suffix.lower() in ALLOWED_PHOTO_SOURCE_EXTENSIONS
+
+
 def direct_upload_method() -> str:
     """POST form upload on Amazon S3 (unchanged); single signed PUT when a custom
     S3-compatible endpoint is configured (Cloudflare R2 does not implement the
@@ -110,7 +123,7 @@ def upload_prefix() -> str:
 def _safe_name(original_name: str) -> str:
     base = Path(original_name or "").name
     suffix = Path(base).suffix.lower()
-    if suffix not in ALLOWED_VIDEO_EXTENSIONS:
+    if suffix not in ALLOWED_VIDEO_EXTENSIONS and suffix not in ALLOWED_PHOTO_SOURCE_EXTENSIONS:
         raise ValueError("unsupported video extension")
     stem = Path(base).stem
     clean = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip("-._")[:72] or "video"
@@ -141,7 +154,13 @@ def prepare_upload_target(
     safe_name = _safe_name(original_name)
     detected = mimetypes.guess_type(safe_name)[0]
     resolved_type = (content_type or detected or "application/octet-stream").lower()
-    if resolved_type not in ALLOWED_CONTENT_TYPES:
+    if is_photo_uri(safe_name):
+        # B-roll v2: a JPEG photo source -- image/jpeg only, and a smaller size cap than a video.
+        if resolved_type not in ALLOWED_PHOTO_SOURCE_CONTENT_TYPES:
+            raise ValueError("unsupported photo content type")
+        if int(size_bytes) > MAX_PHOTO_UPLOAD_BYTES:
+            raise ValueError("upload size is outside allowed range")
+    elif resolved_type not in ALLOWED_CONTENT_TYPES:
         raise ValueError("unsupported video content type")
     config = load_runtime_config()
     if not config.s3_bucket:
@@ -198,7 +217,9 @@ def validate_product_source_uri(
     *,
     project_id: str | None = None,
     user_id: str | None = None,
+    allow_photo: bool = False,
 ) -> tuple[str, str]:
+    """`allow_photo` (B-roll v2): also accept a JPEG photo source in the same scope (a B-roll photo)."""
     bucket, key = parse_s3_uri(uri)
     config = load_runtime_config()
     # Reads may name the old Amazon bucket (storage_routing); writes never do.
@@ -211,7 +232,8 @@ def validate_product_source_uri(
         required_prefix = scoped_upload_prefix(user_id=user_id, project_id=project_id)
     if not key.startswith(required_prefix):
         raise ValueError("source uri is outside allowed CutSell upload scope")
-    if Path(key).suffix.lower() not in ALLOWED_VIDEO_EXTENSIONS:
+    suffix = Path(key).suffix.lower()
+    if suffix not in ALLOWED_VIDEO_EXTENSIONS and not (allow_photo and suffix in ALLOWED_PHOTO_SOURCE_EXTENSIONS):
         raise ValueError("source uri does not reference a supported video")
     return bucket, key
 
@@ -231,6 +253,7 @@ def create_presigned_source_download(
         uri,
         project_id=project_id,
         user_id=user_id,
+        allow_photo=True,      # B-roll v2: the editor shows this project's own B-roll photos too (same scope)
     )
     config = load_runtime_config()
     if client is None:

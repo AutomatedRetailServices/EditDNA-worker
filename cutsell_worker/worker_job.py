@@ -25,7 +25,7 @@ from .timeline_asset_s3 import register_primary_video
 from .timeline_asset_storage import store_timeline_assets
 from .timeline_assets import generate_filmstrip, waveform_peaks
 from .uploads import validate_product_source_uri
-from .broll_overlay import split_sources
+from .broll_overlay import is_photo_source, split_sources
 from .usage_limits import record_processing_minutes, release_processing_slot
 
 # =============================================================================
@@ -449,6 +449,12 @@ def _build_timeline_assets(request, local_paths: dict[str, str], directory: str,
                            audio_only: set[str] | None = None) -> dict[str, dict]:
     output: dict[str, dict] = {}
     for source in request.sources:
+        if is_photo_source(source) or source.source_asset_id not in local_paths:
+            # B-roll v2: a photo has no filmstrip / waveform; a B-roll file still uploading has none yet.
+            output[source.source_asset_id] = {"status": "not_applicable" if is_photo_source(source) else
+                                              "waiting_for_video", "filmstrip": [], "waveform_uri": None,
+                                              "waveform_bucket_count": 0}
+            continue
         if audio_only and source.source_asset_id in audio_only:
             # Made from the video by the follow-up job (run_video_followup_job) when it arrives.
             output[source.source_asset_id] = {"status": "waiting_for_video", "filmstrip": [], "waveform_uri": None,
@@ -584,24 +590,42 @@ def run_flow_b_job(payload: dict) -> dict:
             # the app sent it audio first; only if the video is not on storage yet is its voice file used (then it is
             # placed without looking at it).
             broll_ids = {s.source_asset_id for s in split_sources(request.sources)[1]}
+            # B-roll v2 (11 Nov): a B-roll PHOTO is a JPEG source (never heard, 0 minutes, no format gate). In the
+            # audio-first flow the app sends NO audio_uri for B-roll (videos or photos): their file may still be
+            # uploading. A B-roll file that is not on storage yet (or cannot be read) never fails the cut: it is
+            # "pending" -- placed from its declared length without being looked at (a photo: placed blind), and
+            # its own file is read by the export once it is there.
+            photo_ids = {s.source_asset_id for s in request.sources
+                         if s.source_asset_id in broll_ids and is_photo_source(s)}
+            pending_broll: set[str] = set()
             for index, source in enumerate(request.sources):
                 validate_product_source_uri(
                     source.uri,
                     project_id=request.project_id,
                     user_id=request.user_id,
+                    allow_photo=source.source_asset_id in photo_ids,
                 )
-                audio_uri = audio_first_uri(source, project_id=request.project_id, user_id=request.user_id)
-                broll_video = None
-                if audio_uri and source.source_asset_id in broll_ids:
+                if source.source_asset_id in broll_ids:
+                    suffix = Path(source.original_name).suffix or Path(source.uri).suffix or ".mp4"
+                    destination = str(Path(directory) / f"{source.source_order:03d}-{source.source_asset_id}{suffix}")
                     try:
-                        suffix = Path(source.original_name).suffix or ".mp4"
-                        broll_video = download_source(source.uri, str(
-                            Path(directory) / f"{source.source_order:03d}-{source.source_asset_id}{suffix}"))
+                        local_paths[source.source_asset_id] = download_source(source.uri, destination)
+                        probe = probe_media(local_paths[source.source_asset_id])
+                        if source.source_asset_id in photo_ids and not (probe.width and probe.height):
+                            raise ValueError("unreadable photo")
                     except Exception:
-                        broll_video = None
-                if broll_video:
-                    local_paths[source.source_asset_id] = broll_video
-                elif audio_uri:
+                        local_paths.pop(source.source_asset_id, None)
+                        pending_broll.add(source.source_asset_id)
+                        measured_by_source[source.source_asset_id] = 0.0
+                        continue
+                    # a photo counts 0 minutes; a B-roll video is measured like any source (as before)
+                    seconds = 0.0 if source.source_asset_id in photo_ids else max(0.0, float(probe.duration_sec))
+                    measured_by_source[source.source_asset_id] = seconds
+                    measured_seconds += seconds
+                    publish("preparing", min(10, 2 + int((index + 1) * 8 / len(request.sources))))
+                    continue
+                audio_uri = audio_first_uri(source, project_id=request.project_id, user_id=request.user_id)
+                if audio_uri:
                     audio_only.add(source.source_asset_id)
                     destination = str(Path(directory) / f"{source.source_order:03d}-{source.source_asset_id}.m4a")
                     local_paths[source.source_asset_id] = download_source(audio_uri, destination)
@@ -622,7 +646,8 @@ def run_flow_b_job(payload: dict) -> dict:
             downloaded_paths = dict(local_paths)
             # The video format gate is for videos; a voice-only source skips it (its video is checked
             # by the follow-up job when it arrives).
-            video_paths = {key: path for key, path in local_paths.items() if key not in audio_only}
+            video_paths = {key: path for key, path in local_paths.items()
+                           if key not in audio_only and key not in photo_ids}
             (
                 resolved_video_paths,
                 source_format_diagnostics,
@@ -657,10 +682,13 @@ def run_flow_b_job(payload: dict) -> dict:
                     import dataclasses
                     cut_request = dataclasses.replace(request, sources=tuple(
                         s for s in request.sources if s.source_asset_id not in dropped_broll))
-                result = process_with_simple_engine(cut_request, local_paths, progress=publish, audio_only=audio_only)
+                result = process_with_simple_engine(cut_request, local_paths, progress=publish, audio_only=audio_only,
+                                                    pending_broll=pending_broll)
                 serialized = result_to_dict(result)
                 if dropped_broll:
                     serialized["broll_dropped_by_format_gate"] = dropped_broll
+                if pending_broll:
+                    serialized["broll_pending_upload"] = sorted(pending_broll)
                 serialized["brain_backend"] = "simple_engine"
                 serialized["external_brain_calls_enabled"] = True
                 serialized["hybrid_provider"] = "anthropic"
@@ -759,7 +787,7 @@ def run_flow_b_job(payload: dict) -> dict:
                     from .post_plan import record_source
                     from .simple_engine_adapter import is_bulk
                     record_source(request.user_id, request.project_id,
-                                  "combine" if len(request.sources) > 1 else "bulk" if is_bulk(request.sources) else "single")
+                                  "combine" if len(split_sources(request.sources)[0]) > 1 else "bulk" if is_bulk(request.sources) else "single")
                 except Exception:
                     pass
                 from .post_captions import caption_once
@@ -820,7 +848,7 @@ def run_video_followup_job(payload: dict) -> dict:
     source_order = int(payload.get("source_order") or 0)
     if not project_id or not user_id or not uri:
         raise ValueError("project_id, user_id and uri are required")
-    validate_product_source_uri(uri, project_id=project_id, user_id=user_id)
+    validate_product_source_uri(uri, project_id=project_id, user_id=user_id, allow_photo=True)
     started = time.time()
     with tempfile.TemporaryDirectory(prefix="cutsell-video-followup-") as directory:
         suffix = Path(uri).suffix or ".mp4"

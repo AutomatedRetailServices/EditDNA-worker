@@ -281,16 +281,36 @@ def _media_overlay_from_dict(item: dict) -> MediaOverlay:
         raise ValueError("media overlay edge must be one of: " + ", ".join(OVERLAY_EDGES))
     if not -360.0 <= rotation <= 360.0:
         raise ValueError("media overlay rotation must be between -360 and 360 degrees")
+    motion = str(item.get("motion") or "")
+    if motion not in OVERLAY_MOTIONS:
+        raise ValueError("media overlay motion must be one of: " + ", ".join(m for m in OVERLAY_MOTIONS if m))
+    try:
+        zoom_from = float(item.get("motion_zoom_from", 1.0) if item.get("motion_zoom_from") is not None else 1.0)
+        zoom_to = float(item.get("motion_zoom_to", 1.0) if item.get("motion_zoom_to") is not None else 1.0)
+    except (TypeError, ValueError):
+        raise ValueError("media overlay motion zoom must be numbers") from None
+    if motion:
+        if kind != "photo":
+            raise ValueError("media overlay motion is for photo overlays only")
+        if not (MOTION_ZOOM_RANGE[0] <= zoom_from <= MOTION_ZOOM_RANGE[1]
+                and MOTION_ZOOM_RANGE[0] <= zoom_to <= MOTION_ZOOM_RANGE[1]):
+            raise ValueError("media overlay motion zoom must be between 1.0 and 1.5")
+    else:
+        zoom_from = zoom_to = 1.0
     return MediaOverlay(
         overlay_id=str(item["overlay_id"]), kind=kind, uri=uri, start=start, end=end,
         x=x, y=y, width=width, source_start=source_start, source_end=source_end,
         mute_audio=bool(item.get("mute_audio", True)),
         layer=layer, layout=layout, edge=edge, fill=bool(item.get("fill", False)), rotation=rotation,
         volume=_gain(item.get("volume"), "media overlay volume"),
+        motion=motion, motion_zoom_from=zoom_from, motion_zoom_to=zoom_to,
     )
 
 
 MAX_OVERLAY_LAYER = 50
+#: B-roll v2: "" = still; "ken_burns" = slow centred zoom (photo overlays only).
+OVERLAY_MOTIONS = ("", "ken_burns")
+MOTION_ZOOM_RANGE = (1.0, 1.5)
 OVERLAY_LAYOUTS = ("float", "side_by_side", "stacked", "left", "right", "top", "bottom", "full")
 OVERLAY_EDGES = ("sharp", "soft", "extra_soft")
 AUDIO_CLIP_KINDS = ("voice", "music", "sfx")
@@ -501,6 +521,10 @@ def _json_safe(value: Any) -> Any:
             for key, default in (("layer", 0), ("layout", "float"), ("edge", "sharp"), ("fill", False),
                                  ("rotation", 0.0), ("volume", 1.0)):
                 if data.get(key) == default:
+                    data.pop(key, None)
+            # B-roll v2: a still overlay serializes exactly as before; a moving one carries all three fields.
+            if not data.get("motion"):
+                for key in ("motion", "motion_zoom_from", "motion_zoom_to"):
                     data.pop(key, None)
         elif isinstance(value, AudioClip):
             for key in ("asset_id", "sfx_id"):

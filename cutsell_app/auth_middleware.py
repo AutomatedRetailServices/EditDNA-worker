@@ -132,8 +132,9 @@ class AuthScopeMiddleware:
 
         # Commercial cost guard: reject oversized/over-quota processing before RQ/GPU work.
         if path == "/v1/flow-b/jobs" and scope.get("method") == "POST" and isinstance(payload, dict):
+            # B-roll v2: a B-roll photo (a JPEG marked clip_type "broll") counts 0 minutes.
             durations = [
-                float(item.get("duration_sec") or 0.0)
+                0.0 if _is_broll_photo(item) else float(item.get("duration_sec") or 0.0)
                 for item in (payload.get("sources") or [])
                 if isinstance(item, dict)
             ]
@@ -154,3 +155,12 @@ class AuthScopeMiddleware:
             return {"type": "http.request", "body": b"", "more_body": False}
 
         return await self.app(scope, replay_receive, send)
+
+
+def _is_broll_photo(item: dict) -> bool:
+    from types import SimpleNamespace
+    from cutsell_worker.broll_overlay import is_photo_source
+    meta = item.get("metadata")
+    return is_photo_source(SimpleNamespace(metadata=meta if isinstance(meta, dict) else {},
+                                           uri=str(item.get("uri") or ""),
+                                           original_name=str(item.get("original_name") or "")))

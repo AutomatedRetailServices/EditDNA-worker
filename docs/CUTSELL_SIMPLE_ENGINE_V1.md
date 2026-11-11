@@ -185,8 +185,8 @@ user's or another project's object is still refused (tested).
 and frozen by the guard test; B-roll must also match the phrases that SURVIVED the cut, which exist only after the
 decision; and it needs images. So after the cut: 3 frames per clip (1/6, 3/6, 5/6 of it, 512 px long side) + the kept
 phrases with their times + the product name -> per clip "what it shows", the best phrase, the best frame, and where
-the closing CTA starts. Same model as the engine (`CUTSELL_SIMPLE_ENGINE_MODEL`, default `claude-sonnet-5-5`), effort
-low, JSON schema, max_tokens 2000. Normal API (not the Bulk Batch API); not cached / not remembered.
+the closing CTA starts. (v1 used the engine's model; **v2 uses Haiku, see below**.) Effort low, JSON schema,
+max_tokens 2000. Normal API (not the Bulk Batch API); not cached / not remembered.
 
 **Rules (enforced in code, whatever the answer says).** No B-roll in the first 3 s, nor from the start of the phrase
 holding the closing call to action (model's `cta_phrase` or the engine's `cta` moment in the second half; at least the
@@ -223,3 +223,85 @@ the cut + the export read `broll_overlay.py`, the adapter, `worker_job.py`, `ove
 (`cutsell_app`, which signs the overlays' `preview_url` through `overlay_uploads`; without it the blocks are on the
 timeline but the editor has no picture for them). Before enabling for users: one real end-to-end cut + export with B-roll
 and a human watch of the result.
+
+### B-roll v2 (2026-11-11, same branch, NOT deployed)
+PO spec 11 Nov. Same files plus: `contracts.py` / `serde.py` (overlay `motion` fields), `media_overlay_render.py`
+(Ken Burns), `uploads.py` / `overlay_uploads.py` (JPEG photo sources), `export_job.py`, `cutsell_app/main.py`,
+`cutsell_app/auth_middleware.py`. `engine.py`, `prompts/`, `simple_engine/__init__.py` untouched; the cut call and
+`CUTSELL_SIMPLE_ENGINE_MODEL` unchanged (tested).
+
+**Source metadata contract (iPhone -> server, all string values, free-form `metadata`).**
+- `clip_type`: `"primary"` (talking video; SEVERAL allowed, joined in source_order) or `"broll"`.
+- `broll_kind`: `"video"` | `"photo"` (B-roll only). A photo source is a JPEG (`image/jpeg`, `.jpg`/`.jpeg`).
+- `broll_order`: `"1".."N"` (B-roll only; the creator's order). `broll_keep_order`: `"1"` | `"0"` (same on every B-roll).
+- Sources order: all primary first, then B-roll. In the audio-first flow B-roll sources carry NO `audio_uri`.
+A source is a photo when it is marked `broll` AND its uri is `.jpg`/`.jpeg` (the overlay kind must match the stored
+object, so `broll_kind` alone never turns a video file into a photo).
+
+**Several talking videos.** Only voice sources go to the engine; each is cut and the kept parts follow one another in
+source_order (the Combine path, unchanged). Overlay times are on that joined sum-of-clips timeline (the one the
+renderer and `draft_from_dict` use); tested with a B-roll matched to a phrase of the SECOND talking video.
+
+**Haiku for the images.** `match_with_claude` uses `CUTSELL_BROLL_MATCH_MODEL` (default `claude-haiku-5-5`), read at every
+call (no redeploy to change it). `diagnostics.broll_overlay.ai` records `model` and `cost_usd`. Price table
+`broll_overlay.PRICES`: Haiku 5.5 $0.10 in / $0.50 out per M tokens, Sonnet 5.5 $2 / $10 -- the values already in the
+repo (`post_captions.py`, `product_tagging.py`, `mix_engine.py`, `simple_engine/llm.py`); **not re-checked against the
+live Anthropic price page for this change: verify before relying on the totals below.**
+
+**Frames.** Clip < 10 s: 3 frames (1/6, 3/6, 5/6). Longer: one every ~2.5 s (`round(duration / 2.5)`), max 10 (20 s ->
+8 frames). 512 px long side. The model answers per clip `uses: [{phrase, at}]`, `at` = the second of the clip where
+the content is; the piece used is the steadiest 2-4 s window that contains `at`. A clip of 10 s or more may be used
+up to `min(3, duration // 5)` times, on different parts: a piece overlapping an already used part of the same clip is
+never placed. A second piece of a clip gets id `ai-broll-<source_order>-2`.
+
+**Photos.** One photo = one image for the model (no `-ss` seek: it drops a still's only frame). It is never sent to
+speech-to-text, never goes through the format gate, has no filmstrip/waveform (`timeline_assets.status:
+"not_applicable"`) and counts **0 minutes** (worker meter, `check_measured`, the adapter's allowance check and the API's
+declared-length guard). Overlay fields (what the iPhone editor/export must draw the same way):
+`{"overlay_id": "ai-broll-002", "kind": "photo", "uri": <the photo source uri>, "start": s, "end": e (2-4 s),
+"x": 0.5, "y": 0.5, "width": 1.0, "source_start": 0.0, "source_end": null, "mute_audio": true, "layout": "full",
+"fill": true, "motion": "ken_burns", "motion_zoom_from": 1.0, "motion_zoom_to": 1.08}`.
+Meaning: the photo covers the 9:16 frame (scale to cover, centre crop), and its scale goes LINEARLY from
+`motion_zoom_from` at `start` to `motion_zoom_to` at `end`, centred. Server render (`media_overlay_render.ken_burns_chain`):
+one frame of the photo, scaled to cover 2x the region, `zoompan` (z linear in the output frame, centred x/y, d = frames
+of the overlay, 30 fps) to the region size. `motion` is accepted only on photo overlays (`serde`); an overlay without
+`motion` serializes and renders byte-identically to before (tested against the previous renderer from git).
+Uploads: `.jpg`/`.jpeg` names accept only `image/jpeg` (or octet-stream), max 40 MB; video names never accept an image
+type. `validate_product_source_uri(..., allow_photo=True)` only where a photo is expected (cut request when the source
+is a B-roll photo, worker download, export sources -- skipped, it is drawn as its overlay --, playback links,
+video-ready); every other reader (Mix, audio clean...) still refuses a JPEG. `validate_overlay_uri` accepts this same
+user's same project's JPEG source as a `photo` overlay.
+
+**Order 1-2-3.** `broll_keep_order "1"`: the shots appear in `broll_order` (1 before 2 before 3; a long clip's pieces
+stay inside its slot). `best_ordered_assignment` (DP) picks strictly increasing phrases maximizing the number of shots
+placed, then keeping the model's picks (cost 0 on its phrase, 1 + distance elsewhere), clips without a pick near their
+even-spread target; reasons `matched` / `reordered` / `spread`. The model is also told the order. `"0"`: build-79 rules
+(the model's matches, product mentions, even spread). Every rule still holds (face first 3 s and over the closing CTA,
+2-4 s blocks, <= 50 % coverage, no two overlap); the fallback (no answer / invalid / `CUTSELL_BROLL_AI=0`) respects the
+order when keep_order is on.
+
+**Audio first.** The app sends no `audio_uri` for B-roll. The worker fetches each B-roll file directly; one that is not
+on storage yet (or a photo that cannot be read) never fails the cut: it is `broll_pending_upload` in the result, gets
+0 minutes, and is placed from its declared length without being looked at (a pending photo is placed blind; a pending
+video with declared 0 s is not placed). The export reads it once it is there.
+
+**Cost per video, B-roll matching only** (estimates: image ~ w x h / 750 = ~200 tokens per 512 px frame; text ~600-800
+tokens; output incl. low-effort thinking 100-800 tokens; prices as above, not measured on real calls):
+
+| case | images | input tokens | Haiku 5.5 (v2) | Sonnet 5.5 (build 79) |
+|---|---|---|---|---|
+| (a) 3 short clips (< 10 s) | 9 | ~2.4 k | ~$0.0003-0.0005 | ~$0.005-0.011 |
+| (b) 3 long clips (~20 s) | 24 (8 each) | ~5.4 k | ~$0.0006-0.0009 | ~$0.013-0.019 (same 24 frames) / ~$0.005-0.011 with build-79's 3 frames |
+| (c) 3 photos | 3 | ~1.2 k | ~$0.0002-0.0004 | ~$0.003-0.007 |
+
+About 15-20x cheaper than Sonnet: under 0.1 c per video on top of the ~3.6-3.8 c cut (if Haiku's repo price is right).
+
+**To deploy (Product Owner decision; nothing deployed).** Modal worker (cut + export: `broll_overlay.py`, the adapter,
+`worker_job.py`, `export_job.py`, `media_overlay_render.py`, `serde.py`, `contracts.py`, `uploads.py`,
+`overlay_uploads.py`) via `.github/workflows/cutsell-modal-worker-deploy.yml` (push to `feat/simple-engine-v1` only), AND
+the Render API (`cutsell_app`: JPEG presign/multipart, the cut-request check, the export-request check, the usage
+guard, photo `preview_url` / `playback_url`). Both must ship together: an API without it refuses the photo upload; a
+worker without it fails the cut on a JPEG source. Optional env: `CUTSELL_BROLL_MATCH_MODEL` (default Haiku), no new
+secret. Before users: one real cut + export with long clips, photos and keep_order, watched by a human; check the real
+Haiku token usage / price in `diagnostics.broll_overlay.ai`.
+

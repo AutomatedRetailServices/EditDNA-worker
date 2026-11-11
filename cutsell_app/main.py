@@ -54,6 +54,7 @@ from cutsell_worker.source_identity import stable_source_id
 from cutsell_worker.timeline_asset_storage import sign_timeline_assets
 from cutsell_worker.overlay_uploads import create_presigned_overlay_download
 from cutsell_worker.sfx_library import signed_manifest as signed_sfx_manifest
+from cutsell_worker.broll_overlay import is_photo_source
 from cutsell_worker.uploads import (
     create_presigned_source_download,
     create_presigned_upload,
@@ -367,7 +368,9 @@ def submit_flow_b(payload: FlowBSubmitRequest):
             raise HTTPException(status_code=409, detail="source_order values must be unique")
         seen_orders.add(item.source_order)
         try:
-            validate_product_source_uri(item.uri, project_id=payload.project_id, user_id=payload.user_id)
+            # B-roll v2: a JPEG is accepted only as a B-roll photo (metadata.clip_type "broll").
+            validate_product_source_uri(item.uri, project_id=payload.project_id, user_id=payload.user_id,
+                                        allow_photo=is_photo_source(item))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
         sources.append({
@@ -419,7 +422,8 @@ class VideoReadyRequest(BaseModel):
 def video_ready(project_id: str, payload: VideoReadyRequest):
     """Audio first (iOS build 23): the video of a source cut from its voice only is now on storage."""
     try:
-        validate_product_source_uri(payload.uri, project_id=project_id, user_id=payload.user_id)
+        # B-roll v2: the app may also announce a B-roll photo that finished uploading (nothing to do for it).
+        validate_product_source_uri(payload.uri, project_id=project_id, user_id=payload.user_id, allow_photo=True)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     from .mix_routes import is_mix
@@ -563,7 +567,8 @@ def submit_export(payload: ExportSubmitRequest):
             raise HTTPException(status_code=409, detail="source_asset_id values must be unique")
         seen_source_ids.add(item.source_asset_id)
         try:
-            validate_product_source_uri(item.uri, project_id=payload.project_id, user_id=payload.user_id)
+            validate_product_source_uri(item.uri, project_id=payload.project_id, user_id=payload.user_id,
+                                        allow_photo=True)   # B-roll v2: a B-roll photo source (drawn as its overlay)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
         sources.append(item.model_dump())

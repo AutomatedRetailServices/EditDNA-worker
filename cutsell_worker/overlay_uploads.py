@@ -88,9 +88,13 @@ def validate_overlay_uri(uri: str, *, user_id: str, project_id: str) -> tuple[st
         # B-roll over the voice (broll_overlay.py): the cut places a B-roll clip the creator sent WITH this project
         # as a video overlay naming that source itself. Accepted only inside this same user's same project upload
         # scope, and only as a video (tenant isolation unchanged: the same user/project hashes as the overlay scope).
-        from .uploads import scoped_upload_prefix
-        if key.startswith(scoped_upload_prefix(user_id=user_id, project_id=project_id)) and suffix in VIDEO_EXTENSIONS:
-            return bucket, key, "video"
+        # B-roll v2 (11 Nov): a B-roll PHOTO source of this same project (JPEG only, as the source upload allows).
+        from .uploads import ALLOWED_PHOTO_SOURCE_EXTENSIONS, scoped_upload_prefix
+        if key.startswith(scoped_upload_prefix(user_id=user_id, project_id=project_id)):
+            if suffix in VIDEO_EXTENSIONS:
+                return bucket, key, "video"
+            if suffix in ALLOWED_PHOTO_SOURCE_EXTENSIONS:
+                return bucket, key, "photo"
         raise ValueError("overlay uri is outside allowed CutSell project scope")
     if suffix in PHOTO_EXTENSIONS:
         kind = "photo"

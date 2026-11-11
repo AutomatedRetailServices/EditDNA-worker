@@ -35,7 +35,7 @@ from .render_versions import add_render_version
 from .serde import draft_from_dict
 from .storage import download_source
 from .universal_clean_cut_validation import perceptual_review_for_rendered_candidate
-from .uploads import validate_product_source_uri
+from .uploads import is_photo_uri, validate_product_source_uri
 
 # D-269A Stage 2/4: the SAME output geometry `render.render_preview`'s own
 # defaults use -- never a new decision, just threading the existing
@@ -853,7 +853,11 @@ def run_export_job(payload: dict) -> dict:
                     raise ValueError("export source_asset_id values must be unique")
                 seen_source_ids.add(source_id)
                 uri = str(item["uri"])
-                validate_product_source_uri(uri, project_id=project_id, user_id=user_id)
+                validate_product_source_uri(uri, project_id=project_id, user_id=user_id, allow_photo=True)
+                if is_photo_uri(uri):
+                    # B-roll v2: a B-roll photo source is never on the voice timeline; it is drawn (and fetched)
+                    # as its photo overlay below.
+                    continue
                 suffix = Path(str(item.get("original_name") or "source.mp4")).suffix or ".mp4"
                 destination = str(Path(directory) / f"source-{index:03d}-{source_id}{suffix}")
                 local_paths[source_id] = download_source(uri, destination)

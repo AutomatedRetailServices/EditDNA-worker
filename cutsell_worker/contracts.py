@@ -387,6 +387,12 @@ class MediaOverlay:
     rotation: float = 0.0
     #   volume   -- the overlay video's own audio gain (0..2) when `mute_audio` is False.
     volume: float = 1.0
+    # B-roll v2 (PO 11 Nov 2026): a photo overlay may move. "" = still (every overlay before this);
+    # "ken_burns" = a slow centred zoom from `motion_zoom_from` to `motion_zoom_to` over the overlay's
+    # duration, the photo cropped to fill its region (photo overlays in a region layout only).
+    motion: str = ""
+    motion_zoom_from: float = 1.0
+    motion_zoom_to: float = 1.0
 
 
 @dataclass(frozen=True)
