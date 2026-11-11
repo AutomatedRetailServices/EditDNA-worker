@@ -214,8 +214,7 @@ enum ShopVision {
 
 // MARK: - Textures (drawn in code: no image files)
 
-/// Linen, Paper, Marble, Wood, Knit, Satin, Concrete and Velvet, drawn with Core Graphics + Core Image noise from a
-/// fixed seed, on the Figma swatch gradients (or on the matched colour with ✨ Match my products).
+/// Linen, Paper, Marble, Wood, Knit, Satin, Concrete and Velvet, drawn with Core Graphics and seeded noise, on the Figma swatch gradients (or on the matched colour with ✨ Match my products).
 enum ShopTextureRenderer {
     private static let cache = NSCache<NSString, UIImage>()
 
@@ -244,23 +243,28 @@ enum ShopTextureRenderer {
     private static func white(_ a: CGFloat) -> CGColor { CGColor(gray: 1, alpha: a) }
     private static func black(_ a: CGFloat) -> CGColor { CGColor(gray: 0, alpha: a) }
 
-    /// Grey noise from CIRandomGenerator, stretched by (sx, sy) and blurred.
-    private static func noise(size: CGSize, sx: CGFloat, sy: CGFloat, blur: CGFloat, offset: CGFloat = 0) -> CGImage? {
-        guard var image = CIFilter.randomGenerator().outputImage else { return nil }
-        image = image.transformed(by: CGAffineTransform(translationX: offset, y: offset * 0.7))
-            .transformed(by: CGAffineTransform(scaleX: sx, y: sy))
-        let mono = CIFilter.colorControls()
-        mono.inputImage = image
-        mono.saturation = 0
-        image = mono.outputImage ?? image
-        if blur > 0 { image = image.clampedToExtent().applyingGaussianBlur(sigma: Double(blur)) }
-        return ShopCutout.context.createCGImage(image.cropped(to: CGRect(origin: .zero, size: size)),
-                                                from: CGRect(origin: .zero, size: size))
+    /// Grey noise: one random grey per (sx × sy) cell, stretched over `size` by Core Graphics (smooth when the cells
+    /// are big, so large cells give soft blotches and long thin cells give threads / grain). Seeded: same look each time.
+    private static func noise(size: CGSize, sx: CGFloat, sy: CGFloat, blur: CGFloat = 0, offset: CGFloat = 0) -> CGImage? {
+        let w = max(1, min(1024, Int((size.width / max(sx, 0.01)).rounded(.up))))
+        let h = max(1, min(1024, Int((size.height / max(sy, 0.01)).rounded(.up))))
+        var rng = ShopRandom(seed: UInt64(w * 73_856_093 ^ h * 19_349_663) &+ UInt64(offset * 1000))
+        var bytes = [UInt8](repeating: 0, count: w * h)
+        var i = 0
+        while i < bytes.count {
+            var r = rng.next()
+            for _ in 0..<8 where i < bytes.count { bytes[i] = UInt8(truncatingIfNeeded: r); r >>= 8; i += 1 }
+        }
+        guard let provider = CGDataProvider(data: Data(bytes) as CFData) else { return nil }
+        return CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 8, bytesPerRow: w,
+                       space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+                       provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
     }
 
     private static func overlay(_ image: CGImage?, in ctx: CGContext, size: CGSize, alpha: CGFloat, mode: CGBlendMode) {
         guard let image else { return }
         ctx.saveGState()
+        ctx.interpolationQuality = .high
         ctx.setAlpha(alpha)
         ctx.setBlendMode(mode)
         ctx.draw(image, in: CGRect(origin: .zero, size: size))
