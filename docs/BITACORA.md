@@ -8,6 +8,14 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 - **B-roll automático del motor (anotado el 11 nov 2026):** El B-roll automático del motor será un feature solo de los planes de pago más altos. Mientras estamos en pruebas queda activo para todos. Cuando existan los planes, se separa por cuenta (control en el servidor) y las cuentas sin el feature verán '+ B-roll' con candado PRO y podrán poner B-roll a mano en el editor.
 
+## Motor de B-roll (rama sin deploy, no es un build de la app)
+
+- **11 nov 2026 · rama `feature/broll-after-stop-engine`, commit `09409a52`** — decisiones de la PO sobre el build 80, aplicadas con pruebas simuladas (55 pruebas de B-roll pasan; sin deploy):
+  - Dos pedazos del mismo clip largo quedan separados al menos ~4 s (con cara u otra toma en medio). Si un segundo pedazo no cabe con esa separación, se deja fuera.
+  - Con "Keep this order", los pedazos de un clip largo quedan en su lugar del orden, con la cara en medio: pedazo A → cara → pedazo B → la toma siguiente.
+  - Si una toma todavía se está subiendo al empezar el corte, el corte espera hasta 60 s en total (para todas las tomas pendientes juntas, no 60 s cada una); si llega, la IA la mira normal; si no, se coloca sin que la IA la vea. Ajuste: `CUTSELL_BROLL_UPLOAD_WAIT_SEC` (60 por defecto).
+  - Pendiente de confirmar: 60 s en total (recomendado) en lugar de 60 s por toma.
+
 ## Resumen
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
