@@ -12,6 +12,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 80 | 2026-11-11 | ✅ subido (pedido) | feature/broll-after-stop | `262c9378` | B-roll v2: Upload con B-roll en 2 pasos, fotos, orden 1-2-3 y "Keep this order" |
 | 79 | 2026-11-10 22:15 | ✅ subido | feature/broll-after-stop | `5ad00288` | "+ B-roll" en Grabar: después de STOP, cámara de B-roll y "Ready to edit" |
 | 78 | 2026-11-09 13:44 | ✅ subido | feature/clon-ar-autopausa | `71ae403e` | Modos Talk / B-roll en Grabar; la cámara ya cabe en la pantalla |
 | 77 | 2026-11-08 20:52 | ✅ subido | feature/clon-ar-autopausa | `e5895e3a` | Clon AR (beta), auto-pausa por voz y B-roll en Grabar; aviso de borrado |
@@ -93,6 +94,27 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 | 1 | 2026-10-12 13:01 | ❌ falló | feature/ios-captions-v2 | `d90bfc50` | Primer intento, no llegó a TestFlight |
 
 ---
+
+## Build 80 — 2026-11-11
+- **Resultado:** pedido a TestFlight (si la subida falla, se corrige esta línea)
+- **Rama (según el historial de git):** feature/broll-after-stop  ·  **Commit de la app:** `262c9378`
+- **Qué cambió:**
+  - Con "+ B-roll" encendido, "Upload" en la cámara abre la galería en 2 pasos (Figma F1 3026:328 → F2 3026:366 → F3 3026:416):
+    - "Your talking video" · "1 of 2": uno o varios videos, numerados en el orden en que se tocan; se unen en ese orden.
+    - "B-roll shots" · "2 of 2": videos y fotos ("PHOTO" en lugar de la duración), numerados 1, 2, 3, todos con "✓ B-roll". Incluye "Record shots instead" (abre la cámara de B-roll) y "Add N shots".
+  - La "✕" cierra la galería en el paso 1 y vuelve al paso 1 en el paso 2 (decisión de la PO, 11 nov).
+  - "Ready to edit" (Figma E4 3023:439 y F4 3026:471): número azul en cada toma, mantener y arrastrar para cambiar el orden, "Hold and drag to change the order." y la fila "Keep this order" (encendida por defecto). Si el video hablando viene de la galería: "Talking · N clips · 1:20" y "Joined in your order".
+  - Las fotos se suben como B-roll tipo "photo" (JPEG, máximo 1920 px). En el editor y en la exportación del iPhone hacen un zoom lento (de 1.0 a 1.08, en línea recta, igual que el servidor).
+  - Cada clip se manda con sus marcas: clip_type (primary / broll), broll_kind (video / photo), broll_order (1..N) y broll_keep_order (1 / 0).
+  - Arreglo: antes de subir, al hacer más liviano un video se perdían sus marcas (B-roll / voz) y el nombre del álbum. Ahora se conservan, también al retomar una subida.
+  - Los clips de B-roll no sacan voz propia al subir (van encima de la voz).
+  - Pruebas automáticas nuevas (galería en 2 pasos, varios videos hablando en orden, fotos y videos con su orden, arrastrar cambia el orden, zoom de fotos, marcas que no se pierden, sin B-roll = igual que hoy).
+- **Pantallas nuevas o cambiadas:** Galería de 2 pasos (nueva: "Your talking video" y "B-roll shots"), Ready to edit (números, arrastrar, "Keep this order", versión desde galería), editor (zoom en fotos de B-roll). Ver docs/design-audit/build-80/.
+- **Pendiente o con problemas:**
+  - El motor (Haiku para las imágenes, orden 1-2-3, fotos con zoom, varios videos hablando) está solo en la rama feature/broll-after-stop-engine (commit `b6c8aa1e`), **sin deploy**. Hay que publicar juntos el worker de Modal y el servidor de Render: si se publica solo uno, las fotos fallan.
+  - Hasta ese deploy, el servidor de hoy no acepta fotos como fuente: un proyecto con fotos de B-roll puede fallar al subir.
+  - Mientras se copian los videos y fotos de la galería, el botón azul muestra el aro de carga (no está en Figma).
+  - Falta probar en un iPhone real.
 
 ## Build 79 — 2026-11-10
 - **Resultado:** subido a TestFlight
