@@ -275,7 +275,7 @@ final class CameraLayoutTests: XCTestCase {
         // The Create tab's Record camera, with the "+ B-roll" switch (PO 10 Nov 2026).
         let host = UIHostingController(rootView: CreateCameraView(onBack: {}, onUpload: {}, onRecorded: { _ in },
                                                                   previewMode: true, allowsClone: true,
-                                                                  onRecordedWithBroll: { _, _ in }))
+                                                                  onRecordedWithBroll: { _, _, _ in }))
         return host.sizeThatFits(in: size).height
     }
 
