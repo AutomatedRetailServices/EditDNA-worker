@@ -35,7 +35,48 @@ enum BrollAfterStop {
 
     /// What goes to the cut, in this order: the voice first, then the B-roll shots (one project).
     static func uploadVideos(talk: LocalVideo, shots: [LocalVideo]) -> [LocalVideo] {
-        [Self.talk(talk)] + shots.map(Self.shot)
+        uploadVideos(talks: [talk], shots: shots, keepOrder: true)
+    }
+
+    /// B-roll v2 (PO 11 Nov 2026): one or more talking videos (joined in this order) + the shots, each numbered
+    /// 1, 2, 3 (broll_order), with its kind (video / photo) and "Keep this order" (broll_keep_order).
+    static func uploadVideos(talks: [LocalVideo], shots: [LocalVideo], keepOrder: Bool) -> [LocalVideo] {
+        let voice = talks.map(Self.talk)
+        let numbered = shots.enumerated().map { index, video -> LocalVideo in
+            var out = Self.shot(video)
+            out.clipTags[ClipMark.kindKey] = video.isPhoto ? "photo" : "video"
+            out.clipTags[ClipMark.orderKey] = String(index + 1)
+            out.clipTags[ClipMark.keepOrderKey] = keepOrder ? "1" : "0"
+            return out
+        }
+        return voice + numbered
+    }
+
+    /// Drag in "Ready to edit": the shot at `from` goes to `to`; the numbers follow the new places.
+    static func moved(_ shots: [LocalVideo], from: Int, to: Int) -> [LocalVideo] {
+        guard shots.indices.contains(from), shots.indices.contains(to), from != to else { return shots }
+        var out = shots
+        let item = out.remove(at: from)
+        out.insert(item, at: to)
+        return out
+    }
+
+    /// "Talking · 3 clips · 1:20" (several videos from the gallery) or "Talking · 0:24".
+    static func talkingLine(_ talks: [LocalVideo]) -> String {
+        let seconds = talks.reduce(0) { $0 + $1.duration }
+        guard talks.count > 1 else { return talkingLine(seconds: seconds) }
+        return String(format: L10n.tr("Talking · %d clips · %@"), talks.count, clock(seconds))
+    }
+
+    /// "3 videos selected" / "3 shots selected"
+    static func selectedText(_ count: Int, shots: Bool) -> String {
+        if shots { return count == 1 ? L10n.tr("1 shot selected") : String(format: L10n.tr("%d shots selected"), count) }
+        return count == 1 ? L10n.tr("1 video selected") : String(format: L10n.tr("%d videos selected"), count)
+    }
+
+    /// "Add 3 shots"
+    static func addShotsTitle(_ count: Int) -> String {
+        count == 1 ? L10n.tr("Add 1 shot") : String(format: L10n.tr("Add %d shots"), count)
     }
 
     /// "● Shot 3 · 0:03" while a shot records (N = shots already taken + 1).
@@ -167,6 +208,9 @@ struct ClipThumbnail: View {
     }
 
     static func firstFrame(_ url: URL) async -> UIImage? {
+        if ["jpg", "jpeg", "png", "heic"].contains(url.pathExtension.lowercased()) {
+            return UIImage(contentsOfFile: url.path)
+        }
         let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 240, height: 320)
@@ -240,7 +284,8 @@ struct BrollClipsPicker: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> PHPickerViewController {
         var configuration = PHPickerConfiguration()
-        configuration.filter = .videos
+        // B-roll v2: videos and photos.
+        configuration.filter = .any(of: [.videos, .images])
         configuration.selectionLimit = 0
         configuration.preferredAssetRepresentationMode = .current
         let picker = PHPickerViewController(configuration: configuration)
@@ -269,7 +314,11 @@ struct BrollClipsPicker: UIViewControllerRepresentable {
         }
 
         static func copy(_ provider: NSItemProvider) async -> URL? {
-            await withCheckedContinuation { continuation in
+            if !provider.hasItemConformingToTypeIdentifier(UTType.movie.identifier),
+               provider.canLoadObject(ofClass: UIImage.self) {
+                return await copyPhoto(provider)
+            }
+            return await withCheckedContinuation { continuation in
                 provider.loadFileRepresentation(forTypeIdentifier: UTType.movie.identifier) { url, _ in
                     guard let url else { continuation.resume(returning: nil); return }
                     let ext = url.pathExtension.isEmpty ? "mov" : url.pathExtension
@@ -284,12 +333,35 @@ struct BrollClipsPicker: UIViewControllerRepresentable {
                 }
             }
         }
+
+        /// A photo as a JPEG (at most 1920 px long side).
+        static func copyPhoto(_ provider: NSItemProvider) async -> URL? {
+            let image: UIImage? = await withCheckedContinuation { continuation in
+                provider.loadObject(ofClass: UIImage.self) { object, _ in continuation.resume(returning: object as? UIImage) }
+            }
+            guard let image else { return nil }
+            let longSide = max(image.size.width, image.size.height)
+            let scale = min(1, 1920 / max(1, longSide))
+            let size = CGSize(width: (image.size.width * scale).rounded(), height: (image.size.height * scale).rounded())
+            let format = UIGraphicsImageRendererFormat.default()
+            format.scale = 1
+            let resized = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+                image.draw(in: CGRect(origin: .zero, size: size))
+            }
+            guard let jpeg = resized.jpegData(compressionQuality: 0.88) else { return nil }
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("broll-\(UUID().uuidString).jpg")
+            do { try jpeg.write(to: url); return url } catch { return nil }
+        }
     }
 }
 
 extension LocalVideo {
     /// A clip picked from Photos for B-roll (already copied into CutSell's folder).
     static func brollClip(url: URL) async -> LocalVideo {
+        if ["jpg", "jpeg"].contains(url.pathExtension.lowercased()) {
+            return BrollAfterStop.shot(LocalVideo(url: url, name: url.lastPathComponent, duration: 0,
+                                                  contentType: "image/jpeg"))
+        }
         let seconds = (try? await AVURLAsset(url: url).load(.duration).seconds) ?? 0
         let type = url.pathExtension.lowercased() == "mp4" ? "video/mp4" : "video/quicktime"
         return BrollAfterStop.shot(LocalVideo(url: url, name: url.lastPathComponent, duration: max(0, seconds),
@@ -297,16 +369,22 @@ extension LocalVideo {
     }
 }
 
-// MARK: - E4: "Ready to edit"
+// MARK: - E4 / F4: "Ready to edit"
 
 struct BrollSummaryView: View {
-    let talk: LocalVideo
-    /// Auto-pause was on for the talking part (then "Silences removed").
+    /// The talking part: one recording, or one or more gallery videos joined in this order.
+    let talks: [LocalVideo]
+    /// The talking part came from the gallery (F4: "Joined in your order").
+    let fromGallery: Bool
+    /// Auto-pause was on for the talking part (E4: "Silences removed").
     let silencesRemoved: Bool
     @Binding var shots: [LocalVideo]
+    /// "Keep this order" (on by default; off = AI picks the best moment for each).
+    @Binding var keepOrder: Bool
     let onBack: () -> Void
     let onAddMore: () -> Void
     let onContinue: () -> Void
+    @State private var dragging: URL?
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -363,14 +441,20 @@ struct BrollSummaryView: View {
                 .font(CS.inter(13, .bold))
                 .foregroundStyle(Color(fixed: 0x6B7385))
             HStack(spacing: 16) {
-                ClipThumbnail(url: talk.url)
-                    .frame(width: 64, height: 94)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                if let first = talks.first {
+                    ClipThumbnail(url: first.url)
+                        .frame(width: 64, height: 94)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(verbatim: BrollAfterStop.talkingLine(seconds: talk.duration))
+                    Text(verbatim: BrollAfterStop.talkingLine(talks))
                         .font(CS.inter(16, .bold))
                         .foregroundStyle(Color(fixed: 0x0B1020))
-                    if silencesRemoved {
+                    if fromGallery {
+                        Text(L10n.tr("Joined in your order"))
+                            .font(CS.inter(13, .medium))
+                            .foregroundStyle(Color(fixed: 0x6B7385))
+                    } else if silencesRemoved {
                         Text(L10n.tr("Silences removed"))
                             .font(CS.inter(13, .medium))
                             .foregroundStyle(Color(fixed: 0x6B7385))
@@ -394,16 +478,13 @@ struct BrollSummaryView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
                     ForEach(Array(shots.enumerated()), id: \.element.url) { index, shot in
-                        ClipThumbnail(url: shot.url)
-                            .frame(width: 64, height: 94)
-                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .overlay(alignment: .topTrailing) {
-                                Button { shots.remove(at: index) } label: { RemoveBadge(size: 20) }
-                                    .buttonStyle(.plain)
-                                    .offset(x: 4, y: -6)
-                                    .accessibilityLabel(L10n.tr("Remove"))
-                                    .accessibilityIdentifier("brollSummaryRemove")
+                        shotTile(shot, number: index + 1)
+                            .onDrag {
+                                dragging = shot.url
+                                return NSItemProvider(object: shot.url.absoluteString as NSString)
                             }
+                            .onDrop(of: [UTType.text], delegate: ShotDropDelegate(target: shot.url, shots: $shots,
+                                                                                  dragging: $dragging))
                     }
                     Button(action: onAddMore) {
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -420,17 +501,104 @@ struct BrollSummaryView: View {
                 .padding(.top, 12)
                 .padding(.trailing, 6)
             }
-            Text(L10n.tr("We'll place them over your voice at the right moments."))
+            Text(L10n.tr("Hold and drag to change the order."))
                 .font(CS.inter(13, .medium))
                 .foregroundStyle(Color(fixed: 0x6B7385))
                 .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 8)
+            keepOrderRow
                 .padding(.top, 14)
         }
         .padding(.horizontal, 18)
         .padding(.top, 16)
-        .padding(.bottom, 16)
+        .padding(.bottom, 24)
         .frame(maxWidth: .infinity, alignment: .leading)
         .modifier(SummaryCard())
+    }
+
+    private func shotTile(_ shot: LocalVideo, number: Int) -> some View {
+        ClipThumbnail(url: shot.url)
+            .frame(width: 64, height: 94)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .opacity(dragging == shot.url ? 0.5 : 1)
+            .overlay(alignment: .bottomLeading) {
+                BrollNumberBadge(number: number, size: 22).padding(4)
+            }
+            .overlay(alignment: .topTrailing) {
+                Button { shots.removeAll { $0.url == shot.url } } label: { RemoveBadge(size: 20) }
+                    .buttonStyle(.plain)
+                    .offset(x: 4, y: -6)
+                    .accessibilityLabel(L10n.tr("Remove"))
+                    .accessibilityIdentifier("brollSummaryRemove")
+            }
+            .accessibilityLabel(String(format: L10n.tr("Shot %d"), number))
+    }
+
+    /// "Keep this order" / "Off = AI picks the best moment for each" + blue switch (48×28).
+    private var keepOrderRow: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(L10n.tr("Keep this order"))
+                    .font(CS.inter(15, .bold))
+                    .foregroundStyle(Color(fixed: 0x0B1020))
+                Text(L10n.tr("Off = AI picks the best moment for each"))
+                    .font(CS.inter(11, .medium))
+                    .foregroundStyle(Color(fixed: 0x6B7385))
+                    .lineLimit(1).minimumScaleFactor(0.8)
+            }
+            Spacer(minLength: 0)
+            Button { keepOrder.toggle() } label: {
+                Capsule()
+                    .fill(keepOrder ? Color(fixed: 0x1769FF) : Color(fixed: 0xD5DAE3))
+                    .frame(width: 48, height: 28)
+                    .overlay(alignment: keepOrder ? .trailing : .leading) {
+                        Circle().fill(.white).frame(width: 24, height: 24).padding(2)
+                    }
+                    .animation(.easeOut(duration: 0.15), value: keepOrder)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L10n.tr("Keep this order"))
+            .accessibilityValue(keepOrder ? "On" : "Off")
+            .accessibilityIdentifier("brollKeepOrder")
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 50)
+        .background(Color(fixed: 0xF3F5F9), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+/// Hold-and-drag reordering of the shots: the dragged shot takes the place of the one it is over.
+private struct ShotDropDelegate: DropDelegate {
+    let target: URL
+    @Binding var shots: [LocalVideo]
+    @Binding var dragging: URL?
+
+    func dropEntered(info: DropInfo) {
+        guard let dragging, dragging != target,
+              let from = shots.firstIndex(where: { $0.url == dragging }),
+              let to = shots.firstIndex(where: { $0.url == target }) else { return }
+        withAnimation(.easeOut(duration: 0.15)) { shots = BrollAfterStop.moved(shots, from: from, to: to) }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
+
+    func performDrop(info: DropInfo) -> Bool {
+        dragging = nil
+        return true
+    }
+}
+
+/// The order number on a shot: #1769FF circle, 2 pt white border, white number (Figma E4 / F2 / F3).
+struct BrollNumberBadge: View {
+    let number: Int
+    var size: CGFloat = 24
+    var body: some View {
+        Text(verbatim: "\(number)")
+            .font(CS.inter(12, .bold))
+            .foregroundStyle(.white)
+            .frame(width: size, height: size)
+            .background(Circle().fill(Color(fixed: 0x1769FF)))
+            .overlay(Circle().stroke(.white, lineWidth: 2))
     }
 }
 

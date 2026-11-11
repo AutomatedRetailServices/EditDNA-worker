@@ -11,6 +11,18 @@ struct PendingCutVideo: Codable, Hashable {
     /// PO 28 Oct (speed): a 4K / heavy video whose cut started from its voice; its lighter copy is made in
     /// the background and uploaded to the place reserved for it (nil on older records = upload as it is).
     var prepareBeforeUpload: Bool? = nil
+    /// B-roll (PO 11 Nov 2026): the clip's tags and album hint, so a resumed upload still sends them
+    /// (nil on older records).
+    var clipTags: [String: String]? = nil
+    var albumHint: String? = nil
+
+    /// The clip to upload again, with its tags.
+    var localVideo: LocalVideo {
+        var video = LocalVideo(url: fileURL, name: name, duration: duration, contentType: contentType)
+        video.clipTags = clipTags ?? [:]
+        video.albumHint = albumHint
+        return video
+    }
 
     /// Build 22: found again after an app update moves CutSell's folder.
     var fileURL: URL { ContainerPath.resolve(filePath) }

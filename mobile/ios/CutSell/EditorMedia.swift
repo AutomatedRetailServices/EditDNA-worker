@@ -271,7 +271,7 @@ extension DraftEditorViewModel {
             let url = OverlayMediaStore.localURL(forURI: uri)
                 ?? (item["preview_url"]?.stringValue ?? item["playback_url"]?.stringValue).flatMap(URL.init(string:))
             let start = item["start"]?.doubleValue ?? 0
-            return OverlayOnScreen(
+            var overlay = OverlayOnScreen(
                 id: id, kind: kind, url: url,
                 x: item["x"]?.doubleValue ?? 0.5, y: item["y"]?.doubleValue ?? 0.5,
                 width: item["width"]?.doubleValue ?? 0.4,
@@ -279,6 +279,12 @@ extension DraftEditorViewModel {
                 sourceStart: item["source_start"]?.doubleValue ?? 0,
                 style: OverlayStyle(item)
             )
+            // B-roll photos placed by the engine: slow zoom (Ken Burns).
+            if item["motion"]?.stringValue == KenBurns.motion {
+                overlay.zoomFrom = item["motion_zoom_from"]?.doubleValue ?? 1.0
+                overlay.zoomTo = item["motion_zoom_to"]?.doubleValue ?? 1.08
+            }
+            return overlay
         }
         for item in pendingOverlays {
             out.append(OverlayOnScreen(id: item.id, kind: item.kind, url: item.fileURL, x: item.x, y: item.y,

@@ -19,6 +19,9 @@ struct CreateFlowView: View {
     @State private var recorded: LocalVideo?
     /// B-roll after STOP (PO 10 Nov 2026): the shots that go with `recorded` (empty = a normal recording).
     @State private var recordedShots: [LocalVideo] = []
+    /// B-roll v2: more talking videos after `recorded` (gallery, joined in order) and "Keep this order".
+    @State private var recordedMoreTalks: [LocalVideo] = []
+    @State private var recordedKeepOrder = true
     @State private var job: CreateJob?
     /// Chosen in the gallery; started once the gallery has finished closing.
     @State private var jobAfterGallery: CreateJob?
@@ -129,9 +132,14 @@ struct CreateFlowView: View {
                 CreateCameraView(
                     onBack: { showingCamera = false },
                     onUpload: { afterCamera = .gallery; showingCamera = false },
-                    onRecorded: { recordedShots = []; recorded = $0 },
+                    onRecorded: { recordedShots = []; recordedMoreTalks = []; recorded = $0 },
                     allowsClone: true,
-                    onRecordedWithBroll: { talk, shots in recordedShots = shots; recorded = talk }
+                    onRecordedWithBroll: { talks, shots, keep in
+                        recordedShots = shots
+                        recordedMoreTalks = Array(talks.dropFirst())
+                        recordedKeepOrder = keep
+                        recorded = talks.first
+                    }
                 )
                 // Never taller than the screen, so the sheet below always slides up completely.
                 .frame(width: screen.size.width, height: screen.size.height)
@@ -141,16 +149,19 @@ struct CreateFlowView: View {
                         recorded = nil
                         discardRecording(video)
                         recordedShots.forEach(discardRecording)
+                        recordedMoreTalks.forEach(discardRecording)
                         recordedShots = []
+                        recordedMoreTalks = []
                     } }
                 )) {
                     StyleSheetView(ctaTitle: CreateMode.single.ctaTitle(1)) { style in
                         guard let video = recorded else { return }
                         recorded = nil
-                        let shots = recordedShots
+                        let shots = recordedShots, more = recordedMoreTalks, keep = recordedKeepOrder
                         recordedShots = []
+                        recordedMoreTalks = []
                         afterCamera = .job(CreateJob(mode: .single, source: .recorded(video), style: style,
-                                                     brollShots: shots))
+                                                     brollShots: shots, brollMoreTalks: more, brollKeepOrder: keep))
                         showingCamera = false
                     }
                 }
@@ -241,6 +252,7 @@ struct CreateFlowView: View {
                             if case .recorded(let video) = current.source {
                                 discardRecording(video)
                                 current.brollShots.forEach(discardRecording)
+                                current.brollMoreTalks.forEach(discardRecording)
                             }
                         }
                     )
@@ -420,7 +432,7 @@ struct CreateFlowView: View {
         submitter.reset()
         do {
             try await StallWatch.run(submitter) {
-                let videos = record.videos.map { LocalVideo(url: $0.fileURL, name: $0.name, duration: $0.duration, contentType: $0.contentType) }
+                let videos = record.videos.map(\.localVideo)
                 let id = try await submitter.submit(
                     videos: videos, title: record.title, mode: record.mode, audioOverlap: record.audioOverlap,
                     autoZoom: record.autoZoom ?? true, resumeProjectID: projectID, appState: appState
@@ -498,7 +510,7 @@ struct CreateFlowView: View {
             // Its own submitter: a retry never waits behind (or disturbs) the upload running now.
             let retrying = CutSubmitter()
             retrying.queueItem = item
-            let videos = record.videos.map { LocalVideo(url: $0.fileURL, name: $0.name, duration: $0.duration, contentType: $0.contentType) }
+            let videos = record.videos.map(\.localVideo)
             do {
                 let id = try await retrying.submit(
                     videos: videos, title: record.title, mode: record.mode, audioOverlap: record.audioOverlap,
@@ -530,8 +542,10 @@ struct CreateFlowView: View {
             case .recorded(let video):
                 let thumbnail = await prepareScreen(for: [video])
                 // B-roll after STOP: one project = the voice (clip_type "primary") + the shots (clip_type "broll").
-                let videos = current.brollShots.isEmpty
-                    ? [video] : BrollAfterStop.uploadVideos(talk: video, shots: current.brollShots)
+                let videos = current.brollShots.isEmpty && current.brollMoreTalks.isEmpty
+                    ? [video]
+                    : BrollAfterStop.uploadVideos(talks: [video] + current.brollMoreTalks, shots: current.brollShots,
+                                                  keepOrder: current.brollKeepOrder)
                 let projectID = try await submitter.submit(
                     videos: videos, title: Self.cutTitle([video]),
                     mode: videos.count > 1 ? CutSubmitter.multipleMode : CutSubmitter.singleMode,
@@ -669,6 +683,9 @@ struct CreateJob: Identifiable {
     var brollAssetIDs: Set<String> = []
     /// B-roll after STOP (PO 10 Nov 2026): shots recorded / picked after the talking part (tagged "broll").
     var brollShots: [LocalVideo] = []
+    /// B-roll v2: more talking videos (gallery, joined after the first in this order) and "Keep this order".
+    var brollMoreTalks: [LocalVideo] = []
+    var brollKeepOrder = true
     /// What she is promoting, chosen before this job (captured when the job is made).
     var promoting: PromotingChoice.Pick? = PromotingChoice.current
 }

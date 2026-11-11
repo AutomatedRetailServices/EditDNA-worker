@@ -12,7 +12,7 @@ enum ResumeRunner {
                                       projectID: record.projectID, state: .uploading(0))
         let submitter = CutSubmitter()
         submitter.queueItem = item
-        let videos = record.videos.map { LocalVideo(url: $0.fileURL, name: $0.name, duration: $0.duration, contentType: $0.contentType) }
+        let videos = record.videos.map(\.localVideo)
         do {
             let id = try await submitter.submit(
                 videos: videos, title: record.title, mode: record.mode, audioOverlap: record.audioOverlap,

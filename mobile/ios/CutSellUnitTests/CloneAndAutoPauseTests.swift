@@ -356,7 +356,141 @@ final class BrollAfterStopTests: XCTestCase {
     func testSummaryFitsTheSmallestIPhone() {
         let shots = (0..<6).map { BrollAfterStop.shot(video("s\($0)")) }
         let host = UIHostingController(rootView: BrollSummaryView(
-            talk: BrollAfterStop.talk(video("talk")), silencesRemoved: true, shots: .constant(shots),
+            talks: [BrollAfterStop.talk(video("talk"))], fromGallery: false, silencesRemoved: true,
+            shots: .constant(shots), keepOrder: .constant(true),
+            onBack: {}, onAddMore: {}, onContinue: {}))
+        let screen = CGSize(width: 375, height: 667)
+        XCTAssertLessThanOrEqual(host.sizeThatFits(in: screen).height, screen.height + 0.5)
+    }
+}
+
+/// B-roll v2 (PO 11 Nov 2026, Figma F1–F4): Upload with B-roll, order 1-2-3, photos.
+final class BrollV2Tests: XCTestCase {
+    private func video(_ name: String, seconds: Double = 20) -> LocalVideo {
+        LocalVideo(url: URL(fileURLWithPath: "/tmp/\(name).mov"), name: name, duration: seconds,
+                   contentType: "video/quicktime")
+    }
+    private func photo(_ name: String) -> LocalVideo {
+        LocalVideo(url: URL(fileURLWithPath: "/tmp/\(name).jpg"), name: name, duration: 0, contentType: "image/jpeg")
+    }
+
+    /// a) Upload with B-roll on: F2 (talking, numbered in tap order) → "Next: add B-roll" → F3 (shots) → add.
+    func testUploadGoesTalkingThenShots() {
+        var pick = BrollGalleryPick()
+        XCTAssertEqual(pick.step, .talking)
+        XCTAssertFalse(pick.canGoOn)                 // "Next" waits for a video
+        pick.toggle("v2"); pick.toggle("v1"); pick.toggle("v3")
+        XCTAssertEqual(pick.number(of: "v2"), 1)
+        XCTAssertEqual(pick.number(of: "v3"), 3)
+        pick.toggle("v1")                            // un-pick: the numbers after it move up
+        XCTAssertEqual(pick.talking, ["v2", "v3"])
+        XCTAssertEqual(pick.number(of: "v3"), 2)
+        pick.next()
+        XCTAssertEqual(pick.step, .shots)
+        XCTAssertFalse(pick.canGoOn)                 // "Add N shots" waits for a shot
+        pick.toggle("p1"); pick.toggle("s1")
+        XCTAssertEqual(pick.shots, ["p1", "s1"])
+        XCTAssertTrue(pick.canGoOn)
+        // ✕ on step 2 goes back to step 1 with the talking videos kept; ✕ on step 1 closes.
+        XCTAssertFalse(pick.close())
+        XCTAssertEqual(pick.step, .talking)
+        XCTAssertEqual(pick.talking, ["v2", "v3"])
+        XCTAssertTrue(pick.close())
+        XCTAssertEqual(BrollAfterStop.selectedText(3, shots: false), "3 videos selected")
+        XCTAssertEqual(BrollAfterStop.selectedText(3, shots: true), "3 shots selected")
+        XCTAssertEqual(BrollAfterStop.addShotsTitle(3), "Add 3 shots")
+    }
+
+    /// b) Several talking videos are sent first, in the order picked, all tagged "primary".
+    func testSeveralTalkingVideosKeepTheirOrder() {
+        let videos = BrollAfterStop.uploadVideos(talks: [video("t1", seconds: 30), video("t2", seconds: 50)],
+                                                 shots: [video("s1")], keepOrder: true)
+        XCTAssertEqual(videos.map(\.name), ["t1", "t2", "s1"])
+        XCTAssertEqual(videos.map { $0.clipTags["clip_type"] }, ["primary", "primary", "broll"])
+        XCTAssertNil(videos[0].clipTags["broll_order"])
+        XCTAssertEqual(BrollAfterStop.talkingLine([video("t1", seconds: 30), video("t2", seconds: 50)]),
+                       "Talking · 2 clips · 1:20")
+        XCTAssertEqual(BrollAfterStop.talkingLine([video("t1", seconds: 24)]), "Talking · 0:24")
+    }
+
+    /// c) Photos and videos are B-roll with their kind and order, and "Keep this order".
+    func testShotsCarryKindOrderAndKeepOrder() throws {
+        let on = BrollAfterStop.uploadVideos(talks: [video("t")], shots: [photo("p"), video("v"), photo("q")],
+                                             keepOrder: true)
+        XCTAssertEqual(on.dropFirst().map { $0.clipTags["clip_type"] }, ["broll", "broll", "broll"])
+        XCTAssertEqual(on.dropFirst().map { $0.clipTags["broll_kind"] }, ["photo", "video", "photo"])
+        XCTAssertEqual(on.dropFirst().map { $0.clipTags["broll_order"] }, ["1", "2", "3"])
+        XCTAssertEqual(on.dropFirst().map { $0.clipTags["broll_keep_order"] }, ["1", "1", "1"])
+        let off = BrollAfterStop.uploadVideos(talks: [video("t")], shots: [photo("p")], keepOrder: false)
+        XCTAssertEqual(off[1].clipTags["broll_keep_order"], "0")
+        XCTAssertTrue(off[1].isPhoto)
+        // What the server receives.
+        let meta = ClipMark.sourceMetadata(["album_hint": "CeraVe"], tags: on[1].clipTags)
+        XCTAssertEqual(meta?["broll_kind"], "photo")
+        XCTAssertEqual(meta?["album_hint"], "CeraVe")
+        let source = SourceInput(originalName: "p.jpg", uri: "s3://x/p.jpg", sourceOrder: 1, durationSec: 0, metadata: meta)
+        let json = String(data: try JSONEncoder().encode(source), encoding: .utf8) ?? ""
+        XCTAssertTrue(json.contains("\"broll_order\":\"1\""), json)
+    }
+
+    /// d) Hold and drag changes the order; the numbers follow.
+    func testDragChangesTheOrder() {
+        let shots = [video("a"), video("b"), video("c")]
+        let moved = BrollAfterStop.moved(shots, from: 0, to: 2)
+        XCTAssertEqual(moved.map(\.name), ["b", "c", "a"])
+        let sent = BrollAfterStop.uploadVideos(talks: [video("t")], shots: moved, keepOrder: true)
+        XCTAssertEqual(sent.dropFirst().map { "\($0.name)=\($0.clipTags["broll_order"] ?? "")" }, ["b=1", "c=2", "a=3"])
+        XCTAssertEqual(BrollAfterStop.moved(shots, from: 1, to: 1).map(\.name), ["a", "b", "c"])
+        XCTAssertEqual(BrollAfterStop.moved(shots, from: 5, to: 0).map(\.name), ["a", "b", "c"])
+    }
+
+    /// h) A B-roll photo zooms in slowly over its time, from 1.0 to 1.08 (same as the server's export).
+    func testPhotoZoom() {
+        XCTAssertEqual(KenBurns.scale(time: 2, start: 2, end: 5, from: 1, to: 1.08), 1, accuracy: 1e-9)
+        XCTAssertEqual(KenBurns.scale(time: 5, start: 2, end: 5, from: 1, to: 1.08), 1.08, accuracy: 1e-9)
+        let mid = KenBurns.scale(time: 3.5, start: 2, end: 5, from: 1, to: 1.08)
+        XCTAssertEqual(mid, 1.04, accuracy: 1e-9)
+        XCTAssertEqual(KenBurns.scale(time: 9, start: 2, end: 5, from: 1, to: 1), 1)   // no zoom on video overlays
+    }
+
+    /// Build 79 lost the tags when a clip was made lighter or an upload resumed: they are kept now.
+    func testTagsSurviveALighterCopyAndAResume() {
+        var clip = video("s")
+        clip.albumHint = "Dior"
+        clip = BrollAfterStop.uploadVideos(talks: [video("t")], shots: [clip], keepOrder: false)[1]
+        let lighter = clip.movedTo(URL(fileURLWithPath: "/tmp/light.mp4"), contentType: "video/mp4")
+        XCTAssertEqual(lighter.clipTags, clip.clipTags)
+        XCTAssertEqual(lighter.albumHint, "Dior")
+        let pending = PendingCutVideo(filePath: "/tmp/light.mp4", name: "s", duration: 20, contentType: "video/mp4",
+                                      clipTags: lighter.clipTags, albumHint: lighter.albumHint)
+        XCTAssertEqual(pending.localVideo.clipTags["clip_type"], "broll")
+        XCTAssertEqual(pending.localVideo.clipTags["broll_keep_order"], "0")
+        XCTAssertEqual(pending.localVideo.albumHint, "Dior")
+    }
+
+    /// j) With B-roll off nothing is tagged: the clip goes as today.
+    func testNoBrollNoTags() {
+        let plain = video("talk")
+        XCTAssertTrue(plain.clipTags.isEmpty)
+        XCTAssertNil(ClipMark.sourceMetadata(nil, tags: plain.clipTags))
+        XCTAssertEqual(ClipMark.sourceMetadata(["album_hint": "X"], tags: plain.clipTags), ["album_hint": "X"])
+    }
+
+    /// A photo picked for B-roll is a photo shot.
+    func testPickedPhotoIsAPhotoShot() async {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("p-\(UUID().uuidString).jpg")
+        let clip = await LocalVideo.brollClip(url: url)
+        XCTAssertTrue(clip.isBroll)
+        XCTAssertTrue(clip.isPhoto)
+        XCTAssertEqual(clip.contentType, "image/jpeg")
+    }
+
+    /// The gallery-path summary (F4) fits the smallest iPhone.
+    @MainActor
+    func testGallerySummaryFitsTheSmallestIPhone() {
+        let host = UIHostingController(rootView: BrollSummaryView(
+            talks: [video("a"), video("b"), video("c")], fromGallery: true, silencesRemoved: false,
+            shots: .constant([photo("p"), video("v"), photo("q")]), keepOrder: .constant(true),
             onBack: {}, onAddMore: {}, onContinue: {}))
         let screen = CGSize(width: 375, height: 667)
         XCTAssertLessThanOrEqual(host.sizeThatFits(in: screen).height, screen.height + 0.5)

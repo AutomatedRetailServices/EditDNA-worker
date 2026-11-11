@@ -888,7 +888,7 @@ struct ExportOverlayLayer: View {
             ForEach(model.overlaysOnScreen.sorted { $0.style.layer < $1.style.layer }) { overlay in
                 if time >= overlay.start && time < overlay.end, let picture = pictures[overlay.id] {
                     ExportMediaOverlay(overlay: overlay, frame: frame, picture: picture,
-                                       key: model.overlayTransform(id: overlay.id, at: time))
+                                       key: model.overlayTransform(id: overlay.id, at: time), time: time)
                 }
             }
             if model.captionsEnabled {
@@ -907,6 +907,8 @@ struct ExportMediaOverlay: View {
     let frame: CGSize
     let picture: UIImage
     let key: TransformValue
+    /// The moment drawn (for a B-roll photo's slow zoom).
+    var time: Double = 0
 
     private var style: OverlayStyle { overlay.style }
     private var aspect: CGFloat { picture.size.height > 0 ? picture.size.width / picture.size.height : 1 }
@@ -918,7 +920,10 @@ struct ExportMediaOverlay: View {
             ZStack {
                 if !style.fill && !style.layout.transparentPad { Color.black }
                 if style.fill {
-                    Image(uiImage: picture).resizable().scaledToFill().frame(width: size.width, height: size.height).clipped()
+                    Image(uiImage: picture).resizable().scaledToFill().frame(width: size.width, height: size.height)
+                        .scaleEffect(overlay.zoom(at: time))
+                        .frame(width: size.width, height: size.height)
+                        .clipped()
                 } else {
                     Image(uiImage: picture).resizable().aspectRatio(aspect, contentMode: .fit).frame(width: size.width, height: size.height)
                 }

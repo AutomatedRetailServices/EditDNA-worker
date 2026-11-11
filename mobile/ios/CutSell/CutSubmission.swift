@@ -169,6 +169,8 @@ final class CutSubmitter: ObservableObject {
                 for (index, video) in selected.enumerated() {
                     // iCloud light: the original is still downloading; it is uploaded as it is.
                     if video.cloudAssetID != nil { preparedVideos.append(video); continue }
+                    // A B-roll photo is uploaded as it is (a JPEG).
+                    if video.isPhoto { preparedVideos.append(video); continue }
                     if voiceFirst, await VideoPreparation.shared.needsLighterCopy(fileURL: video.url) {
                         deferred.insert(index)
                         preparedVideos.append(video)
@@ -188,12 +190,8 @@ final class CutSubmitter: ObservableObject {
                         }
                     }
                     if prepared.wasTranscoded { transientPreparedFiles.append(prepared.url) }
-                    preparedVideos.append(LocalVideo(
-                        url: prepared.url,
-                        name: video.name,
-                        duration: video.duration,
-                        contentType: prepared.contentType
-                    ))
+                    // Keeps the album hint and the B-roll / voice tags (build 79 lost them here).
+                    preparedVideos.append(video.movedTo(prepared.url, contentType: prepared.contentType))
                 }
                 uploadVideos = preparedVideos
             }
@@ -230,7 +228,9 @@ final class CutSubmitter: ObservableObject {
                             duration: $0.duration,
                             contentType: $0.contentType,
                             cloudAssetID: $0.cloudAssetID,
-                            expectedBytes: $0.expectedBytes
+                            expectedBytes: $0.expectedBytes,
+                            clipTags: $0.clipTags.isEmpty ? nil : $0.clipTags,
+                            albumHint: $0.albumHint
                         )
                     }.enumerated().map { index, item in
                         var item = item
@@ -264,8 +264,7 @@ final class CutSubmitter: ObservableObject {
                     Task { @MainActor in self?.stage(title, fraction) }
                 }
                 if prepared.wasTranscoded { transientPreparedFiles.append(prepared.url) }
-                uploadVideos[index] = LocalVideo(url: prepared.url, name: video.name, duration: video.duration,
-                                                 contentType: prepared.contentType)
+                uploadVideos[index] = video.movedTo(prepared.url, contentType: prepared.contentType)
             }
             // The whole-video flow needs every original on the iPhone (iCloud light falls back here).
             for (index, video) in uploadVideos.enumerated() where video.cloudAssetID != nil
@@ -344,8 +343,7 @@ final class CutSubmitter: ObservableObject {
                     uri: result.sourceURI,
                     sourceOrder: index,
                     durationSec: video.duration,
-                    metadata: ClipMark.sourceMetadata(Self.metadata(tags, album: video.albumHint), broll: video.isBroll,
-                                                  primary: video.isPrimaryVoice)
+                    metadata: ClipMark.sourceMetadata(Self.metadata(tags, album: video.albumHint), tags: video.clipTags)
                 ))
             }
 
@@ -379,9 +377,11 @@ extension CutSubmitter {
                         autoZoom: Bool, reserved: Set<Int> = []) async throws -> String? {
         let count = videos.count
         func clip(_ index: Int, _ text: String) -> String { count > 1 ? "Clip \(index + 1) of \(count) · \(text)" : text }
-        var voices: [URL] = []
+        var voices: [URL?] = []
         let extractStarted = Date()
         for (index, video) in videos.enumerated() {
+            // B-roll shots (videos and photos) go over the voice: no voice of their own to extract or send.
+            if video.isBroll { voices.append(nil); continue }
             stage(clip(index, "Preparing…"), 0)
             do {
                 var voice = try await AudioExtractor.extractWithPeak(from: video.previewURL ?? video.url) { [weak self] fraction in
@@ -398,7 +398,7 @@ extension CutSubmitter {
                 }
                 if voice.peak < AudioExtractor.quietPeak {
                     try? FileManager.default.removeItem(at: voice.url)
-                    for url in voices { try? FileManager.default.removeItem(at: url) }
+                    for url in voices.compactMap({ $0 }) { try? FileManager.default.removeItem(at: url) }
                     CutSellDiagnostics.log("audio_first_skipped", ["reason": "quiet", "peak": String(format: "%.4f", voice.peak),
                                                                    "source_order": String(index)])
                     return nil
@@ -428,11 +428,16 @@ extension CutSubmitter {
         let voiceStarted = Date()
         var sources: [SourceInput] = []
         for (index, video) in videos.enumerated() {
-            stage(clip(index, "Uploading audio…"), Double(index) / Double(count))
-            let voiceURI = try await VoiceUpload.upload(fileURL: voices[index], projectID: projectID, session: session, order: index)
-            try? FileManager.default.removeItem(at: voices[index])
+            var base = Self.metadata(tags, album: video.albumHint) ?? [:]
+            if let voice = voices[index] {
+                stage(clip(index, "Uploading audio…"), Double(index) / Double(count))
+                let voiceURI = try await VoiceUpload.upload(fileURL: voice, projectID: projectID, session: session, order: index)
+                try? FileManager.default.removeItem(at: voice)
+                base["audio_uri"] = voiceURI
+            }
             sources.append(SourceInput(originalName: video.url.lastPathComponent, uri: starts[index].sourceURI,
-                                       sourceOrder: index, durationSec: video.duration, metadata: ClipMark.sourceMetadata(["audio_uri": voiceURI].merging(Self.metadata(tags, album: video.albumHint) ?? [:]) { own, _ in own }, broll: video.isBroll, primary: video.isPrimaryVoice)))
+                                       sourceOrder: index, durationSec: video.duration,
+                                       metadata: ClipMark.sourceMetadata(base.isEmpty ? nil : base, tags: video.clipTags)))
         }
         CutSellDiagnostics.log("stage_timing", ["stage": "audio_upload", "seconds": String(format: "%.1f", Date().timeIntervalSince(voiceStarted))])
         stage("Cutting your video…")

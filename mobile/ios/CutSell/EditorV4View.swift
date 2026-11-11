@@ -2291,6 +2291,26 @@ struct OverlayOnScreen: Identifiable, Equatable {
     var style = OverlayStyle()
     var uploading: Double?
     var failed = false
+    /// B-roll photos (PO 11 Nov 2026): slow zoom over the overlay's time ("motion": "ken_burns", from → to).
+    var zoomFrom: Double = 1
+    var zoomTo: Double = 1
+
+    /// The zoom now (1 = none): eased from `zoomFrom` at `start` to `zoomTo` at `end`.
+    func zoom(at time: Double) -> CGFloat {
+        KenBurns.scale(time: time, start: start, end: end, from: zoomFrom, to: zoomTo)
+    }
+}
+
+/// The slow zoom of a B-roll photo (same curve as the server's export).
+enum KenBurns {
+    static let motion = "ken_burns"
+
+    static func scale(time: Double, start: Double, end: Double, from: Double, to: Double) -> CGFloat {
+        guard from != to, end > start else { return CGFloat(from) }
+        let p = min(1, max(0, (time - start) / (end - start)))
+        let eased = p * p * (3 - 2 * p)            // smoothstep: gentle at both ends
+        return CGFloat(from + (to - from) * eased)
+    }
 }
 
 private struct MediaOverlayOnVideo: View {
@@ -2372,7 +2392,10 @@ private struct MediaOverlayOnVideo: View {
         return ZStack {
             if !style.fill && !style.layout.transparentPad { Color.black }
             if style.fill {
-                picture.frame(width: size.width, height: size.height).clipped()
+                picture.frame(width: size.width, height: size.height)
+                    .scaleEffect(overlay.zoom(at: time))
+                    .frame(width: size.width, height: size.height)
+                    .clipped()
             } else {
                 picture.aspectRatio(CGFloat(aspect ?? 1), contentMode: .fit).frame(width: size.width, height: size.height)
             }

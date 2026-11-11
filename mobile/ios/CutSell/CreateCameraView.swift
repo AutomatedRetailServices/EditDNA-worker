@@ -42,7 +42,9 @@ struct CreateCameraView: View {
     /// B-roll after STOP (PO 10 Nov 2026, Figma E1-E4): the Record camera of the Create tab offers "+ B-roll". When
     /// it is on, STOP opens the B-roll camera, then "Ready to edit"; Continue hands over the talking part and the
     /// shots. nil = no switch (other cameras).
-    var onRecordedWithBroll: ((LocalVideo, [LocalVideo]) -> Void)? = nil
+    /// B-roll v2 (PO 11 Nov 2026): the talking videos (one recording, or gallery videos in order), the shots in
+    /// their order, and "Keep this order".
+    var onRecordedWithBroll: (([LocalVideo], [LocalVideo], Bool) -> Void)? = nil
 
     @StateObject private var camera = CameraController()
     @State private var gate: Gate = .checking
@@ -65,8 +67,13 @@ struct CreateCameraView: View {
     @State private var brollAfter = false
     /// The B-roll camera (E3) is showing; the talking part is kept in `talkVideo`.
     @State private var inBrollCamera = false
-    @State private var talkVideo: LocalVideo?
+    @State private var talkVideos: [LocalVideo] = []
+    /// The talking part came from the gallery (F2), not from the camera.
+    @State private var talkFromGallery = false
     @State private var talkUsedAutoPause = false
+    @State private var keepShotOrder = true
+    @State private var showingBrollGallery = false
+    @State private var galleryPick = BrollGalleryPick()
     @State private var shots: [LocalVideo] = []
     @State private var showingBrollSummary = false
     @State private var pickingBrollClips = false
@@ -134,29 +141,54 @@ struct CreateCameraView: View {
             })
         }
         .fullScreenCover(isPresented: $showingBrollSummary) {
-            if let talkVideo {
+            if !talkVideos.isEmpty {
                 BrollSummaryView(
-                    talk: talkVideo, silencesRemoved: talkUsedAutoPause, shots: $shots,
-                    onBack: { showingBrollSummary = false },
-                    onAddMore: { showingBrollSummary = false },
+                    talks: talkVideos, fromGallery: talkFromGallery, silencesRemoved: talkUsedAutoPause,
+                    shots: $shots, keepOrder: $keepShotOrder,
+                    onBack: {
+                        showingBrollSummary = false
+                        // From the gallery (F4): back to "B-roll shots" with the picks kept.
+                        if !inBrollCamera { reopenGallery() }
+                    },
+                    onAddMore: {
+                        if inBrollCamera { showingBrollSummary = false } else { pickingBrollClips = true }
+                    },
                     onContinue: {
-                        let talk = talkVideo, taken = shots
+                        let talks = talkVideos, taken = shots, keep = keepShotOrder
                         showingBrollSummary = false
                         leaveBrollCamera()
-                        onRecordedWithBroll?(talk, taken)
+                        onRecordedWithBroll?(talks, taken, keep)
                     }
                 )
+                .sheet(isPresented: $pickingBrollClips) { clipsPicker }
             }
         }
-        .sheet(isPresented: $pickingBrollClips) {
-            BrollClipsPicker(onPicked: { urls in
-                pickingBrollClips = false
-                Task {
-                    for url in urls { shots.append(await LocalVideo.brollClip(url: url)) }
+        .fullScreenCover(isPresented: $showingBrollGallery) {
+            BrollGalleryFlow(
+                pick: $galleryPick,
+                onClose: { showingBrollGallery = false; galleryPick = BrollGalleryPick() },
+                onAdd: { talks, picked in
+                    showingBrollGallery = false
+                    talkVideos = talks
+                    talkFromGallery = true
+                    shots = picked
+                    keepShotOrder = true
+                    // After the gallery has gone (one full-screen view at a time).
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { showingBrollSummary = true }
+                },
+                onRecordInstead: { talks in
+                    showingBrollGallery = false
+                    galleryPick = BrollGalleryPick()
+                    talkVideos = talks
+                    talkFromGallery = true
+                    talkUsedAutoPause = false
+                    shots = []
+                    enterBrollCamera()
                 }
-            }, onCancel: { pickingBrollClips = false })
-            .ignoresSafeArea()
+            )
         }
+        .sheet(isPresented: Binding(get: { pickingBrollClips && !showingBrollSummary },
+                                    set: { if !$0 { pickingBrollClips = false } })) { clipsPicker }
         .fullScreenCover(isPresented: $recordingFailed) {
             CreateProblemView(
                 problem: .couldNotAdd,
@@ -607,7 +639,17 @@ struct CreateCameraView: View {
     }
 
     private var uploadButton: some View {
-        Button(action: { if inBrollCamera { pickingBrollClips = true } else { onUpload() } }) {
+        Button(action: {
+            if inBrollCamera {
+                pickingBrollClips = true
+            } else if brollAfter, onRecordedWithBroll != nil {
+                // F1: "+ B-roll" on → the 2-step gallery (talking videos, then shots).
+                galleryPick = BrollGalleryPick()
+                showingBrollGallery = true
+            } else {
+                onUpload()
+            }
+        }) {
             VStack(spacing: 8) {
                 Image("IconUpload")
                     .resizable()
@@ -723,7 +765,9 @@ struct CreateCameraView: View {
             return
         }
         talkUsedAutoPause = camera.usesAutoPause
-        talkVideo = BrollAfterStop.talk(video)
+        talkVideos = [BrollAfterStop.talk(video)]
+        talkFromGallery = false
+        keepShotOrder = true
         shots = []
         enterBrollCamera()
     }
@@ -739,11 +783,29 @@ struct CreateCameraView: View {
     /// Back on the Record camera (Continue, or "‹" on the B-roll camera, which leaves the talking part unused).
     private func leaveBrollCamera() {
         inBrollCamera = false
-        talkVideo = nil
+        talkVideos = []
+        talkFromGallery = false
+        galleryPick = BrollGalleryPick()
         shots = []
         elapsed = 0
         camera.mode = .talk
         Task { await camera.applyAutoPauseChoice() }
+    }
+
+    /// Clips and photos you already have, added as B-roll shots (Upload on E3, "+" on F4).
+    private var clipsPicker: some View {
+        BrollClipsPicker(onPicked: { urls in
+            pickingBrollClips = false
+            Task {
+                for url in urls { shots.append(await LocalVideo.brollClip(url: url)) }
+            }
+        }, onCancel: { pickingBrollClips = false })
+        .ignoresSafeArea()
+    }
+
+    private func reopenGallery() {
+        galleryPick.step = .shots
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { showingBrollGallery = true }
     }
 
     /// E3: Flip, Flash, Grid, Mirror (Flip waits while a shot records).

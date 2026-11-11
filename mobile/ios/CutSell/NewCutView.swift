@@ -32,7 +32,7 @@ struct NewCutView: View {
         resumeProjectID = pending?.projectID
         _mode = State(initialValue: Mode(rawValue: pending?.mode ?? "") ?? .single)
         _selected = State(initialValue: (pending?.videos ?? []).map {
-            LocalVideo(url: $0.fileURL, name: $0.name, duration: $0.duration, contentType: $0.contentType)
+            $0.localVideo
         })
         _title = State(initialValue: pending?.title ?? "")
         _audioOverlap = State(initialValue: pending?.audioOverlap ?? StyleChoice.saved().overlapAudio)
@@ -286,9 +286,37 @@ struct LocalVideo: Identifiable, Hashable {
     var expectedBytes: Int64? = nil
     /// The Photos album the video was picked from (e.g. "CeraVe"): a free hint for its brand / product.
     var albumHint: String? = nil
-    /// B-roll (PO 9 Nov 2026): recorded in B-roll mode, or marked B-roll in the gallery. Sent as clip_type "broll".
-    var isBroll = false
-    /// B-roll after STOP (PO 10 Nov 2026): the talking part of a recording that has B-roll shots. Sent as
-    /// clip_type "primary" (the voice the engine edits; the "broll" clips go over it).
-    var isPrimaryVoice = false
+    /// Tags sent with the cut as source metadata (B-roll, PO 9–11 Nov 2026): clip_type "primary" | "broll",
+    /// broll_kind "video" | "photo", broll_order "1".."N", broll_keep_order "1" | "0". Kept when the clip is made
+    /// lighter and when an upload resumes, so the server always gets them.
+    var clipTags: [String: String] = [:]
+
+    /// B-roll: recorded on the B-roll camera, picked as a B-roll shot, or marked B-roll in the gallery.
+    var isBroll: Bool {
+        get { clipTags[ClipMark.sourceKey] == ClipMark.broll }
+        set {
+            if newValue { clipTags[ClipMark.sourceKey] = ClipMark.broll }
+            else if isBroll { ClipMark.brollKeys.forEach { clipTags.removeValue(forKey: $0) } }
+        }
+    }
+
+    /// The talking part of a recording / upload that has B-roll shots (the voice the engine edits).
+    var isPrimaryVoice: Bool {
+        get { clipTags[ClipMark.sourceKey] == ClipMark.primary }
+        set {
+            if newValue { ClipMark.brollKeys.forEach { clipTags.removeValue(forKey: $0) }; clipTags[ClipMark.sourceKey] = ClipMark.primary }
+            else if isPrimaryVoice { clipTags.removeValue(forKey: ClipMark.sourceKey) }
+        }
+    }
+
+    /// A photo used as B-roll (JPEG; no sound, no duration).
+    var isPhoto: Bool { contentType.hasPrefix("image/") }
+
+    /// The same clip in another file (a lighter copy): keeps its name, album hint and tags.
+    func movedTo(_ url: URL, contentType: String) -> LocalVideo {
+        var out = LocalVideo(url: url, name: name, duration: duration, contentType: contentType)
+        out.albumHint = albumHint
+        out.clipTags = clipTags
+        return out
+    }
 }

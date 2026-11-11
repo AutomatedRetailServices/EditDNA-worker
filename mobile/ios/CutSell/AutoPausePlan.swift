@@ -111,6 +111,16 @@ enum ClipMark {
     static let sourceKey = "clip_type"
     static let broll = "broll"
     static let primary = "primary"
+    static let kindKey = "broll_kind"
+    static let orderKey = "broll_order"
+    static let keepOrderKey = "broll_keep_order"
+    static let brollKeys = [sourceKey, kindKey, orderKey, keepOrderKey]
+
+    /// The source metadata of a clip: its base metadata plus its tags (the tags win).
+    static func sourceMetadata(_ base: [String: String]?, tags: [String: String]) -> [String: String]? {
+        guard !tags.isEmpty else { return base }
+        return (base ?? [:]).merging(tags) { _, tag in tag }
+    }
 
     static func fileItem() -> AVMetadataItem {
         let item = AVMutableMetadataItem()
