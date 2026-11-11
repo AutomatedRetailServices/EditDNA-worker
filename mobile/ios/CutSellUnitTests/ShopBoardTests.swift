@@ -242,7 +242,7 @@ final class ShopMatchTests: XCTestCase {
         let pixels = Array(repeating: navy, count: 300) + Array(repeating: grey, count: 100)
         let clusters = ShopPalette.kMeans(pixels, k: 2)
         XCTAssertEqual(clusters.count, 2)
-        XCTAssertEqual(clusters[0].color, navy)
+        XCTAssertLessThan(clusters[0].color.distance2(navy), 1e-9)
         XCTAssertEqual(clusters[0].weight, 0.75, accuracy: 0.001)
     }
 
