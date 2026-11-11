@@ -25,7 +25,10 @@ from .timeline_asset_s3 import register_primary_video
 from .timeline_asset_storage import store_timeline_assets
 from .timeline_assets import generate_filmstrip, waveform_peaks
 from .uploads import validate_product_source_uri
-from .broll_overlay import is_photo_source, split_sources
+from .broll_overlay import UploadRejected, is_photo_source, split_sources
+from .broll_overlay import upload_wait_sec as broll_upload_wait_sec
+from .broll_overlay import wait_for_uploads as broll_wait_for_uploads
+from .usage_limits import MAX_SOURCE_SECONDS
 from .usage_limits import record_processing_minutes, release_processing_slot
 
 # =============================================================================
@@ -682,13 +685,59 @@ def run_flow_b_job(payload: dict) -> dict:
                     import dataclasses
                     cut_request = dataclasses.replace(request, sources=tuple(
                         s for s in request.sources if s.source_asset_id not in dropped_broll))
+                late_seconds: dict[str, float] = {}
+
+                def fetch_late_broll(sid: str):
+                    """One poll of a B-roll file that was still uploading: its local path once it is on storage and
+                    usable (same checks as at the start: photo readable, B-roll video through the format gate, a
+                    source's length limit), None while it is not there, UploadRejected when it never can be used."""
+                    source = next(s for s in request.sources if s.source_asset_id == sid)
+                    suffix = Path(source.original_name).suffix or Path(source.uri).suffix or ".mp4"
+                    destination = str(Path(directory) / f"{source.source_order:03d}-{sid}{suffix}")
+                    try:
+                        path = download_source(source.uri, destination)
+                    except Exception:
+                        return None
+                    try:
+                        probe = probe_media(path)
+                    except Exception:
+                        raise UploadRejected(sid)
+                    if sid in photo_ids:
+                        if not (probe.width and probe.height):
+                            raise UploadRejected(sid)
+                        late_seconds[sid] = 0.0
+                    else:
+                        if float(probe.duration_sec) > MAX_SOURCE_SECONDS:
+                            raise UploadRejected(sid)
+                        resolved, _fmt, _norm, blocked = resolve_sources_for_editorial_entry(
+                            {sid: path}, output_directory=directory)
+                        if blocked:
+                            raise UploadRejected(sid)
+                        path = resolved.get(sid, path)
+                        late_seconds[sid] = max(0.0, float(probe.duration_sec))
+                    local_paths[sid] = path
+                    downloaded_paths[sid] = path
+                    return path
+
+                def wait_for_broll(pending: set):
+                    return broll_wait_for_uploads({sid: (lambda sid=sid: fetch_late_broll(sid)) for sid in pending},
+                                                  cap=broll_upload_wait_sec())
+
                 result = process_with_simple_engine(cut_request, local_paths, progress=publish, audio_only=audio_only,
-                                                    pending_broll=pending_broll)
+                                                    pending_broll=pending_broll, wait_for_broll=wait_for_broll)
                 serialized = result_to_dict(result)
                 if dropped_broll:
                     serialized["broll_dropped_by_format_gate"] = dropped_broll
+                for sid, seconds in late_seconds.items():
+                    measured_by_source[sid] = seconds
+                    measured_seconds += seconds
                 if pending_broll:
-                    serialized["broll_pending_upload"] = sorted(pending_broll)
+                    waited = (serialized["draft"].get("diagnostics") or {}).get("broll_overlay", {}).get("upload_wait")
+                    still = sorted(pending_broll - set(late_seconds))
+                    if still:
+                        serialized["broll_pending_upload"] = still
+                    if isinstance(waited, dict):
+                        serialized["broll_upload_wait"] = waited
                 serialized["brain_backend"] = "simple_engine"
                 serialized["external_brain_calls_enabled"] = True
                 serialized["hybrid_provider"] = "anthropic"

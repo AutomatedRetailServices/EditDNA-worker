@@ -67,6 +67,7 @@ LONG_FRAME_EVERY_SEC = 2.5
 MAX_FRAMES_PER_CLIP = 10
 MAX_USES_PER_CLIP = 3     # a long clip: different parts, never the same / an overlapping one
 USE_EVERY_SEC = 5.0       # ... one use per 5 s of clip (10 s -> 2, 15 s+ -> 3)
+SAME_CLIP_GAP_SEC = 4.0   # PO 11 Nov: between two pieces of the SAME clip, at least this much face / another shot
 FRAME_LONG_SIDE = 512     # px: ~200 image tokens per frame
 MOTION_FPS = 4
 WINDOW_STEP_SEC = 0.25
@@ -156,6 +157,74 @@ def split_sources(sources: Sequence, env: Mapping[str, str] | None = None) -> tu
     if not broll or not voice:
         return no_photos, []
     return voice, broll
+
+
+# ------------------------------------------------------------------ B-roll still uploading (PO 11 Nov 2026)
+
+UPLOAD_WAIT_ENV = "CUTSELL_BROLL_UPLOAD_WAIT_SEC"
+DEFAULT_UPLOAD_WAIT_SEC = 60.0
+MAX_UPLOAD_WAIT_SEC = 300.0
+UPLOAD_POLL_SEC = 3.0
+
+
+class UploadRejected(Exception):
+    """The file arrived but can never be used (unreadable photo, format gate, too long): stop polling for it."""
+
+
+def _now() -> float:            # module-level so tests swap in a fake clock (no real waiting in tests)
+    import time
+    return time.monotonic()
+
+
+def _pause(seconds: float) -> None:
+    import time
+    time.sleep(seconds)
+
+
+def upload_wait_sec(env: Mapping[str, str] | None = None) -> float:
+    """Total seconds a cut may wait for ALL its still-uploading B-roll files together (0 = never wait)."""
+    raw = str((env if env is not None else os.environ).get(UPLOAD_WAIT_ENV, "")).strip()
+    try:
+        value = float(raw) if raw else DEFAULT_UPLOAD_WAIT_SEC
+    except ValueError:
+        value = DEFAULT_UPLOAD_WAIT_SEC
+    return max(0.0, min(MAX_UPLOAD_WAIT_SEC, value))
+
+
+def wait_for_uploads(fetchers: Mapping[str, Callable[[], Optional[str]]], *, cap: float,
+                     interval: float = UPLOAD_POLL_SEC, clock: Optional[Callable[[], float]] = None,
+                     sleep: Optional[Callable[[float], None]] = None) -> tuple[dict, dict]:
+    """Polls every still-missing file at once, then every `interval` s, until all are here or `cap` seconds have
+    passed IN TOTAL (one budget shared by all the job's files, not per file). A fetcher returns the local path when
+    the file is here, None (or raises) while it is not, and raises UploadRejected when it is here but unusable.
+    -> ({source id: local path}, diagnostics). Never raises."""
+    clock = clock or _now
+    sleep = sleep or _pause
+    started = clock()
+    arrived: dict[str, str] = {}
+    rejected: list[str] = []
+    waiting = sorted(fetchers)
+    polls = 0
+    while waiting:
+        polls += 1
+        for sid in list(waiting):
+            try:
+                path = fetchers[sid]()
+            except UploadRejected:
+                rejected.append(sid)
+                waiting.remove(sid)
+                continue
+            except Exception:
+                path = None
+            if path:
+                arrived[sid] = path
+                waiting.remove(sid)
+        left = cap - (clock() - started)
+        if not waiting or left <= 1e-9:
+            break
+        sleep(min(interval, left))
+    return arrived, {"cap_sec": round(cap, 3), "waited_sec": round(clock() - started, 3), "polls": polls,
+                     "arrived": sorted(arrived), "rejected": sorted(rejected), "still_missing": sorted(waiting)}
 
 
 # ------------------------------------------------------------------ the voice timeline
@@ -552,21 +621,24 @@ def best_ordered_assignment(requests: Sequence[Mapping], starts: Sequence[Phrase
         target = lo + span * (i + 0.5) / m
         return 0.5 * abs(here.start - target) / span
 
-    memo: dict[tuple[int, int], tuple] = {}
+    memo: dict[tuple, tuple] = {}
 
-    def best(i: int, last: int) -> tuple:
-        """(-placed count, cost, choices) for requests i.. after the shot at starts[last] (-1 = none yet)."""
+    def best(i: int, last: int, last_clip=None) -> tuple:
+        """(-placed count, cost, choices) for requests i.. after the shot at starts[last] (-1 = none yet) of clip
+        `last_clip`. A next piece of the SAME clip starts at least MIN_SEC + SAME_CLIP_GAP_SEC later (its first piece
+        lasts >= MIN_SEC, then >= SAME_CLIP_GAP_SEC of face)."""
         if i == m:
             return (0, 0.0, ())
-        key = (i, last)
+        key = (i, last, last_clip)
         if key in memo:
             return memo[key]
-        result = best(i + 1, last)                                       # skip this request
-        floor = starts[last].start + MIN_SEC - 1e-6 if last >= 0 else -1.0
+        result = best(i + 1, last, last_clip)                            # skip this request
+        gap = MIN_SEC + (SAME_CLIP_GAP_SEC if last_clip is not None and requests[i].get("clip") == last_clip else 0.0)
+        floor = starts[last].start + gap - 1e-6 if last >= 0 else -1.0
         for j in range(last + 1, n):
             if starts[j].start < floor:
                 continue
-            count, total_cost, choices = best(i + 1, j)
+            count, total_cost, choices = best(i + 1, j, requests[i].get("clip"))
             option = (count - 1, round(total_cost + cost(i, j), 9), ((i, j),) + choices)
             if option[:2] < result[:2]:
                 result = option
@@ -611,10 +683,18 @@ def plan_placements(
         room = min(MAX_SEC, MAX_SEC if clip.is_photo else clip.duration, budget - used() - reserve)
         if room < MIN_SEC - 1e-6:
             return False
-        nxt = min([p.start for p in placed if p.start >= phrase.start - 1e-6] + [hi] + ([limit] if limit else []))
+        same = [p for p in placed if p.clip_index == index]
+        # PO 11 Nov: two pieces of the same clip never closer than SAME_CLIP_GAP_SEC (end of one to start of the next)
+        if any(p.end - 1e-6 < phrase.start < p.end + SAME_CLIP_GAP_SEC - 1e-6 for p in same):
+            return False
+        nxt = min([p.start for p in placed if p.start >= phrase.start - 1e-6] + [hi] + ([limit] if limit else [])
+                  + [p.start - SAME_CLIP_GAP_SEC for p in same if p.start >= phrase.start - 1e-6])
         end = _pick_end(phrase.start, nxt, room, phrases, words)
         if end is None or not free(phrase.start, end):
             return False
+        if any(not (phrase.start >= p.end + SAME_CLIP_GAP_SEC - 1e-6 or end <= p.start - SAME_CLIP_GAP_SEC + 1e-6)
+               for p in same):
+            return False                      # never violated: the piece is dropped
         length = round(end - phrase.start, 3)
         if clip.is_photo:
             source_start = 0.0
@@ -653,6 +733,8 @@ def plan_placements(
         for position, (i, j) in enumerate(chosen):
             request, phrase = requests[i], starts[j]
             following = starts[chosen[position + 1][1]].start if position + 1 < len(chosen) else None
+            if following is not None and requests[chosen[position + 1][0]]["clip"] == request["clip"]:
+                following -= SAME_CLIP_GAP_SEC   # piece A, then >= 4 s of face, then piece B of the same clip
             reason = ("matched" if request["phrase"] == phrase.index
                       else "reordered" if request["phrase"] is not None else "spread")
             near = request["at"] if request["phrase"] is not None else None

@@ -31,6 +31,23 @@ def _env(monkeypatch):
     monkeypatch.delenv("REDIS_URL", raising=False)
     monkeypatch.delenv("CUTSELL_BROLL_MATCH_MODEL", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)          # never a real call from a test
+    monkeypatch.delenv("CUTSELL_BROLL_UPLOAD_WAIT_SEC", raising=False)
+    clock = FakeClock()
+    monkeypatch.setattr(B, "_now", clock.now)                       # no real waiting in any test
+    monkeypatch.setattr(B, "_pause", clock.sleep)
+
+
+class FakeClock:
+    def __init__(self):
+        self.t = 0.0
+        self.slept: list[float] = []
+
+    def now(self) -> float:
+        return self.t
+
+    def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+        self.t += seconds
 
 
 # 12 spoken lines over 40 s; line 6 talks about the texture, line 12 is the call to action
@@ -907,6 +924,8 @@ def test_worker_accepts_audio_first_primary_with_broll_that_has_no_audio_uri(med
         "s3://bk/up/voice-not-there-yet.mov": False, "s3://bk/up/b1.mov": False,
         "s3://bk/up/b2-not-there-yet.mov": False, "s3://bk/up/photo.jpg": True}
     assert result["broll_pending_upload"] == ["b2"] and result["audio_first_sources"] == ["voice"]
+    wait = result["broll_upload_wait"]
+    assert wait["still_missing"] == ["b2"] and wait["waited_sec"] == pytest.approx(60.0)   # waited the cap, then blind
     overlays = sorted(result["draft"]["media_overlays"], key=lambda o: o["start"])
     assert [o["uri"] for o in overlays] == ["s3://bk/up/b1.mov", "s3://bk/up/b2-not-there-yet.mov",
                                             "s3://bk/up/photo.jpg"]              # 1-2-3, the pending one too
@@ -914,3 +933,151 @@ def test_worker_accepts_audio_first_primary_with_broll_that_has_no_audio_uri(med
     assets = {s["source_asset_id"]: s["timeline_assets"]["status"] for s in drafts[0]["sources"]}
     assert assets["photo"] == "not_applicable" and assets["b2"] == "waiting_for_video"
     assert minutes and minutes[0] == pytest.approx((DURATION + 6.0) / 60.0, abs=0.01)   # photo 0, pending 0
+
+
+
+# ================================================================== PO decisions 11 Nov: same-clip gap, slots, upload wait
+
+def test_two_pieces_of_one_clip_are_at_least_four_seconds_apart_or_the_second_is_dropped():
+    words, phrases = _phrases(20, 2.0)                  # a phrase every 2 s
+    clip = _clip(0, 20.0)
+    close = {0: {"uses": [{"phrase": 5, "at": 3.0}, {"phrase": 6, "at": 15.0}]}}       # 2 s apart on the timeline
+    placed, _ = B.plan_placements(total=40.0, phrases=phrases, words=words, clips=[clip], suggestions=close,
+                                  cta_start=35.0)
+    assert len(placed) == 1                             # never violated: the second piece is dropped
+    far = {0: {"uses": [{"phrase": 5, "at": 3.0}, {"phrase": 9, "at": 15.0}]}}
+    placed, _ = B.plan_placements(total=40.0, phrases=phrases, words=words, clips=[clip], suggestions=far,
+                                  cta_start=35.0)
+    assert len(placed) == 2 and placed[1].start - placed[0].end >= B.SAME_CLIP_GAP_SEC - 1e-6
+    for suggestions in (close, far):                    # whatever the answer, the rule holds
+        placed, _ = B.plan_placements(total=40.0, phrases=phrases, words=words, clips=[clip, _clip(1, 5.0)],
+                                      suggestions=suggestions, cta_start=35.0)
+        same = sorted((p for p in placed if p.clip_index == 0), key=lambda p: p.start)
+        assert all(b.start - a.end >= B.SAME_CLIP_GAP_SEC - 1e-6 for a, b in zip(same, same[1:]))
+
+
+@pytest.mark.parametrize("picks", [
+    {0: {"uses": [{"phrase": 4, "at": 3.0}, {"phrase": 8, "at": 15.0}]}, 1: {"uses": [{"phrase": 12, "at": 1.0}]}},
+    {0: {"uses": [{"phrase": 4, "at": 3.0}, {"phrase": 5, "at": 15.0}]}, 1: {"uses": [{"phrase": 6, "at": 1.0}]}},
+    {1: {"uses": [{"phrase": 4, "at": 1.0}]}, 0: {"uses": [{"phrase": 8, "at": 3.0}, {"phrase": 12, "at": 15.0}]}},
+    None,
+])
+def test_keep_order_long_clip_pieces_stay_in_its_slot_with_face_in_between(picks):
+    words, phrases = _phrases(20, 2.0)
+    clips = [_clip(0, 20.0, order=1), _clip(1, 5.0, order=2)]
+    suggestions = picks or {0: {"uses": [{"phrase": 4, "at": 3.0}, {"phrase": 6, "at": 15.0}]}}
+    placed, _ = B.plan_placements(total=40.0, phrases=phrases, words=words, clips=clips, suggestions=suggestions,
+                                  cta_start=35.0, keep_order=True)
+    timeline = sorted(placed, key=lambda p: p.start)
+    assert [p.clip_index for p in timeline] == [0, 0, 1]                              # 1A, 1B, 2
+    a, b, two = timeline
+    assert b.start - a.end >= B.SAME_CLIP_GAP_SEC - 1e-6                              # face between 1A and 1B
+    assert two.start >= b.end - 1e-6                                                  # 2 after 1B
+    assert not (a.source_start < b.source_start + (b.end - b.start) and b.source_start < a.source_start + (a.end - a.start))
+
+
+def test_wait_for_uploads_sees_a_file_that_arrives_after_some_seconds():
+    clock = FakeClock()
+    arrives_at = 7.0
+    fetch = lambda: "/tmp/b.mov" if clock.t >= arrives_at else None
+    arrived, info = B.wait_for_uploads({"b": fetch}, cap=60.0, clock=clock.now, sleep=clock.sleep)
+    assert arrived == {"b": "/tmp/b.mov"} and info["still_missing"] == []
+    assert info["waited_sec"] == pytest.approx(9.0) and info["polls"] == 4              # polls at 0, 3, 6, 9 s
+
+
+def test_wait_for_uploads_total_cap_is_shared_by_all_files():
+    clock = FakeClock()
+    calls = []
+    never = lambda name: (lambda: calls.append(name) or None)
+    arrived, info = B.wait_for_uploads({"b1": never("b1"), "b2": never("b2")}, cap=60.0,
+                                       clock=clock.now, sleep=clock.sleep)
+    assert arrived == {} and info["still_missing"] == ["b1", "b2"]
+    assert info["waited_sec"] == pytest.approx(60.0) and sum(clock.slept) == pytest.approx(60.0)   # not 2 x 60
+    assert calls.count("b1") == calls.count("b2") == info["polls"]                   # both polled together
+    rejected = lambda: (_ for _ in ()).throw(B.UploadRejected("x"))
+    arrived, info = B.wait_for_uploads({"bad": rejected}, cap=60.0, clock=clock.now, sleep=clock.sleep)
+    assert info["rejected"] == ["bad"] and info["polls"] == 1                         # an unusable file: no more polls
+    assert B.upload_wait_sec({}) == 60.0 and B.upload_wait_sec({"CUTSELL_BROLL_UPLOAD_WAIT_SEC": "0"}) == 0.0
+    assert B.upload_wait_sec({"CUTSELL_BROLL_UPLOAD_WAIT_SEC": "9999"}) == B.MAX_UPLOAD_WAIT_SEC
+    arrived, info = B.wait_for_uploads({"b": never("z")}, cap=0.0, clock=clock.now, sleep=clock.sleep)
+    assert info["polls"] == 1 and info["waited_sec"] == 0.0                           # cap 0: one look, no wait
+
+
+def test_broll_that_arrives_during_the_wait_is_looked_at_by_the_ai(media2):
+    seen = {}
+
+    def ask(content):
+        seen["images"] = sum(1 for c in content if c["type"] == "image")
+        seen["text"] = "".join(c.get("text", "") for c in content)
+        return '{"clips": [], "cta_phrase": null}', {}
+
+    def wait(pending):
+        assert pending == {"b1", "photo"}
+        return {"b1": media2["b1"]}, {"arrived": ["b1"], "still_missing": ["photo"], "waited_sec": 60.0}
+
+    result = simple_engine_adapter.process_with_simple_engine(
+        _photo_request(media2), {"voice": media2["voice"]}, transcribe=Hearing(), llm=FakeLLM(), broll_ask=ask,
+        pending_broll={"b1", "photo"}, wait_for_broll=wait)
+    assert seen["images"] == 3 and "B1 (6.0 s)" in seen["text"]                       # b1 arrived: its 3 frames seen
+    diag = result.draft.diagnostics["broll_overlay"]
+    assert diag["upload_wait"]["still_missing"] == ["photo"]
+    by_id = {s["source_asset_id"]: s for s in diag["sources"]}
+    assert by_id["b1"]["video_available"] is True and by_id["photo"]["video_available"] is False
+    assert any(o.kind == "photo" for o in result.draft.media_overlays)               # the missing photo: placed blind
+
+
+def test_worker_waits_for_a_broll_upload_and_uses_it_when_it_arrives(media2, monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from cutsell_worker import worker_job
+    from cutsell_worker.simple_engine import asr as se_asr, llm as se_llm
+    monkeypatch.setenv("CUTSELL_ENGINE", "simple")
+    monkeypatch.setenv("CUTSELL_BROLL_AI", "0")
+    clock = FakeClock()
+    monkeypatch.setattr(B, "_now", clock.now)
+    monkeypatch.setattr(B, "_pause", clock.sleep)
+    monkeypatch.setattr(se_asr, "transcribe_words", Hearing())
+    monkeypatch.setattr(se_llm, "call_anthropic", FakeLLM())
+    attempts = {"b1": 0}
+
+    def download(uri, destination, *, client=None):
+        if uri.endswith("b1.mov"):
+            attempts["b1"] += 1
+            if clock.t < 5.0:                                                  # on storage only after 5 s
+                raise FileNotFoundError(uri)
+            shutil.copyfile(media2["b1"], destination)
+            return destination
+        shutil.copyfile(media2["voice"], destination)
+        return destination
+
+    gate = []
+    monkeypatch.setattr(worker_job, "validate_product_source_uri", lambda uri, **kw: None)
+    monkeypatch.setattr(worker_job, "download_source", download)
+    monkeypatch.setattr(worker_job, "resolve_sources_for_editorial_entry",
+                        lambda paths, **kw: (gate.append(sorted(paths)) or (dict(paths), [], [], [])))
+    monkeypatch.setattr(worker_job, "load_runtime_config", lambda: SimpleNamespace(asr_model="tiny"))
+    drafts, minutes = [], []
+    monkeypatch.setattr(worker_job, "create_initial_draft", lambda **kw: drafts.append(kw))
+    monkeypatch.setattr(worker_job, "safe_update_project", lambda **kw: {"status": "saved"})
+    monkeypatch.setattr(worker_job, "publish_notification", lambda **kw: {"notification_id": "n1"})
+    monkeypatch.setattr(worker_job, "generate_filmstrip", lambda *a, **kw: [])
+    monkeypatch.setattr(worker_job, "waveform_peaks", lambda *a, **kw: [0.0])
+    monkeypatch.setattr(worker_job, "store_timeline_assets", lambda **kw: {"status": "ok"})
+    monkeypatch.setattr(worker_job, "record_processing_minutes", lambda **kw: minutes.append(kw["minutes"]))
+    monkeypatch.setattr(worker_job, "release_processing_slot", lambda **kw: None)
+    payload = {"project_id": "p1", "user_id": "u1", "sources": [
+        {"source_asset_id": "voice", "uri": "s3://bk/up/voice.mov", "original_name": "v.mov", "source_order": 0,
+         "duration_sec": DURATION, "metadata": {"clip_type": "primary"}},
+        {"source_asset_id": "b1", "uri": "s3://bk/up/b1.mov", "original_name": "b1.mov", "source_order": 1,
+         "duration_sec": 6.0, "metadata": {"clip_type": "broll", "broll_kind": "video", "broll_order": "1"}}]}
+
+    result = worker_job.run_flow_b_job(payload)
+
+    assert "broll_pending_upload" not in result
+    assert result["broll_upload_wait"]["arrived"] == ["b1"] and result["broll_upload_wait"]["waited_sec"] == 6.0
+    assert attempts["b1"] == 1 + 3                                                    # first try, then polls 0, 3, 6
+    assert ["b1"] in gate                                                             # the late clip went through the gate
+    source = result["draft"]["diagnostics"]["broll_overlay"]["sources"][0]
+    assert source["video_available"] is True and source["frames"] == 3              # looked at normally
+    assert minutes[0] == pytest.approx((DURATION + 6.0) / 60.0, abs=0.01)
+    assets = {s["source_asset_id"]: s["timeline_assets"]["status"] for s in drafts[0]["sources"]}
+    assert assets["b1"] == "ok"

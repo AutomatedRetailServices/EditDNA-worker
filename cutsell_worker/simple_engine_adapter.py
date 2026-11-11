@@ -210,6 +210,7 @@ def process_with_simple_engine(
     broll_frames: Optional[Callable[[str, float], list]] = None,
     broll_motion: Optional[Callable[[str], list]] = None,
     pending_broll: Optional[set] = None,
+    wait_for_broll: Optional[Callable[[set], "tuple[dict, dict]"]] = None,
 ) -> ProcessingResult:
     """`transcribe` and `llm` are injectable for tests; production uses Deepgram and Anthropic.
     B-roll (PO 9-10 Nov 2026, broll_overlay.py): sources marked metadata.clip_type "broll" are never cut and never
@@ -217,7 +218,9 @@ def process_with_simple_engine(
     A request with no B-roll source runs exactly as before.
     B-roll v2: a B-roll photo (JPEG) counts 0 s for the usage meter and is never heard. `pending_broll` = B-roll
     sources whose file is not on storage yet (audio-first flow: the app sends no audio for B-roll): no local file is
-    needed for them; they are placed from their declared length without being looked at."""
+    needed for them. After the voice is cut, `wait_for_broll(pending ids) -> ({id: local path}, diagnostics)` gives
+    them a last chance (the worker polls storage, CUTSELL_BROLL_UPLOAD_WAIT_SEC in total): one that arrived is looked
+    at normally; one still missing is placed from its declared length without being looked at."""
     notify = progress or (lambda stage, percent: None)
     transcribe = transcribe or _asr.transcribe_words
     sources = sorted(request.sources, key=lambda item: int(item.source_order))
@@ -376,6 +379,26 @@ def process_with_simple_engine(
         },
     }
     media_overlays: tuple = ()
+    upload_wait = None
+    if broll_sources and pending_broll and wait_for_broll is not None:
+        # PO 11 Nov: B-roll still uploading -- polled AFTER the voice cut, so the cut's own time is not added.
+        try:
+            arrived, upload_wait = wait_for_broll(set(pending_broll))
+        except Exception as exc:              # never fail the cut because of B-roll
+            arrived, upload_wait = {}, {"error": exc.__class__.__name__}
+        local_paths = dict(local_paths)
+        for sid, path in (arrived or {}).items():
+            source = next((s for s in broll_sources if s.source_asset_id == sid), None)
+            if source is None or not path or not Path(path).exists():
+                continue
+            local_paths[sid] = path
+            if not _broll.is_photo_source(source):
+                try:
+                    durations[sid] = float(probe_media(path).duration_sec)
+                except Exception:
+                    local_paths.pop(sid, None)
+                    continue
+            pending_broll.discard(sid)
     if broll_sources:
         # Over the finished voice cut: the voice (selected) is never changed by this step, and it never raises.
         media_overlays, diagnostics["broll_overlay"] = _broll.place_broll_overlays(
@@ -383,6 +406,8 @@ def process_with_simple_engine(
             durations=durations, moments=engine_moments, audio_only=audio_only,
             ask=broll_ask, frames=broll_frames, motion=broll_motion,
         )
+        if upload_wait is not None:
+            diagnostics["broll_overlay"]["upload_wait"] = upload_wait
     draft = DraftTimeline(
         schema_version=SCHEMA_VERSION,
         project_id=request.project_id,

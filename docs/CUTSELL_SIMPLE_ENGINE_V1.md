@@ -252,7 +252,9 @@ live Anthropic price page for this change: verify before relying on the totals b
 8 frames). 512 px long side. The model answers per clip `uses: [{phrase, at}]`, `at` = the second of the clip where
 the content is; the piece used is the steadiest 2-4 s window that contains `at`. A clip of 10 s or more may be used
 up to `min(3, duration // 5)` times, on different parts: a piece overlapping an already used part of the same clip is
-never placed. A second piece of a clip gets id `ai-broll-<source_order>-2`.
+never placed. A second piece of a clip gets id `ai-broll-<source_order>-2`. **PO 11 Nov: two pieces of the SAME clip are
+at least 4 s apart on the timeline** (`SAME_CLIP_GAP_SEC`, end of one to start of the next; face or another shot in
+between), enforced in code: a piece that cannot respect it is dropped, never placed closer.
 
 **Photos.** One photo = one image for the model (no `-ss` seek: it drops a still's only frame). It is never sent to
 speech-to-text, never goes through the format gate, has no filmstrip/waveform (`timeline_assets.status:
@@ -272,8 +274,9 @@ is a B-roll photo, worker download, export sources -- skipped, it is drawn as it
 video-ready); every other reader (Mix, audio clean...) still refuses a JPEG. `validate_overlay_uri` accepts this same
 user's same project's JPEG source as a `photo` overlay.
 
-**Order 1-2-3.** `broll_keep_order "1"`: the shots appear in `broll_order` (1 before 2 before 3; a long clip's pieces
-stay inside its slot). `best_ordered_assignment` (DP) picks strictly increasing phrases maximizing the number of shots
+**Order 1-2-3.** `broll_keep_order "1"`: the shots appear in `broll_order` (1 before 2 before 3). PO 11 Nov: a long
+clip's pieces stay inside its slot with the face in between: 1A -> face (>= 4 s) -> 1B -> 2 (the assignment requires
+the next piece of the same clip to start >= 2 + 4 s after the previous one, and piece A must end >= 4 s before B). `best_ordered_assignment` (DP) picks strictly increasing phrases maximizing the number of shots
 placed, then keeping the model's picks (cost 0 on its phrase, 1 + distance elsewhere), clips without a pick near their
 even-spread target; reasons `matched` / `reordered` / `spread`. The model is also told the order. `"0"`: build-79 rules
 (the model's matches, product mentions, even spread). Every rule still holds (face first 3 s and over the closing CTA,
@@ -281,9 +284,17 @@ even-spread target; reasons `matched` / `reordered` / `spread`. The model is als
 order when keep_order is on.
 
 **Audio first.** The app sends no `audio_uri` for B-roll. The worker fetches each B-roll file directly; one that is not
-on storage yet (or a photo that cannot be read) never fails the cut: it is `broll_pending_upload` in the result, gets
-0 minutes, and is placed from its declared length without being looked at (a pending photo is placed blind; a pending
-video with declared 0 s is not placed). The export reads it once it is there.
+on storage yet never fails the cut. **PO 11 Nov: the cut waits for it.** After the voice is cut (so the cut's own time
+is not added), the worker polls storage for every still-missing B-roll file every ~3 s, with ONE total budget for all
+of the job's missing files: `CUTSELL_BROLL_UPLOAD_WAIT_SEC` (default 60, 0 = never wait, max 300). A file that arrives
+gets the same checks as at the start (photo readable, B-roll video through the format gate, <= 10 min) and is looked at
+by the AI normally (its minutes are counted; its filmstrip is made). One still missing after the budget is
+`broll_pending_upload`, gets 0 minutes and is placed from its declared length without being looked at (a pending video
+with declared 0 s is not placed); one that arrived but is unusable stops being polled. `broll_upload_wait` in the
+result (and `diagnostics.broll_overlay.upload_wait`) records `cap_sec`, `waited_sec`, `polls`, `arrived`, `rejected`,
+`still_missing`. Total rather than per file: with 3 clips still uploading in parallel a per-file cap could hold the
+cut 3 minutes; the total keeps the worst case at 60 s while parallel uploads still all get the full window.
+The export reads a pending file once it is there.
 
 **Cost per video, B-roll matching only** (estimates: image ~ w x h / 750 = ~200 tokens per 512 px frame; text ~600-800
 tokens; output incl. low-effort thinking 100-800 tokens; prices as above, not measured on real calls):
@@ -302,6 +313,6 @@ About 15-20x cheaper than Sonnet: under 0.1 c per video on top of the ~3.6-3.8 c
 the Render API (`cutsell_app`: JPEG presign/multipart, the cut-request check, the export-request check, the usage
 guard, photo `preview_url` / `playback_url`). Both must ship together: an API without it refuses the photo upload; a
 worker without it fails the cut on a JPEG source. Optional env: `CUTSELL_BROLL_MATCH_MODEL` (default Haiku), no new
-secret. Before users: one real cut + export with long clips, photos and keep_order, watched by a human; check the real
+secret. Optional `CUTSELL_BROLL_UPLOAD_WAIT_SEC` (default 60). Before users: one real cut + export with long clips, photos and keep_order, watched by a human; check the real
 Haiku token usage / price in `diagnostics.broll_overlay.ai`.
 
