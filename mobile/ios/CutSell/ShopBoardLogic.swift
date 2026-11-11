@@ -360,7 +360,7 @@ enum ShopPalette {
             if !moved { break }
         }
         let total = Double(pixels.count)
-        return zip(centres, counts).filter { $0.1 > 0 }.map { ($0.0, Double($0.1) / total) }.sorted { $0.weight > $1.weight }
+        return zip(centres, counts).filter { $0.1 > 0 }.map { (color: $0.0, weight: Double($0.1) / total) }.sorted { $0.weight > $1.weight }
     }
 
     /// The products' colours: a few clusters per product (every product counts the same), near-duplicates merged.

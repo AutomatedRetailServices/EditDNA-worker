@@ -114,12 +114,20 @@ enum ShopCutout {
             let s = Double(maxSide) / Double(max(w, h))
             w = max(1, Int(Double(w) * s)); h = max(1, Int(Double(h) * s))
         }
-        var bytes = [UInt8](repeating: 0, count: w * h * 4)
-        guard let ctx = CGContext(data: &bytes, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
                                   space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.clear(CGRect(x: 0, y: 0, width: w, height: h))
         ctx.interpolationQuality = .medium
+        // Row 0 of a bitmap context's memory is the top of the picture (as CGImage.cropping expects).
         ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        guard let data = ctx.data else { return nil }
+        let stride = ctx.bytesPerRow
+        let raw = data.bindMemory(to: UInt8.self, capacity: stride * h)
+        var bytes = [UInt8](repeating: 0, count: w * h * 4)
+        for y in 0..<h {
+            for x in 0..<(w * 4) { bytes[y * w * 4 + x] = raw[y * stride + x] }
+        }
         return (bytes, w, h)
     }
 
