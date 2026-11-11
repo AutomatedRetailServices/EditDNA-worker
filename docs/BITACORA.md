@@ -1,6 +1,6 @@
 # Bitácora de builds de CutSell (iOS / TestFlight)
 
-Este archivo es el registro permanente de cada versión de la app de iPhone de CutSell que se mandó a TestFlight. El número de build es el mismo número que muestra TestFlight. El más nuevo va primero (78 arriba, 1 abajo). Las fechas y horas están en hora del Este (ET), y son el momento en que corrió la subida a TestFlight. Cuando dice "commit" quiere decir "versión guardada del código": el "commit de la app" es el código que se armó para ese build, y el "commit del pedido a TestFlight" es una versión chiquita que a veces se guarda solo para pedir la subida (en ese caso aparece aparte). La "rama" es la línea de trabajo de donde salió ese código, según el historial de git.
+Este archivo es el registro permanente de cada versión de la app de iPhone de CutSell que se mandó a TestFlight. El número de build es el mismo número que muestra TestFlight. El más nuevo va primero (el más nuevo arriba, 1 abajo). Las fechas y horas están en hora del Este (ET), y son el momento en que corrió la subida a TestFlight. Cuando dice "commit" quiere decir "versión guardada del código": el "commit de la app" es el código que se armó para ese build, y el "commit del pedido a TestFlight" es una versión chiquita que a veces se guarda solo para pedir la subida (en ese caso aparece aparte). La "rama" es la línea de trabajo de donde salió ese código, según el historial de git.
 
 Regla: después de CADA build nuevo, agregar su entrada al inicio de este archivo, en el mismo commit del build. Si el build cambia pantallas, actualizar también docs/design-audit/.
 
@@ -8,6 +8,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 79 | 2026-11-10 22:15 | ✅ subido (pedido) | feature/broll-after-stop | `5ad00288` | "+ B-roll" en Grabar: después de STOP, cámara de B-roll y "Ready to edit" |
 | 78 | 2026-11-09 13:44 | ✅ subido | feature/clon-ar-autopausa | `71ae403e` | Modos Talk / B-roll en Grabar; la cámara ya cabe en la pantalla |
 | 77 | 2026-11-08 20:52 | ✅ subido | feature/clon-ar-autopausa | `e5895e3a` | Clon AR (beta), auto-pausa por voz y B-roll en Grabar; aviso de borrado |
 | 76 | 2026-11-07 15:18 | ✅ subido | build/apple-signup | `a2bb7fd0` | Sign in with Apple para todos; los invitados deben iniciar sesión |
@@ -88,6 +89,23 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 | 1 | 2026-10-12 13:01 | ❌ falló | feature/ios-captions-v2 | `d90bfc50` | Primer intento, no llegó a TestFlight |
 
 ---
+
+## Build 79 — 2026-11-10
+- **Resultado:** pedido a TestFlight (si la subida falla, se corrige esta línea)
+- **Rama (según el historial de git):** feature/broll-after-stop (sale de feature/clon-ar-autopausa, build 78)  ·  **Commit de la app:** `5ad00288`
+- **Qué cambió:**
+  - En la cámara de Grabar se quitaron los chips Talk / B-roll. En su lugar hay un solo interruptor: "+ B-roll" (apagado, por defecto) / "✓ B-roll after" (encendido, azul 3D) con el aviso "After STOP you'll add product shots" (Figma E1 3023:324 y E1b 3024:331).
+  - La parte hablada se graba siempre con Auto-pause, como antes.
+  - Con el interruptor apagado, después de STOP sale "Choose your style" como hoy.
+  - Con el interruptor encendido, después de STOP se abre la **cámara de B-roll** (Figma E3 3023:387): etiqueta verde "B-roll", solo Flip / Flash / Grid / Mirror, "Auto-pause off · records everything", cada toque graba una toma corta con la pastilla roja "● Shot N · 0:03", miniaturas con "×" y un "+" punteado, "Upload" para agregar clips de la galería y botón azul "Done".
+  - Nueva pantalla **"Ready to edit"** (Figma E4 3023:439): tarjeta "Your video" ("Talking · 0:24", "Silences removed") y tarjeta "B-roll · N shots" con "×", "+" y "We'll place them over your voice at the right moments."; "Continue" lleva a "Choose your style" (sin cambios).
+  - La parte hablada sale marcada como voz (clip_type "primary") y cada toma como B-roll (clip_type "broll", la misma marca del interruptor B-roll de la galería). Todo sube junto en un solo proyecto.
+  - 28 pruebas automáticas en el simulador (nuevas: interruptor apagado = flujo de hoy, encendido = cámara de B-roll, tomas marcadas "broll", clip de galería marcado, textos, "Ready to edit" cabe en un iPhone SE).
+- **Pantallas nuevas o cambiadas:** Cámara de Grabar (interruptor B-roll), Cámara de B-roll (nueva), Ready to edit (nueva). Ver docs/design-audit/build-79/.
+- **Pendiente o con problemas:**
+  - El motor que pone el B-roll encima de la voz está solo en la rama feature/broll-after-stop-engine, **sin deploy**. Hasta que se publique, el servidor de hoy une los clips B-roll al final del video y les corta silencios como a cualquier clip.
+  - Falta probar la cámara de B-roll en un iPhone real.
+  - "‹" en la cámara de B-roll vuelve a la cámara de Grabar y descarta lo grabado (Figma no lo define; queda por confirmar).
 
 ## Build 78 — 2026-11-09
 - **Resultado:** subido a TestFlight
