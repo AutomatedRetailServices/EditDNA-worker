@@ -12,7 +12,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
-| 80 | 2026-11-11 | ✅ subido (pedido) | feature/broll-after-stop | `262c9378` | B-roll v2: Upload con B-roll en 2 pasos, fotos, orden 1-2-3 y "Keep this order" |
+| 80 | 2026-11-11 | ✅ subido | feature/broll-after-stop | `262c9378` | B-roll v2: Upload con B-roll en 2 pasos, fotos, orden 1-2-3 y "Keep this order" |
 | 79 | 2026-11-10 22:15 | ✅ subido | feature/broll-after-stop | `5ad00288` | "+ B-roll" en Grabar: después de STOP, cámara de B-roll y "Ready to edit" |
 | 78 | 2026-11-09 13:44 | ✅ subido | feature/clon-ar-autopausa | `71ae403e` | Modos Talk / B-roll en Grabar; la cámara ya cabe en la pantalla |
 | 77 | 2026-11-08 20:52 | ✅ subido | feature/clon-ar-autopausa | `e5895e3a` | Clon AR (beta), auto-pausa por voz y B-roll en Grabar; aviso de borrado |
@@ -96,8 +96,8 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 ---
 
 ## Build 80 — 2026-11-11
-- **Resultado:** pedido a TestFlight (si la subida falla, se corrige esta línea)
-- **Rama (según el historial de git):** feature/broll-after-stop  ·  **Commit de la app:** `262c9378`
+- **Resultado:** subido a TestFlight
+- **Rama (según el historial de git):** feature/broll-after-stop  ·  **Commit de la app:** `262c9378`  ·  **Commit del pedido a TestFlight:** `224841a6`
 - **Qué cambió:**
   - Con "+ B-roll" encendido, "Upload" en la cámara abre la galería en 2 pasos (Figma F1 3026:328 → F2 3026:366 → F3 3026:416):
     - "Your talking video" · "1 of 2": uno o varios videos, numerados en el orden en que se tocan; se unen en ese orden.
