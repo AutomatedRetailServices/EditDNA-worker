@@ -4,6 +4,10 @@ Este archivo es el registro permanente de cada versión de la app de iPhone de C
 
 Regla: después de CADA build nuevo, agregar su entrada al inicio de este archivo, en el mismo commit del build. Si el build cambia pantallas, actualizar también docs/design-audit/.
 
+## Decisiones pendientes para después
+
+- **B-roll automático del motor (anotado el 11 nov 2026):** El B-roll automático del motor será un feature solo de los planes de pago más altos. Mientras estamos en pruebas queda activo para todos. Cuando existan los planes, se separa por cuenta (control en el servidor) y las cuentas sin el feature verán '+ B-roll' con candado PRO y podrán poner B-roll a mano en el editor.
+
 ## Resumen
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
