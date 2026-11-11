@@ -219,7 +219,12 @@ enum ShopVision {
 enum ShopTextureRenderer {
     private static let cache = NSCache<NSString, UIImage>()
 
-    static func image(_ texture: ShopTexture, size: CGSize, base: (top: ShopRGB, bottom: ShopRGB)? = nil) -> UIImage {
+    /// Textures are drawn at most this long (then stretched with the board): soft surfaces, fast to make.
+    static let maxSide: CGFloat = 960
+
+    static func image(_ texture: ShopTexture, size requested: CGSize, base: (top: ShopRGB, bottom: ShopRGB)? = nil) -> UIImage {
+        let shrink = min(1, maxSide / max(1, max(requested.width, requested.height)))
+        let size = CGSize(width: (requested.width * shrink).rounded(), height: (requested.height * shrink).rounded())
         let colors = base ?? (texture.top, texture.bottom)
         let key = "\(texture.rawValue)-\(Int(size.width))x\(Int(size.height))-\(colors.top.hex)-\(colors.bottom.hex)" as NSString
         if let hit = cache.object(forKey: key) { return hit }

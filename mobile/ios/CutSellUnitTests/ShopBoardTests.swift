@@ -374,10 +374,12 @@ final class ShopExportTests: XCTestCase {
         for texture in ShopTexture.allCases {
             let swatch = ShopTextureRenderer.image(texture, size: CGSize(width: 74, height: 74))
             XCTAssertEqual(swatch.cgImage?.width, 74, texture.rawValue)
-            var snapshot = ShopBoardTestData.snapshot()
-            snapshot.texture = texture
-            XCTAssertEqual(ShopBoardExport.image(snapshot)?.cgImage?.height, 1920, texture.rawValue)
+            let board = ShopTextureRenderer.image(texture, size: CGSize(width: 1080, height: 1920))
+            XCTAssertEqual(board.cgImage?.height, 960, "drawn at most 960 long, stretched with the board")
         }
+        var snapshot = ShopBoardTestData.snapshot()
+        snapshot.texture = .linen
+        XCTAssertEqual(ShopBoardExport.image(snapshot)?.cgImage?.height, 1920)
     }
 }
 
