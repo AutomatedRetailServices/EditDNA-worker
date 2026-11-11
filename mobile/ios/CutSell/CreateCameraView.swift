@@ -286,14 +286,19 @@ struct CreateCameraView: View {
                     HStack {
                         uploadButton
                         Spacer()
-                        if inBrollCamera {
-                            BrollDoneButton { if !camera.isRecording { showingBrollSummary = true } }
-                                .disabled(camera.isRecording)
-                                .padding(.trailing, 20)
-                        }
                     }
                     .padding(.leading, 22)
-                    .offset(y: inBrollCamera ? 0 : 14)
+                    .offset(y: 14)
+                    if inBrollCamera {
+                        // E3: blue 3D "Done" → "Ready to edit".
+                        HStack {
+                            Spacer()
+                            BrollDoneButton { if !camera.isRecording { showingBrollSummary = true } }
+                                .disabled(camera.isRecording)
+                                .opacity(camera.isRecording ? 0.5 : 1)
+                        }
+                        .padding(.trailing, 20)
+                    }
                 }
                 .padding(.bottom, 26)
             }
