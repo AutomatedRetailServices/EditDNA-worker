@@ -157,3 +157,69 @@ Measured per Claude call on the Gold (26 videos x 2 runs), prices from platform.
   sends metadata.bulk_size / bulk_id on each source, iOS build 26+; a lone video never caches), JSON-only on decision /
   haul review / word fix, pass and sale review unchanged, token log per call. The draft diagnostics record
   `prompt_cache` per source. If anything fails: CUTSELL_SIMPLE_ENGINE_CACHE=0 and CUTSELL_SIMPLE_ENGINE_JSON=0.
+
+## B-roll over the voice (2026-11-10, branch feature/broll-after-stop-engine, NOT deployed)
+PO spec 9-10 Nov: one project = the talking part + N B-roll clips. Code: `cutsell_worker/broll_overlay.py`, wired in
+`simple_engine_adapter.py` and `worker_job.py`; tests `tests/test_cutsell_broll_overlay.py`. `engine.py`, `prompts/` and
+`simple_engine/__init__.py` are untouched (guard test in `test_cutsell_mix.py`), so the cut itself is exactly 1.2.5.
+
+**Contract (source `metadata.clip_type`).** `"broll"` (camera B-roll mode or a gallery clip marked B-roll) = B-roll;
+`"primary"`, absent or anything else = voice. A request whose sources are ALL marked B-roll is cut as voice (there is
+nothing to put them over). With no B-roll source nothing new runs: the output is byte-identical to before (test
+compares against the pre-change adapter from git).
+
+**B-roll is never cut.** No speech-to-text, no pass/decision/review/word-fix call, no silence refine, never in
+`selected` / `alternates`. The voice cut, its captions and its zooms are identical with and without B-roll (tested).
+
+**Draft format (no app change).** Each placed clip is one `draft.media_overlays` item, the type the iOS editor already
+draws on the video and lets the creator move, trim and delete (Overlay rows under the video; `/v1/overlays/update|remove`):
+`overlay_id` (`ai-broll-<source_order>`), `kind: "video"`, `uri` (the B-roll source's own URI), `start` / `end` (final
+timeline seconds), `source_start` / `source_end` (in-point inside the clip), `mute_audio: true`, `layout: "full"`,
+`fill: true`, `x 0.5`, `y 0.5`, `width 1.0`, `layer 0`. `draft.diagnostics.broll_overlay` records per clip what it
+shows, the suggested phrase, where it went and why (`matched` / `product` / `spread`) or why not.
+`overlay_uploads.validate_overlay_uri` now also accepts a VIDEO in this same user's same project upload scope
+(`scoped_upload_prefix`), so the export and the editor's `preview_url` accept the B-roll source as an overlay. Another
+user's or another project's object is still refused (tested).
+
+**Matching: one extra small Claude call**, not inside the cut decision. The decision prompt is calibrated on the Gold
+and frozen by the guard test; B-roll must also match the phrases that SURVIVED the cut, which exist only after the
+decision; and it needs images. So after the cut: 3 frames per clip (1/6, 3/6, 5/6 of it, 512 px long side) + the kept
+phrases with their times + the product name -> per clip "what it shows", the best phrase, the best frame, and where
+the closing CTA starts. Same model as the engine (`CUTSELL_SIMPLE_ENGINE_MODEL`, default `claude-sonnet-5-5`), effort
+low, JSON schema, max_tokens 2000. Normal API (not the Bulk Batch API); not cached / not remembered.
+
+**Rules (enforced in code, whatever the answer says).** No B-roll in the first 3 s, nor from the start of the phrase
+holding the closing call to action (model's `cta_phrase` or the engine's `cta` moment in the second half; at least the
+last phrase and the last 3 s); 2-4 s each, starting on a phrase start and ending on a phrase end (else a word end, never
+inside a word); at most 50 % of the video; no two overlap; each clip at most once, using its steadiest window
+(4 fps 32x32 grey frame difference) among those containing the frame the model picked. Clips with no matching phrase go
+where the product is mentioned (`metadata.brand` / `product` from "What are you promoting?", else `album_hint`, plus the
+engine's `product` moments), the rest are spread evenly between the hook and the CTA. Clips under 2 s are not used.
+**Fallback:** no answer, an error, an invalid answer or `CUTSELL_BROLL_AI=0` -> the same rules without suggestions. Any
+error in the B-roll step leaves the cut without overlays and records it; it never fails the cut. A B-roll clip the
+source format gate rejects is dropped from the cut instead of blocking it. A B-roll clip sent audio first: its video
+is fetched; if it is not on storage yet the clip is placed without being looked at.
+
+**Cost per video** (Sonnet 5.5: input $2, output $10 per M; image tokens ~ w x h / 750 ~ 200 per frame; thinking at
+effort low estimated 0-600 tokens; not measured on real calls yet):
+
+| | input tokens | output tokens | Claude USD |
+|---|---|---|---|
+| 30-60 s video, 3 B-roll clips | ~2.2-2.6 k (9 frames ~1.8 k + text) | ~100-600 | ~0.005-0.011 |
+| 30-60 s video, 6 B-roll clips | ~4.0-4.4 k (18 frames ~3.6 k + text) | ~200-700 | ~0.009-0.016 |
+
+That is about +0.5-1.6 c on top of the ~3.6-3.8 c of the cut. Deepgram is cheaper than sending the same clips today
+(B-roll is no longer transcribed). Frames and steadiness are local ffmpeg (a few CPU seconds).
+
+**Switches (names only).** `CUTSELL_BROLL_OVERLAY` = `auto` (default: on only for a request that has B-roll sources) or
+`0` (off: every source is a voice source, exactly as before this change). Default `auto` because the iPhone app already
+sends `clip_type: "broll"`, and without this step those clips are cut as if they were talk (or the cut fails with "no
+speech" on a silent clip); a request without B-roll never reaches the new code either way. `CUTSELL_BROLL_AI` = `1`
+(default) or `0` (no extra call, deterministic placement only). No new secret: it uses `ANTHROPIC_API_KEY`.
+
+**To deploy (Product Owner decision; nothing deployed).** Both services: the Modal worker (`modal_cutsell_worker.py`:
+the cut + the export read `broll_overlay.py`, the adapter, `worker_job.py`, `overlay_uploads.py`), deployed by
+`.github/workflows/cutsell-modal-worker-deploy.yml` on a push to `feat/simple-engine-v1`; and the Render API
+(`cutsell_app`, which signs the overlays' `preview_url` through `overlay_uploads`; without it the blocks are on the
+timeline but the editor has no picture for them). Before enabling for users: one real end-to-end cut + export with B-roll
+and a human watch of the result.

@@ -22,6 +22,7 @@ from .contracts import (
     SCHEMA_VERSION, DraftClip, DraftTimeline, EditStrategy, JobState, ProcessingRequest, ProcessingResult, Word,
     ZoomKeyframe,
 )
+from . import broll_overlay as _broll
 from .media_probe import probe_media
 from .simple_engine import VERSION as ENGINE_VERSION
 from .simple_engine import asr as _asr
@@ -205,8 +206,14 @@ def process_with_simple_engine(
     transcribe: Optional[Callable[..., dict]] = None,
     llm: Optional[Callable[[str], "tuple[str, dict]"]] = None,
     audio_only: Optional[set] = None,
+    broll_ask: Optional[Callable[[list], "tuple[str, dict]"]] = None,
+    broll_frames: Optional[Callable[[str, float], list]] = None,
+    broll_motion: Optional[Callable[[str], list]] = None,
 ) -> ProcessingResult:
-    """`transcribe` and `llm` are injectable for tests; production uses Deepgram and Anthropic."""
+    """`transcribe` and `llm` are injectable for tests; production uses Deepgram and Anthropic.
+    B-roll (PO 9-10 Nov 2026, broll_overlay.py): sources marked metadata.clip_type "broll" are never cut and never
+    enter the voice timeline; they are placed over the voice as `media_overlays`. `broll_*` are injectable for tests.
+    A request with no B-roll source runs exactly as before."""
     notify = progress or (lambda stage, percent: None)
     transcribe = transcribe or _asr.transcribe_words
     sources = sorted(request.sources, key=lambda item: int(item.source_order))
@@ -227,6 +234,9 @@ def process_with_simple_engine(
         raise ValueError(f"processing denied: {usage.reason}")
 
     bulk = is_bulk(sources)
+    # B-roll is never cut: only the voice sources go through the engine below (all of them when there is no B-roll).
+    voice_sources, broll_sources = _broll.split_sources(sources)
+    engine_moments: list = []
     selected: list[DraftClip] = []
     alternates: list[DraftClip] = []
     per_source: list[dict] = []
@@ -234,12 +244,12 @@ def process_with_simple_engine(
     zoom_keyframes: list[ZoomKeyframe] = []
     timeline_offset = 0.0
     spoken: list = []              # (source, words, duration) of every source that has speech
-    total = len(sources)
+    total = len(voice_sources)
 
     # Prompt cache for every video (PO 2026-10-22): 1 hour while few videos are being cut, else 5 minutes.
     cache_ttl, videos_last_hour = _cache_policy.note_video()
     with tempfile.TemporaryDirectory(prefix="cutsell-simple-engine-") as directory:
-        for index, source in enumerate(sources):
+        for index, source in enumerate(voice_sources):
             path = str(local_paths[source.source_asset_id])
             duration = durations[source.source_asset_id]
             base = 12 + int(index * 78 / total)
@@ -286,6 +296,9 @@ def process_with_simple_engine(
 
             zoom_log: list = []
             zoom_keyframes.extend(_zoom_keyframes(source, out.get("moments") or [], out["splits"], zoom_log))
+            if broll_sources:
+                engine_moments.extend({**dict(m), "source_asset_id": source.source_asset_id}
+                                      for m in out.get("moments") or [] if isinstance(m, Mapping))
 
             # captions are on the cut timeline of THIS source; shift them onto the whole draft timeline
             shifted = [{"w": c["w"], "s": round(c["s"] + timeline_offset, 3), "e": round(c["e"] + timeline_offset, 3)}
@@ -350,6 +363,14 @@ def process_with_simple_engine(
             "sources": per_source,
         },
     }
+    media_overlays: tuple = ()
+    if broll_sources:
+        # Over the finished voice cut: the voice (selected) is never changed by this step, and it never raises.
+        media_overlays, diagnostics["broll_overlay"] = _broll.place_broll_overlays(
+            selected=selected, broll_sources=broll_sources, voice_sources=voice_sources, local_paths=local_paths,
+            durations=durations, moments=engine_moments, audio_only=audio_only,
+            ask=broll_ask, frames=broll_frames, motion=broll_motion,
+        )
     draft = DraftTimeline(
         schema_version=SCHEMA_VERSION,
         project_id=request.project_id,
@@ -361,6 +382,7 @@ def process_with_simple_engine(
         audio_overlap_enabled=bool(request.dialogue_overlap_enabled),
         auto_zoom_enabled=bool(request.auto_zoom_enabled),
         zoom_keyframes=tuple(zoom_keyframes),
+        media_overlays=tuple(media_overlays),
     )
     return ProcessingResult(
         schema_version=SCHEMA_VERSION,

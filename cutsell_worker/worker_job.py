@@ -25,6 +25,7 @@ from .timeline_asset_s3 import register_primary_video
 from .timeline_asset_storage import store_timeline_assets
 from .timeline_assets import generate_filmstrip, waveform_peaks
 from .uploads import validate_product_source_uri
+from .broll_overlay import split_sources
 from .usage_limits import record_processing_minutes, release_processing_slot
 
 # =============================================================================
@@ -483,13 +484,19 @@ def _build_timeline_assets(request, local_paths: dict[str, str], directory: str,
     return output
 
 
+def _first_voice_source(request):
+    """The first source that is talked (B-roll sources are shown over the voice, never its base). With no B-roll
+    source this is the first source, exactly as before."""
+    return min(split_sources(request.sources)[0], key=lambda source: source.source_order)
+
+
 def _register_primary_video(
     request, downloaded_paths: dict[str, str], local_paths: dict[str, str], directory: str,
 ) -> dict:
     """The cut's first source becomes the project's PRIMARY_SOURCE timeline asset
     (the base voice-over and B-roll are placed on). Never fails the cut."""
     try:
-        first = min(request.sources, key=lambda source: source.source_order)
+        first = _first_voice_source(request)
         return register_primary_video(
             user_id=request.user_id,
             project_id=request.project_id,
@@ -573,6 +580,10 @@ def run_flow_b_job(payload: dict) -> dict:
             # a small AAC file) while the video is still uploading. The cut needs only the voice; the
             # video is used later (export, timeline strip, primary video) once it is on storage.
             audio_only: set[str] = set()
+            # B-roll (broll_overlay.py): a B-roll clip is shown, never heard or cut, so its VIDEO is fetched even when
+            # the app sent it audio first; only if the video is not on storage yet is its voice file used (then it is
+            # placed without looking at it).
+            broll_ids = {s.source_asset_id for s in split_sources(request.sources)[1]}
             for index, source in enumerate(request.sources):
                 validate_product_source_uri(
                     source.uri,
@@ -580,7 +591,17 @@ def run_flow_b_job(payload: dict) -> dict:
                     user_id=request.user_id,
                 )
                 audio_uri = audio_first_uri(source, project_id=request.project_id, user_id=request.user_id)
-                if audio_uri:
+                broll_video = None
+                if audio_uri and source.source_asset_id in broll_ids:
+                    try:
+                        suffix = Path(source.original_name).suffix or ".mp4"
+                        broll_video = download_source(source.uri, str(
+                            Path(directory) / f"{source.source_order:03d}-{source.source_asset_id}{suffix}"))
+                    except Exception:
+                        broll_video = None
+                if broll_video:
+                    local_paths[source.source_asset_id] = broll_video
+                elif audio_uri:
                     audio_only.add(source.source_asset_id)
                     destination = str(Path(directory) / f"{source.source_order:03d}-{source.source_asset_id}.m4a")
                     local_paths[source.source_asset_id] = download_source(audio_uri, destination)
@@ -609,6 +630,13 @@ def run_flow_b_job(payload: dict) -> dict:
                 blocked_sources,
             ) = resolve_sources_for_editorial_entry(video_paths, output_directory=directory)
             local_paths = {key: resolved_video_paths.get(key, path) for key, path in local_paths.items()}
+            # Never fail the cut because of B-roll: a B-roll clip the format gate cannot accept is left out of the
+            # cut (recorded in the result) instead of blocking the voice.
+            dropped_broll = sorted({str(item.get("source_asset_id")) for item in blocked_sources}
+                                   & {str(i) for i in broll_ids}) if use_simple_engine else []
+            if dropped_broll:
+                blocked_sources = [item for item in blocked_sources
+                                   if str(item.get("source_asset_id")) not in dropped_broll]
             if blocked_sources:
                 # D-272A Stage 3-9, extended by D-274F Stage 5/6/19/20:
                 # every source must reach ACCEPT -- either natively or via
@@ -624,8 +652,15 @@ def run_flow_b_job(payload: dict) -> dict:
                 from .simple_engine import llm as simple_engine_llm
                 from .simple_engine_adapter import process_with_simple_engine
 
-                result = process_with_simple_engine(request, local_paths, progress=publish, audio_only=audio_only)
+                cut_request = request
+                if dropped_broll:
+                    import dataclasses
+                    cut_request = dataclasses.replace(request, sources=tuple(
+                        s for s in request.sources if s.source_asset_id not in dropped_broll))
+                result = process_with_simple_engine(cut_request, local_paths, progress=publish, audio_only=audio_only)
                 serialized = result_to_dict(result)
+                if dropped_broll:
+                    serialized["broll_dropped_by_format_gate"] = dropped_broll
                 serialized["brain_backend"] = "simple_engine"
                 serialized["external_brain_calls_enabled"] = True
                 serialized["hybrid_provider"] = "anthropic"
@@ -688,8 +723,7 @@ def run_flow_b_job(payload: dict) -> dict:
             # The primary video is registered before the project reads draft_ready, so
             # the editor can place voice-over and B-roll as soon as it opens.
             serialized["primary_video"] = (
-                {"status": "waiting_for_video"} if audio_only and min(
-                    request.sources, key=lambda source: source.source_order).source_asset_id in audio_only
+                {"status": "waiting_for_video"} if audio_only and _first_voice_source(request).source_asset_id in audio_only
                 else _register_primary_video(request, downloaded_paths, local_paths, directory)
             )
             serialized["audio_first_sources"] = sorted(audio_only)
@@ -712,7 +746,7 @@ def run_flow_b_job(payload: dict) -> dict:
             # fail it. The photo step reads the original video when it is here (not for a voice-only source).
             if use_simple_engine:
                 from .product_tagging import tag_and_record
-                first = min(request.sources, key=lambda source: source.source_order)
+                first = _first_voice_source(request)
                 serialized["product_tagging"] = tag_and_record(
                     user_id=request.user_id, project_id=request.project_id, draft=serialized["draft"],
                     sources=request.sources,
