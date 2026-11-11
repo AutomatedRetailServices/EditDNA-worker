@@ -12,6 +12,8 @@ struct CreateFlowView: View {
     @ObservedObject private var queue = ProcessingQueue.shared
     @State private var showingCamera = false
     @State private var showingMix = false
+    /// Shop board (PO 11 Nov 2026).
+    @State private var showingShopBoard = false
     @ObservedObject private var router = AppRouter.shared
     @State private var afterCamera: AfterCamera?
     @State private var showingGallery = false
@@ -64,7 +66,8 @@ struct CreateFlowView: View {
                 onRecord: { showingCamera = true },
                 onOpenProject: { path.append($0) },
                 selectTab: selectTab,
-                askPromoting: ask
+                askPromoting: ask,
+                onShopBoard: { showingShopBoard = true }
             )
             .onChange(of: router.pending) { _, destination in openFromGuide(destination) }
             .toolbar(.hidden, for: .navigationBar)
@@ -108,6 +111,10 @@ struct CreateFlowView: View {
             queue.requestedCreateMode = nil
             galleryMode = mode
             showingGallery = true
+        }
+        .fullScreenCover(isPresented: $showingShopBoard) {
+            ShopBoardFlowView(onClose: { showingShopBoard = false })
+                .environmentObject(appState)
         }
         // Create · Mix row: the same Mix · Setup as New Mix in Plan.
         .fullScreenCover(isPresented: $showingMix) {

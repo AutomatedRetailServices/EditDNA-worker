@@ -10,6 +10,8 @@ struct HomeHubView: View {
     let selectTab: (MainTab) -> Void
     /// 23 Oct (PO): "What are you promoting?" first; the action runs after Continue / Detect for me.
     var askPromoting: (PromotingPurpose, @escaping () -> Void) -> Void = { _, then in then() }
+    /// Shop board (PO 11 Nov 2026, Figma 3032:3): the card under the shortcuts.
+    var onShopBoard: () -> Void = {}
 
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var tracker = CutTracker.shared
@@ -93,6 +95,10 @@ struct HomeHubView: View {
                     .padding(.top, 18)
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("hubUpload")
+
+                    // 5b) Shop board (NEW), under the shortcuts.
+                    ShopBoardHomeCard(action: onShopBoard)
+                        .padding(.top, 24)
 
                     // 6) What CutSell already did for her (same numbers as Profile › Your results).
                     if editedCount > 0 { statsCard.padding(.top, 22) }

@@ -79,6 +79,44 @@ final class TikTokPoster: ObservableObject {
         openTikTok()
     }
 
+    /// Shop board (PO 11 Nov 2026): "Post as TikTok photo". The same path as a video: the picture is saved to Photos,
+    /// the caption copied and TikTok opens (Share Kit with the photo when CutSell has its TikTok key).
+    func postPhoto(_ image: UIImage, caption: String?, onNotice: ((String) -> Void)? = nil) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        let identifier: String
+        do {
+            identifier = try await Self.savePhotoToPhotos(image)
+        } catch {
+            notice = "Allow CutSell to add photos to Photos, then try again."
+            onNotice?(notice ?? "")
+            return
+        }
+        if let caption, !caption.isEmpty {
+            UIPasteboard.general.string = caption
+            notice = "Caption copied, paste it in TikTok"
+        } else {
+            notice = "Saved to Photos"
+        }
+        if let notice { onNotice?(notice) }
+        pending = nil
+        CutSellDiagnostics.log("tiktok_photo_post_started", ["share_kit": usesShareKit ? "1" : "0"])
+        try? await Task.sleep(nanoseconds: 1_200_000_000)
+        if usesShareKit, shareKit(identifier, photo: true) { return }
+        openTikTok()
+    }
+
+    static func savePhotoToPhotos(_ image: UIImage) async throws -> String {
+        let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+        guard status == .authorized || status == .limited else { throw CocoaError(.userCancelled) }
+        var identifier: String?
+        try await PHPhotoLibrary.shared().performChanges {
+            identifier = PHAssetChangeRequest.creationRequestForAsset(from: image).placeholderForCreatedAsset?.localIdentifier
+        }
+        return identifier ?? ""
+    }
+
     func openTikTok() {
         for scheme in Self.appSchemes {
             if let url = URL(string: scheme), UIApplication.shared.canOpenURL(url) {
@@ -92,9 +130,9 @@ final class TikTokPoster: ObservableObject {
     }
 
     #if canImport(TikTokOpenShareSDK)
-    private func shareKit(_ identifier: String) -> Bool {
+    private func shareKit(_ identifier: String, photo: Bool = false) -> Bool {
         guard let redirectURI else { return false }
-        let request = TikTokShareRequest(localIdentifiers: [identifier], mediaType: .video, redirectURI: redirectURI)
+        let request = TikTokShareRequest(localIdentifiers: [identifier], mediaType: photo ? .image : .video, redirectURI: redirectURI)
         self.request = request
         let sent = request.send { [weak self] response in
             Task { @MainActor in
@@ -108,7 +146,7 @@ final class TikTokPoster: ObservableObject {
         return sent
     }
     #else
-    private func shareKit(_ identifier: String) -> Bool { false }
+    private func shareKit(_ identifier: String, photo: Bool = false) -> Bool { false }
     #endif
 
     /// Scene phases: leaving for TikTok, then coming back → "Did you post it?"

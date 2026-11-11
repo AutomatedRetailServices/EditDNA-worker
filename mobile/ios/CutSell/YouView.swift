@@ -753,6 +753,7 @@ struct HelpPage: View {
     @State private var legal: LegalDocument?
     @State private var notice: String?
     @State private var cacheBytes: Int64 = 0
+    @State private var showingFontCredits = false
     @State private var versionTaps: [Date] = []
 
     var body: some View {
@@ -768,6 +769,9 @@ struct HelpPage: View {
             }
             YouSection(label: "LEARN") {
                 YouRow(title: "How to use CutSell", detail: "Step-by-step guides for every feature", id: "help_guide") { open(.guide) }
+                YouRow(title: "Font credits", detail: "Shop board letters · SIL Open Font License", id: "help_fontCredits") {
+                    showingFontCredits = true
+                }
                 YouRow(title: "Replay intro", detail: "See the 4 welcome screens again", divider: false, id: "help_intro") {
                     // Figma 945:147: the intro replays over Create.
                     IntroState.shared.replay()
@@ -789,6 +793,7 @@ struct HelpPage: View {
         }
         .sheet(isPresented: $showingDiagnostics) { DiagnosticsView() }
         .sheet(item: $legal) { LegalView(document: $0) }
+        .sheet(isPresented: $showingFontCredits) { ShopFontCreditsView() }
         .task { cacheBytes = YouStyle.cacheSize() }
     }
 
