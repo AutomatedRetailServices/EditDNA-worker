@@ -2307,9 +2307,9 @@ enum KenBurns {
 
     static func scale(time: Double, start: Double, end: Double, from: Double, to: Double) -> CGFloat {
         guard from != to, end > start else { return CGFloat(from) }
+        // A straight line from `from` at start to `to` at end, centred (the server's zoompan does the same).
         let p = min(1, max(0, (time - start) / (end - start)))
-        let eased = p * p * (3 - 2 * p)            // smoothstep: gentle at both ends
-        return CGFloat(from + (to - from) * eased)
+        return CGFloat(from + (to - from) * p)
     }
 }
 
