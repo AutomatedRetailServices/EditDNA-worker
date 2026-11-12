@@ -425,3 +425,19 @@ final class ShopLayoutTests: XCTestCase {
         XCTAssertEqual(frame.midX, slot.center.x * sx, accuracy: 0.01)
     }
 }
+
+// MARK: - Links by destination (Figma S2 / S5 / S5b, 12 Nov)
+
+final class ShopShareByDestinationTests: XCTestCase {
+    func testTikTokTipHasThreeStepsAndEverySharingTextHasSpanish() {
+        XCTAssertEqual(ShopTikTokTipSheet.steps.count, 3)
+        let texts = ShopTikTokTipSheet.steps + [
+            "Amazon / affiliate link", "amazon.com/…  (optional)", "Tag your TikTok Shop product in TikTok",
+            "Your link goes on the link sticker", "9:16 image · link & caption copied", "Tag your TikTok Shop product",
+            "Open TikTok", "Saved to Photos. Link and caption copied.",
+        ]
+        for text in texts {
+            XCTAssertNotNil(L10nES.table[text], "missing Spanish for \(text)")
+        }
+    }
+}

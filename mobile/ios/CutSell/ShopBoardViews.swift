@@ -258,8 +258,6 @@ struct ShopAddProductsView: View {
     @State private var photoFor: UUID?
     /// The item that asks for its photo once the current sheet has finished closing.
     @State private var photoNext: UUID?
-    @State private var askingLink = false
-    @State private var linkText = ""
     @State private var showingProducts = false
     @State private var lastSource: ShopItemSource = .photos
     @State private var notice: String?
@@ -275,7 +273,6 @@ struct ShopAddProductsView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         sourceRow(.myProducts, "From my products", "CeraVe, Dior… (your product list)") { showingProducts = true }
                         sourceRow(.photos, "From photos", "We remove the background") { pickingPhotos = true }
-                        sourceRow(.link, "Paste a link", "Product link from any store") { linkText = ""; askingLink = true }
                         if !model.items.isEmpty {
                             Text(verbatim: String(format: L10n.tr("Your items · %d"), model.items.count))
                                 .font(CS.inter(13, .bold))
@@ -328,24 +325,6 @@ struct ShopAddProductsView: View {
                 showingProducts = false
             }
             .environmentObject(appState)
-        }
-        .alert(L10n.tr("Paste a link"), isPresented: $askingLink) {
-            TextField(L10n.tr("https://…"), text: $linkText)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .keyboardType(.URL)
-            Button(L10n.tr("Cancel"), role: .cancel) {}
-            Button(L10n.tr("Add")) {
-                lastSource = .link
-                if let id = model.addLink(linkText) {
-                    show(L10n.tr("Link saved as the affiliate link. Now add the product's photo from Photos."))
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { photoFor = id }
-                } else {
-                    show(L10n.tr("That doesn't look like a link."))
-                }
-            }
-        } message: {
-            Text(L10n.tr("We save it as this product's affiliate link. We never use pictures from the link."))
         }
         .accessibilityIdentifier("shopAddProducts")
     }
@@ -1096,6 +1075,7 @@ struct ShopShareView: View {
     let onBack: () -> Void
     @State private var notice: String?
     @State private var working = false
+    @State private var showingTikTokTip = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -1108,8 +1088,8 @@ struct ShopShareView: View {
                             ShopBoardCanvas(snapshot: model.snapshot(), width: 85.8)
                                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                             VStack(alignment: .leading, spacing: 0) {
-                                Text(L10n.tr("Affiliate link")).font(CS.inter(13, .bold)).foregroundStyle(Color(fixed: 0x6B7385))
-                                TextField(L10n.tr("your-link.com/…"), text: $model.affiliateLink)
+                                Text(L10n.tr("Amazon / affiliate link")).font(CS.inter(13, .bold)).foregroundStyle(Color(fixed: 0x6B7385))
+                                TextField(L10n.tr("amazon.com/…  (optional)"), text: $model.affiliateLink)
                                     .font(CS.inter(14, .semibold)).foregroundStyle(Color(fixed: 0x0B1020))
                                     .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                                     .padding(.horizontal, 12).frame(height: 44)
@@ -1129,14 +1109,13 @@ struct ShopShareView: View {
                             }
                         }
                         VStack(spacing: 12) {
-                            row("Post as TikTok photo", "Carousel + caption copied", highlighted: true, id: "shopPostTikTok") {
-                                await postTikTok()
-                            }
-                            row("Instagram story", "Add your Shop now link sticker", id: "shopInstagramStory") { await instagram() }
-                            row("Save to Photos", "9:16 image", id: "shopSaveToPhotos") { await save() }
+                            row("Post as TikTok photo", "Tag your TikTok Shop product in TikTok", highlighted: true,
+                                id: "shopPostTikTok") { showingTikTokTip = true }
+                            row("Instagram story", "Your link goes on the link sticker", id: "shopInstagramStory") { await instagram() }
+                            row("Save to Photos", "9:16 image · link & caption copied", id: "shopSaveToPhotos") { await save() }
                         }
                         .padding(.top, 22)
-                        Text(L10n.tr("We add \"#ad\" so your post follows the rules for affiliate links."))
+                        Text(L10n.tr("TikTok Shop products are tagged inside TikTok. Your Amazon / affiliate link goes in your bio, your story sticker or wherever you paste it. We add \"#ad\" so your post follows the rules for affiliate links."))
                             .font(CS.inter(12, .medium)).foregroundStyle(Color(fixed: 0x6B7385))
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.top, 24)
@@ -1155,6 +1134,18 @@ struct ShopShareView: View {
                 .padding(.bottom, 24)
             }
             if let notice { ShopNotice(text: notice).padding(.bottom, 96).transition(.opacity) }
+        }
+        .sheet(isPresented: $showingTikTokTip) {
+            ShopTikTokTipSheet {
+                showingTikTokTip = false
+                Task {
+                    try? await Task.sleep(nanoseconds: 450_000_000)   // the sheet has closed before TikTok opens
+                    await postTikTok()
+                }
+            }
+            .presentationDetents([.height(437)])
+            .presentationDragIndicator(.hidden)
+            .presentationCornerRadius(28)
         }
         .tiktokReturnPrompt()
         .accessibilityIdentifier("shopShare")
@@ -1194,7 +1185,9 @@ struct ShopShareView: View {
         guard let image = exported() else { return }
         do {
             try await ShopShare.saveToPhotos(image)
-            show(L10n.tr("Saved to Photos"))
+            UIPasteboard.general.string = ShopCaption.clipboard(caption: model.caption, title: model.bigTitle,
+                                                                link: model.affiliateLink)
+            show(L10n.tr("Saved to Photos. Link and caption copied."))
         } catch {
             show(L10n.tr("Allow CutSell to add photos to Photos, then try again."))
         }
@@ -1224,6 +1217,48 @@ struct ShopShareView: View {
         .buttonStyle(BubblePress())
         .accessibilityIdentifier(id)
     }
+}
+
+// MARK: - 5b TikTok Shop tip
+
+/// Figma S5b (3051:264): white sheet, radius 28, grabber 40 × 5 #E6E9EF, ExtraBold 22 title, Medium 13 #6B7385,
+/// three #F3F5F9 steps (radius 14) with a 24 pt #1769FF number, blue 3D "Open TikTok", Medium 12 centred footer.
+struct ShopTikTokTipSheet: View {
+    let onOpen: () -> Void
+
+    var body: some View {
+        VStack(spacing: 14) {
+            RoundedRectangle(cornerRadius: 3).fill(Color(fixed: 0xE6E9EF)).frame(width: 40, height: 5)
+            Text(L10n.tr("Tag your TikTok Shop product"))
+                .font(CS.inter(22, .heavy)).foregroundStyle(Color(fixed: 0x0B1020))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(L10n.tr("TikTok Shop links only work inside TikTok. We open TikTok with your board and copy the caption."))
+                .font(CS.inter(13, .medium)).foregroundStyle(Color(fixed: 0x6B7385))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+            ForEach(Array(ShopTikTokTipSheet.steps.enumerated()), id: \.offset) { index, step in
+                HStack(spacing: 12) {
+                    Text(verbatim: "\(index + 1)").font(CS.inter(12, .bold)).foregroundStyle(.white)
+                        .frame(width: 24, height: 24).background(Color(fixed: 0x1769FF), in: Circle())
+                    Text(L10n.tr(step)).font(CS.inter(14, .bold)).foregroundStyle(Color(fixed: 0x0B1020))
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 12)
+                .background(Color(fixed: 0xF3F5F9), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            ShopBigButton(title: "Open TikTok", id: "shopOpenTikTok", action: onOpen)
+            Text(L10n.tr("Using Amazon instead? Put your link in your bio — the caption already says \"link in bio\"."))
+                .font(CS.inter(12, .medium)).foregroundStyle(Color(fixed: 0x6B7385))
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.top, 14).padding(.horizontal, 24).padding(.bottom, 34)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(Color.white)
+        .accessibilityIdentifier("shopTikTokTip")
+    }
+
+    static let steps = ["We open TikTok with your board", "Tap \"Add link\" → \"Products\"", "Pick it from your Showcase and post"]
 }
 
 // MARK: - Font credits (Profile › Help & Support)
