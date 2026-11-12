@@ -20,7 +20,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
-| 82 | 2026-11-12 | ✅ subido (pedido) | feature/shop-board | `e8d4b60f` | Arreglo: elegir una foto ya no cierra todo el Shop board |
+| 82 | 2026-11-12 15:12 | ✅ subido | feature/shop-board | `e8d4b60f` | Arreglo: elegir una foto ya no cierra todo el Shop board |
 | 81 | 2026-11-12 13:32 | ✅ subido | feature/shop-board | `03fc369f` | Shop board: armar un board de productos 9:16 en el iPhone y compartirlo |
 | 80 | 2026-11-11 | ✅ subido | feature/broll-after-stop | `262c9378` | B-roll v2: Upload con B-roll en 2 pasos, fotos, orden 1-2-3 y "Keep this order" |
 | 79 | 2026-11-10 22:15 | ✅ subido | feature/broll-after-stop | `5ad00288` | "+ B-roll" en Grabar: después de STOP, cámara de B-roll y "Ready to edit" |
@@ -106,8 +106,8 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 ---
 
 ## Build 82 — 2026-11-12
-- **Resultado:** pedido a TestFlight (si la subida falla, se corrige esta línea)
-- **Rama (según el historial de git):** feature/shop-board  ·  **Commit de la app:** `e8d4b60f`
+- **Resultado:** subido a TestFlight (listo, 15:12 ET)
+- **Rama (según el historial de git):** feature/shop-board  ·  **Commit de la app:** `e8d4b60f`  ·  **Commit del pedido a TestFlight:** `e860f952`
 - **Qué cambió:**
   - **Arreglo del Shop board (reporte de la PO en el build 81):** al elegir una foto (desde Fotos, después de pegar un link o después de elegir uno de tus productos) se cerraba todo el Shop board y se perdía lo agregado. Causa: el selector de fotos se cerraba dos veces y la segunda cerraba la pantalla de abajo. Ahora se cierra una sola vez; la foto de un producto se pide cuando la lista de productos ya terminó de cerrarse.
   - Nuevo workflow `cutsell-ios-crash-logs.yml` (solo bajo pedido) para leer los reportes de fallas de TestFlight (solo tipo de falla y la parte del código; sin correo ni comentarios).
