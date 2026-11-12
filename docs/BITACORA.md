@@ -20,6 +20,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 81 | 2026-11-12 | ✅ subido (pedido) | feature/shop-board | `03fc369f` | Shop board: armar un board de productos 9:16 en el iPhone y compartirlo |
 | 80 | 2026-11-11 | ✅ subido | feature/broll-after-stop | `262c9378` | B-roll v2: Upload con B-roll en 2 pasos, fotos, orden 1-2-3 y "Keep this order" |
 | 79 | 2026-11-10 22:15 | ✅ subido | feature/broll-after-stop | `5ad00288` | "+ B-roll" en Grabar: después de STOP, cámara de B-roll y "Ready to edit" |
 | 78 | 2026-11-09 13:44 | ✅ subido | feature/clon-ar-autopausa | `71ae403e` | Modos Talk / B-roll en Grabar; la cámara ya cabe en la pantalla |
@@ -102,6 +103,27 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 | 1 | 2026-10-12 13:01 | ❌ falló | feature/ios-captions-v2 | `d90bfc50` | Primer intento, no llegó a TestFlight |
 
 ---
+
+## Build 81 — 2026-11-12
+- **Resultado:** pedido a TestFlight (si la subida falla, se corrige esta línea)
+- **Rama (según el historial de git):** feature/shop-board (sale de feature/broll-after-stop, build 80)  ·  **Commit de la app:** `03fc369f`
+- **Qué cambió:**
+  - Nueva función **Shop board** (Figma, página "💡 10 · Shop board (propuesta)"): en Inicio, tarjeta "Shop board" con "NEW" debajo de los atajos.
+  - **Add products:** 3–8 productos desde "From my products", "From photos" (el iPhone quita el fondo con Vision y muestra "✓ No background") o "Paste a link" (guarda el link como link de afiliado; no descarga fotos del link, pide la foto desde Fotos). Miniaturas con "×". "✦ Shape it" solo en ropa y zapatos.
+  - **Shape it:** pantalla "Before · flat" / "After · shaped" con "Uses AI", "Use shaped", "Keep flat" y "Retry". Llama al servidor (`/v1/shop/shape`), que todavía no está publicado: por ahora muestra "Retry".
+  - **Choose a style:** Everyday chic, Trendy inspo, Look for less y "+ More soon".
+  - **Your board:** vista 9:16 con los productos recortados y sombra suave; "Title", "Shuffle", "Background" y "Next: share".
+  - **Title & fonts:** "Big title", "Script line", 6 parejas de letras gratis incluidas en la app (Google Fonts, licencia OFL 1.1, cada una con su archivo de licencia) y "Title color" ("✨ Matches your products" por defecto). Nueva sección "Font credits" en Profile → Help.
+  - **Background:** pestañas Colors / Textures / My photo; "✨ Match my products" encendido por defecto (saca los colores de los productos en el iPhone); colores de los productos + "Custom"; Classic (8 colores); 8 texturas dibujadas con código (sin imágenes ni licencias).
+  - **Share:** "Affiliate link", caption con "#ad" automático (y la línea de Amazon Associates si es de Amazon), "Post as TikTok photo", "Instagram story", "Save to Photos" (1080×1920) y "Copy link & caption".
+  - Sin logos ni letras de Amazon o Walmart.
+  - 65 pruebas automáticas en el simulador (incluye quitar fondo con máscara sintética, links sin descargar fotos, Shape it solo en ropa/zapatos, Match, color a mano apaga Match, las 12 fuentes, "#ad", exportación 9:16).
+- **Pantallas nuevas o cambiadas:** Inicio (tarjeta Shop board), Add products, Shape it, Choose a style, Your board, Title & fonts, Background (Colors / Textures / My photo), Share, Font credits. Ver docs/design-audit/build-81/.
+- **Pendiente o con problemas:**
+  - El servidor de "Shape it" está solo en la rama `feature/shop-board-server` (commit `5068f3f4`), apagado por defecto y **sin deploy**.
+  - Decisiones provisionales (Figma no las define), aprobadas por la PO para probar en este build: mismo acomodo en las 3 plantillas; lugares para los productos 7 y 8; tamaño 9:16; "YOUR BRAND" sin campo para editar; estados sin diseño (Match apagado, color elegido, "Your pick", "+ Add photo"); círculos sin ícono; cuadro de link, mensajes de error, lista de productos, créditos de fuentes y pestaña "My photo" con estilo sencillo; "1 credit per item" sin sistema de créditos; Match tiñe las texturas; "Carousel" en TikTok aunque es una imagen; caption con "for fall 🍂".
+  - Instagram Stories necesita un Facebook App ID que la app no tiene: por ahora guarda el board, copia el link y abre la cámara de historias.
+  - Falta probar en un iPhone real (quitar fondo y la detección de ropa/zapatos solo funcionan en el teléfono).
 
 ## Build 80 — 2026-11-11
 - **Resultado:** subido a TestFlight
