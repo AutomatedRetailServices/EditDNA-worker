@@ -1,0 +1,37 @@
+name: CutSell Shape it compare (paid, on request only)
+
+# Runs ONLY when a commit is pushed to shape-compare/request. One attempt, no reruns, at most 8 paid calls.
+# Photos and results stay in the private worker bucket; nothing image-like is logged or attached here.
+on:
+  push:
+    branches: [shape-compare/request]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cutsell-shape-it-compare
+  cancel-in-progress: false
+
+jobs:
+  compare:
+    if: github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      SHAPE_RUN_ID: "20261112"
+      SHAPE_PROVIDERS: nano-banana
+      SHAPE_ITEMS: shirt:clothing,pants:clothing,shoes:shoes,sweater:clothing
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install --disable-pip-version-check --quiet -r requirements.cutsell.api.txt
+      - name: Compare (paid)
+        run: python scripts/shape_it_compare_ci.py
