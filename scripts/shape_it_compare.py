@@ -91,6 +91,7 @@ def main(argv=None) -> int:
                 cost = f"${result.cost_usd:.4f}"
             except shape.ShapeError as exc:
                 status, cost = exc.code, "-"
+                print(f"    detail: {exc}")
             print(f"{label:8s} {p:12s} {status:24s} {cost:>9s}  {time.monotonic() - started:5.1f}s")
     print(f"\ntotal recorded cost ${total:.4f}   outputs in {out}")
     return 0

@@ -267,6 +267,21 @@ class ProviderResult:
     usage: dict = field(default_factory=dict)
 
 
+def _error_hint(response) -> str:
+    """Short provider error message for logs (key-like strings redacted, max 200 chars); never the body."""
+    try:
+        data = response.json()
+    except Exception:
+        return ""
+    err = data.get("error") if isinstance(data, dict) else None
+    msg = err.get("message") if isinstance(err, dict) else (err if isinstance(err, str) else "")
+    if not msg:
+        return ""
+    import re
+    msg = re.sub(r"(sk-|AIza)[A-Za-z0-9_*\-]+", "[redacted]", str(msg))
+    return " " + msg[:200].replace("\n", " ")
+
+
 def _post(url: str, *, headers: dict, json_body: dict, provider: str, session=None) -> dict:
     """One POST with at most one retry (network error, 429 or 5xx). Never logs the body or the key."""
     client = session or requests
@@ -283,7 +298,7 @@ def _post(url: str, *, headers: dict, json_body: dict, provider: str, session=No
                     return response.json()
                 except ValueError:
                     raise ShapeProviderError("shape_provider_error", f"{provider}: invalid JSON") from None
-            last = f"HTTP {status}"
+            last = f"HTTP {status}{_error_hint(response)}"
             if status not in (408, 429) and status < 500:
                 break                               # 4xx: retrying will not help
         if attempt < MAX_ATTEMPTS - 1:
