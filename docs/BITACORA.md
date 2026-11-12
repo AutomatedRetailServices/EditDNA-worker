@@ -20,7 +20,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
-| 83 | 2026-11-12 | ✅ subido (pedido) | feature/shop-board | `2ccb453d` | Shop board: los links se piden según dónde se publica (TikTok Shop / Amazon) |
+| 83 | 2026-11-12 17:42 | ✅ subido | feature/shop-board | `2ccb453d` | Shop board: los links se piden según dónde se publica (TikTok Shop / Amazon) |
 | 82 | 2026-11-12 15:12 | ✅ subido | feature/shop-board | `e8d4b60f` | Arreglo: elegir una foto ya no cierra todo el Shop board |
 | 81 | 2026-11-12 13:32 | ✅ subido | feature/shop-board | `03fc369f` | Shop board: armar un board de productos 9:16 en el iPhone y compartirlo |
 | 80 | 2026-11-11 | ✅ subido | feature/broll-after-stop | `262c9378` | B-roll v2: Upload con B-roll en 2 pasos, fotos, orden 1-2-3 y "Keep this order" |
@@ -107,8 +107,8 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 ---
 
 ## Build 83 — 2026-11-12
-- **Resultado:** pedido a TestFlight (si la subida falla, se corrige esta línea)
-- **Rama (según el historial de git):** feature/shop-board  ·  **Commit de la app:** `2ccb453d`
+- **Resultado:** subido a TestFlight (17:42 ET; Apple lo seguía procesando al terminar)
+- **Rama (según el historial de git):** feature/shop-board  ·  **Commit de la app:** `2ccb453d`  ·  **Commit del pedido a TestFlight:** `867c2718`
 - **Qué cambió (diseño cambiado en Figma el 12 nov a pedido de la PO):**
   - **Add products:** se quitó "Paste a link". Quedan "From my products" y "From photos".
   - **Share:** el campo dice "Amazon / affiliate link" (opcional). "Post as TikTok photo" → "Tag your TikTok Shop product in TikTok"; "Instagram story" → "Your link goes on the link sticker"; "Save to Photos" ahora también copia link y caption; nota nueva abajo.
