@@ -374,13 +374,22 @@ class OpenAIImageProvider:
             return "1024x1536"
         return "1024x1024"
 
+    def transparent(self) -> bool:
+        """gpt-image-2 rejects background=transparent: it gets the solid key colour instead (keyed out after).
+        CUTSELL_SHAPE_OPENAI_BACKGROUND=transparent|key overrides."""
+        mode = _env("CUTSELL_SHAPE_OPENAI_BACKGROUND", "").lower()
+        if mode in ("transparent", "key"):
+            return mode == "transparent"
+        return not self.model_id().startswith("gpt-image-2") or self.model_id().startswith("gpt-image-2.")
+
     def build_request(self, garment: GarmentImage, kind: str, key: str) -> tuple[str, dict, dict]:
         base = _env("CUTSELL_SHAPE_OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+        transparent = self.transparent()
         body = {
             "model": self.model_id(),
-            "prompt": build_prompt(kind, background="transparent"),
+            "prompt": build_prompt(kind, background="transparent" if transparent else garment.key_name),
             "images": [{"image_url": _data_url(garment.rgba_png())}],
-            "background": "transparent",
+            "background": "transparent" if transparent else "opaque",
             "output_format": "png",
             "quality": _env("CUTSELL_SHAPE_OPENAI_QUALITY", "high"),
             "size": self.size_for(garment),

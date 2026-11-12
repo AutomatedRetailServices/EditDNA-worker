@@ -398,3 +398,23 @@ def test_light_garment_gets_dark_key():
     garment = shape.decode_image(b64(garment_png(colour=(240, 240, 235, 255))))
     assert garment.key_rgb == (24, 24, 24)
     assert shape.decode_image(b64(garment_png())).key_rgb == (255, 255, 255)
+
+
+def test_openai_gpt_image_2_uses_key_colour_not_transparent(monkeypatch):
+    import base64, io
+    from PIL import Image
+    from cutsell_app import shop_shape as shape
+    img = Image.new("RGBA", (64, 80), (0, 0, 0, 0))
+    img.paste((200, 30, 30, 255), (16, 16, 48, 64))
+    buf = io.BytesIO(); img.save(buf, "PNG")
+    garment = shape.decode_image(base64.b64encode(buf.getvalue()).decode())
+    provider = shape.OpenAIImageProvider()
+    monkeypatch.setenv("CUTSELL_SHAPE_OPENAI_MODEL", "gpt-image-2")
+    _, _, body = provider.build_request(garment, "clothing", "k")
+    assert body["background"] == "opaque" and garment.key_name in body["prompt"]
+    monkeypatch.setenv("CUTSELL_SHAPE_OPENAI_MODEL", "gpt-image-2.5-flare")
+    _, _, body = provider.build_request(garment, "clothing", "k")
+    assert body["background"] == "transparent"
+    monkeypatch.setenv("CUTSELL_SHAPE_OPENAI_BACKGROUND", "key")
+    _, _, body = provider.build_request(garment, "clothing", "k")
+    assert body["background"] == "opaque"
