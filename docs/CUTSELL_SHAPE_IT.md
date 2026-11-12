@@ -132,3 +132,15 @@ Modal deploy workflow is not affected). Set on Render:
    service);
 4. optional: limits and model ids above. `REDIS_URL` is already there.
 Then merge `feature/shop-board-server` into the production server branch and deploy `cutsell-api` by hand.
+
+## Prueba real (12 nov 2026, 4 fotos del PO: camisa, pantalón, tenis, suéter)
+- **Nano Banana 2 Lite:** 4 de 4 bien, US$0.1376 en total (~$0.034 cada una), ~4.4 s cada una. Respeta el producto
+  (colores, botones, bolsillo, suela); el cambio de forma es leve porque las fotos ya eran de catálogo.
+- **OpenAI:** no se pudo probar. El proyecto de OpenAI de la llave del motor no tiene acceso a `gpt-image-2.5-flare`
+  ni a `gpt-image-2` (HTTP 403 "does not have access to model"). Costo US$0 (OpenAI no cobra los rechazos).
+  Para usarlo hay que darle acceso a modelos de imagen a ese proyecto en platform.openai.com (normalmente pide
+  verificar la organización). `gpt-image-2` no acepta fondo transparente: el servidor ya le pide fondo de color
+  sólido y lo quita después (`CUTSELL_SHAPE_OPENAI_BACKGROUND`).
+- Seedream: sin llave, no se probó (decisión del PO: saltarlo).
+- Fotos y resultados: solo en el bucket privado, `private-qa/shape-compare/20261112/`. Workflow:
+  `.github/workflows/cutsell-shape-it-compare.yml` (corre solo al subir a `shape-compare/request`, un intento, máx. 8 llamadas).
