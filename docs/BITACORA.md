@@ -20,7 +20,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
-| 81 | 2026-11-12 | ✅ subido (pedido) | feature/shop-board | `03fc369f` | Shop board: armar un board de productos 9:16 en el iPhone y compartirlo |
+| 81 | 2026-11-12 13:32 | ✅ subido | feature/shop-board | `03fc369f` | Shop board: armar un board de productos 9:16 en el iPhone y compartirlo |
 | 80 | 2026-11-11 | ✅ subido | feature/broll-after-stop | `262c9378` | B-roll v2: Upload con B-roll en 2 pasos, fotos, orden 1-2-3 y "Keep this order" |
 | 79 | 2026-11-10 22:15 | ✅ subido | feature/broll-after-stop | `5ad00288` | "+ B-roll" en Grabar: después de STOP, cámara de B-roll y "Ready to edit" |
 | 78 | 2026-11-09 13:44 | ✅ subido | feature/clon-ar-autopausa | `71ae403e` | Modos Talk / B-roll en Grabar; la cámara ya cabe en la pantalla |
@@ -105,8 +105,8 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 ---
 
 ## Build 81 — 2026-11-12
-- **Resultado:** pedido a TestFlight (si la subida falla, se corrige esta línea)
-- **Rama (según el historial de git):** feature/shop-board (sale de feature/broll-after-stop, build 80)  ·  **Commit de la app:** `03fc369f`
+- **Resultado:** subido a TestFlight (13:32 ET)
+- **Rama (según el historial de git):** feature/shop-board (sale de feature/broll-after-stop, build 80)  ·  **Commit de la app:** `03fc369f`  ·  **Commit del pedido a TestFlight:** `84f934c3`
 - **Qué cambió:**
   - Nueva función **Shop board** (Figma, página "💡 10 · Shop board (propuesta)"): en Inicio, tarjeta "Shop board" con "NEW" debajo de los atajos.
   - **Add products:** 3–8 productos desde "From my products", "From photos" (el iPhone quita el fondo con Vision y muestra "✓ No background") o "Paste a link" (guarda el link como link de afiliado; no descarga fotos del link, pide la foto desde Fotos). Miniaturas con "×". "✦ Shape it" solo en ropa y zapatos.
