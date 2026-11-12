@@ -1,0 +1,57 @@
+name: CutSell iOS crash logs (TestFlight, on request)
+
+# Reads the newest TestFlight crash reports of the app and prints ONLY the crash type and the crashed thread's
+# frames (no tester email, no comment, no device name) so the cause can be found. No paid compute.
+on:
+  push:
+    branches: [ios-crashlogs/request]
+
+permissions:
+  contents: read
+
+jobs:
+  crashes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      BUNDLE_ID: ai.cutsell.app
+    steps:
+      - name: Install
+        run: pip install --quiet --disable-pip-version-check 'pyjwt[crypto]' requests
+      - name: Fetch
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          python - <<'PY'
+          import os, re, time, jwt, requests
+          key = os.environ.pop("ASC_KEY_P8")
+          def token():
+              now = int(time.time())
+              return jwt.encode({"iss": os.environ["ASC_ISSUER_ID"], "iat": now, "exp": now + 1100, "aud": "appstoreconnect-v1"},
+                                key, algorithm="ES256", headers={"kid": os.environ["ASC_KEY_ID"], "typ": "JWT"})
+          def get(path, **params):
+              r = requests.get("https://api.appstoreconnect.apple.com" + path, params=params,
+                               headers={"Authorization": "Bearer " + token()}, timeout=60)
+              return r.status_code, (r.json() if r.content else {})
+          code, apps = get("/v1/apps", **{"filter[bundleId]": os.environ["BUNDLE_ID"]})
+          app_id = apps["data"][0]["id"]
+          code, subs = get(f"/v1/apps/{app_id}/betaFeedbackCrashSubmissions", sort="-createdDate", limit=6)
+          print("crash submissions HTTP", code, "count", len(subs.get("data", [])))
+          for s in subs.get("data", []):
+              a = s.get("attributes", {})
+              print("\n=====", a.get("createdDate"), "build", a.get("buildBundleId", ""), a.get("appBuild", ""), a.get("osVersion"), a.get("deviceModel"))
+              c, log = get(f"/v1/betaFeedbackCrashSubmissions/{s['id']}/crashLog")
+              text = (log.get("data") or {}).get("attributes", {}).get("logText", "") if c == 200 else ""
+              if not text:
+                  print("no crash log (HTTP", c, ")"); continue
+              lines = text.splitlines()
+              keep = [l for l in lines if re.match(r"(Exception Type|Exception Reason|Exception Codes|Termination Reason|Triggered by Thread|Crashed Thread|Version|Application Specific Information)", l)]
+              print("\n".join(keep[:12]))
+              start = next((i for i, l in enumerate(lines) if re.match(r"Thread \d+ Crashed", l)), None)
+              if start is None:
+                  start = next((i for i, l in enumerate(lines) if "Last Exception Backtrace" in l), None)
+              if start is not None:
+                  print("\n".join(lines[start:start + 40]))
+          PY
