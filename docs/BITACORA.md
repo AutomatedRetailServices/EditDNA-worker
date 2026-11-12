@@ -20,6 +20,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 83 | 2026-11-12 | ✅ subido (pedido) | feature/shop-board | `2ccb453d` | Shop board: los links se piden según dónde se publica (TikTok Shop / Amazon) |
 | 82 | 2026-11-12 15:12 | ✅ subido | feature/shop-board | `e8d4b60f` | Arreglo: elegir una foto ya no cierra todo el Shop board |
 | 81 | 2026-11-12 13:32 | ✅ subido | feature/shop-board | `03fc369f` | Shop board: armar un board de productos 9:16 en el iPhone y compartirlo |
 | 80 | 2026-11-11 | ✅ subido | feature/broll-after-stop | `262c9378` | B-roll v2: Upload con B-roll en 2 pasos, fotos, orden 1-2-3 y "Keep this order" |
@@ -104,6 +105,20 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 | 1 | 2026-10-12 13:01 | ❌ falló | feature/ios-captions-v2 | `d90bfc50` | Primer intento, no llegó a TestFlight |
 
 ---
+
+## Build 83 — 2026-11-12
+- **Resultado:** pedido a TestFlight (si la subida falla, se corrige esta línea)
+- **Rama (según el historial de git):** feature/shop-board  ·  **Commit de la app:** `2ccb453d`
+- **Qué cambió (diseño cambiado en Figma el 12 nov a pedido de la PO):**
+  - **Add products:** se quitó "Paste a link". Quedan "From my products" y "From photos".
+  - **Share:** el campo dice "Amazon / affiliate link" (opcional). "Post as TikTok photo" → "Tag your TikTok Shop product in TikTok"; "Instagram story" → "Your link goes on the link sticker"; "Save to Photos" ahora también copia link y caption; nota nueva abajo.
+  - **Nuevo aviso de TikTok Shop (S5b):** al tocar "Post as TikTok photo" sale una hoja con 3 pasos (abrimos TikTok, "Add link" → "Products", elegirlo del Showcase) y "Open TikTok".
+  - Por qué: en TikTok el link del caption no se puede tocar y los productos de TikTok Shop solo se ligan dentro de TikTok; el link de Amazon sirve para la bio, la historia y copiar.
+  - Textos en español nuevos; 66 pruebas automáticas, 0 fallas.
+- **Pantallas nuevas o cambiadas:** Add products, Share, aviso de TikTok Shop. Ver docs/design-audit/build-83/. Las pantallas viejas quedaron en Figma en "🗄 Reemplazadas".
+- **Pendiente o con problemas:**
+  - Falla del build 79 al detener una grabación con Auto-pause: todavía sin arreglar.
+  - Shape it: el servidor sigue sin deploy.
 
 ## Build 82 — 2026-11-12
 - **Resultado:** subido a TestFlight (listo, 15:12 ET)
