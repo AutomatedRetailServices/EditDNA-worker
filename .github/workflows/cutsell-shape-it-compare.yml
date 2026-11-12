@@ -22,7 +22,7 @@ jobs:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       SHAPE_RUN_ID: "20261112"
-      SHAPE_PROVIDERS: nano-banana
+      SHAPE_PROVIDERS: gpt-image
       SHAPE_ITEMS: shirt:clothing,pants:clothing,shoes:shoes,sweater:clothing
     steps:
       - uses: actions/checkout@v4
