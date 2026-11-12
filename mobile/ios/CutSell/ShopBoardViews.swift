@@ -124,10 +124,9 @@ struct ShopPhotoPicker: UIViewControllerRepresentable {
                     }
                     if let image { images.append(image) }
                 }
-                await MainActor.run {
-                    picker.dismiss(animated: true)
-                    parent.onPicked(images)
-                }
+                // The sheet's binding closes the picker. Calling picker.dismiss here as well closed the sheet
+                // AND the screen under it (build 81: Shop board closed right after picking a photo).
+                await MainActor.run { parent.onPicked(images) }
             }
         }
     }
@@ -257,6 +256,8 @@ struct ShopAddProductsView: View {
     @State private var pickingPhotos = false
     /// Photos for this one item (a product from the list or a pasted link).
     @State private var photoFor: UUID?
+    /// The item that asks for its photo once the current sheet has finished closing.
+    @State private var photoNext: UUID?
     @State private var askingLink = false
     @State private var linkText = ""
     @State private var showingProducts = false
@@ -317,14 +318,14 @@ struct ShopAddProductsView: View {
             }
             .ignoresSafeArea()
         }
-        .sheet(isPresented: $showingProducts) {
+        .sheet(isPresented: $showingProducts, onDismiss: {
+            // The product list has no product photos: hers comes from Photos, after the list has closed.
+            if let id = photoNext { photoNext = nil; photoFor = id }
+        }) {
             ShopProductListSheet { name, productID in
-                showingProducts = false
                 lastSource = .myProducts
-                if let id = model.addProduct(name: name, productID: productID) {
-                    // The product list has no product photos: hers comes from Photos.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { photoFor = id }
-                }
+                photoNext = model.addProduct(name: name, productID: productID)
+                showingProducts = false
             }
             .environmentObject(appState)
         }
@@ -338,7 +339,7 @@ struct ShopAddProductsView: View {
                 lastSource = .link
                 if let id = model.addLink(linkText) {
                     show(L10n.tr("Link saved as the affiliate link. Now add the product's photo from Photos."))
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { photoFor = id }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { photoFor = id }
                 } else {
                     show(L10n.tr("That doesn't look like a link."))
                 }
