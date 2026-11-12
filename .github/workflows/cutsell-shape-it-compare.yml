@@ -23,6 +23,7 @@ jobs:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       SHAPE_RUN_ID: "20261112"
       SHAPE_PROVIDERS: gpt-image
+      CUTSELL_SHAPE_OPENAI_MODEL: gpt-image-2
       SHAPE_ITEMS: shirt:clothing,pants:clothing,shoes:shoes,sweater:clothing
     steps:
       - uses: actions/checkout@v4
