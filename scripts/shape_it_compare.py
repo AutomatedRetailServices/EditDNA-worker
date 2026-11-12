@@ -31,9 +31,11 @@ ESTIMATE = {"seedream": shape.SEEDREAM_PRICE_PER_IMAGE, "gpt-image": shape.OPENA
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("pants")
-    parser.add_argument("sweater")
-    parser.add_argument("shoes")
+    parser.add_argument("pants", nargs="?")
+    parser.add_argument("sweater", nargs="?")
+    parser.add_argument("shoes", nargs="?")
+    parser.add_argument("--item", action="append", default=[], metavar="LABEL:KIND:PATH",
+                        help="extra or replacement item, KIND is clothing or shoes (repeatable)")
     parser.add_argument("--out", required=True, help="output folder, outside the repository")
     parser.add_argument("--providers", default="seedream,gpt-image,nano-banana")
     parser.add_argument("--yes-spend", action="store_true", help="really call the paid APIs")
@@ -45,8 +47,16 @@ def main(argv=None) -> int:
         return 2
     providers = [shape.provider_name(p.strip()) for p in args.providers.split(",") if p.strip()]
 
+    items = [(label, kind, path) for (label, kind), path in zip(ITEMS, (args.pants, args.sweater, args.shoes)) if path]
+    for spec in args.item:
+        label, kind, path = spec.split(":", 2)
+        if kind not in ("clothing", "shoes"):
+            parser.error(f"--item {label}: KIND must be clothing or shoes")
+        items.append((label, kind, path))
+    if not items:
+        parser.error("give the three positional photos or at least one --item")
     garments = []
-    for (label, kind), path in zip(ITEMS, (args.pants, args.sweater, args.shoes)):
+    for label, kind, path in items:
         data = Path(path).expanduser().read_bytes()
         garment = shape.decode_image(base64.b64encode(data).decode())
         garments.append((label, kind, garment))
