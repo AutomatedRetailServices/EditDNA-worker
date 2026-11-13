@@ -20,7 +20,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
-| 87 | 2026-11-13 | ✅ subido (pedido) | feature/shop-board | `3c9ed3b9` | Arreglo: la pestaña Shop boards muestra la barra de abajo |
+| 87 | 2026-11-13 08:29 | ✅ subido | feature/shop-board | `3c9ed3b9` | Arreglo: la pestaña Shop boards muestra la barra de abajo |
 | 86 | 2026-11-12 23:50 | ✅ subido | feature/shop-board | `c1f74b58` | Pestaña "Shop boards" en la barra de abajo; Edits como antes |
 | 85 | 2026-11-12 21:21 | ✅ subido | feature/shop-board | `f8ca1aa8` | Shop board: mover productos a mano + boards guardados en Edits › Shop boards |
 | 84 | 2026-11-12 19:41 | ✅ subido | feature/shop-board | `2ccb453d` | Mismo código que el 83 (re-subida: Apple no procesó el 83) |
@@ -111,8 +111,8 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 ---
 
 ## Build 87 — 2026-11-13
-- **Resultado:** pedido a TestFlight (si la subida falla, se corrige esta línea)
-- **Rama (según el historial de git):** feature/shop-board  ·  **Commit de la app:** `3c9ed3b9`
+- **Resultado:** subido a TestFlight (listo, 08:29 ET)
+- **Rama (según el historial de git):** feature/shop-board  ·  **Commit de la app:** `3c9ed3b9`  ·  **Commit del pedido a TestFlight:** `c8cb4491`
 - **Qué cambió:**
   - **Arreglo (reporte de la PO en el build 86):** la pestaña Shop boards no mostraba la barra de abajo, así que no había forma de volver a Create (Home) ni a otras pestañas. Cada pestaña dibuja su propia barra y a esta le faltaba. Ahora la muestra con Shop boards marcada.
   - 73 pruebas automáticas, 0 fallas (una nueva revisa que la pestaña tenga la barra).
