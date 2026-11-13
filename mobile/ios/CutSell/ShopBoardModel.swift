@@ -9,6 +9,11 @@ import UIKit
 
 @MainActor
 final class ShopBoardModel: ObservableObject {
+    /// The saved board's id (Edits › Shop boards).
+    let boardID: UUID
+
+    init(boardID: UUID = UUID()) { self.boardID = boardID }
+
     @Published var items: [ShopItem] = [] { didSet { if oldValue.map(\.cutout) != items.map(\.cutout) { refreshPalette() } } }
     /// Items whose photo is being cut out now.
     @Published var busy: Set<UUID> = []

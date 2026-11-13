@@ -6,6 +6,7 @@ import Combine
 /// cut leaves it the moment it is ready and is in Ready at once.
 enum EditsTab: String, CaseIterable, Identifiable, Hashable {
     case processing = "Processing", ready = "Ready", products = "Products", drafts = "Drafts", posted = "Posted", all = "All"
+    case shopBoards = "Shop boards"
     var id: String { rawValue }
 
     /// Figma chip widths (12 pt SF semibold, height 38).
@@ -15,6 +16,7 @@ enum EditsTab: String, CaseIterable, Identifiable, Hashable {
         case .ready, .drafts, .posted: return 84
         case .products: return 80
         case .all: return 66
+        case .shopBoards: return 100
         }
     }
 }
@@ -40,6 +42,9 @@ struct ProjectsView: View {
     @ObservedObject private var tracker = CutTracker.shared
     @ObservedObject private var catalog = CatalogStore.shared
     @ObservedObject private var mixCenter = MixCenter.shared
+    @ObservedObject private var shopBoards = ShopBoardStore.shared
+    /// Edits › Shop boards: a new board (nil model) or a saved one.
+    @State private var shopBoardOpen: ShopBoardOpen?
     @State private var assigning: AssignRequest?
     /// PO 25 Oct: pick several videos by hand (in order) and send them to Plan.
     @State private var selecting = false
@@ -55,6 +60,8 @@ struct ProjectsView: View {
         switch selectedTab {
         case .all, .processing, .products:
             return appState.projects
+        case .shopBoards:
+            return []
         case .ready:
             // PO 26 Oct: a posted video leaves Ready (it lives in Posted).
             return appState.projects.filter { $0.state == "draft_ready" && !PostedLedger.contains($0.projectID) }
@@ -107,7 +114,7 @@ struct ProjectsView: View {
     /// White Indigo (Figma 1166:4): one full-width bar, Processing · Ready · Products · Drafts (no "All").
     private var visibleTabs: [EditsTab] {
         let base: [EditsTab] = processingRows.isEmpty && mixCenter.active.isEmpty ? [.ready, .products, .drafts] : [.processing, .ready, .products, .drafts]
-        return base + [.posted]
+        return base + [.posted, .shopBoards]
     }
 
     private func chipTitle(_ tab: EditsTab) -> String {
@@ -119,6 +126,7 @@ struct ProjectsView: View {
         case .processing: return processingRows.count + mixCenter.active.count
         case .products: return catalog.overview.brands.count
         case .all: return appState.projects.count
+        case .shopBoards: return shopBoards.boards.count
         case .ready: return appState.projects.filter { $0.state == "draft_ready" && !PostedLedger.contains($0.projectID) }.count
         case .posted: return appState.projects.filter { PostedLedger.contains($0.projectID) }.count
         case .drafts:
@@ -138,6 +146,7 @@ struct ProjectsView: View {
                         WIScreenTitle(title: "Edits",
                                       subtitle: selectedTab == .processing ? "Cuts being edited now. You can leave the app."
                                         : selectedTab == .products ? "Your cuts, organized by brand and product."
+                                        : selectedTab == .shopBoards ? "Your Shop boards, saved as you make them."
                                         : "Your saved cuts, ready to review or share.")
                             .padding(.top, 2)
 
@@ -173,6 +182,11 @@ struct ProjectsView: View {
                             }
                         } else if selectedTab == .posted {
                             postedList
+                        } else if selectedTab == .shopBoards {
+                            ShopBoardsGrid(onNew: { shopBoardOpen = ShopBoardOpen(model: nil) },
+                                           onOpen: { id in
+                                               if let model = shopBoards.open(id) { shopBoardOpen = ShopBoardOpen(model: model) }
+                                           })
                         } else {
                         if !pendingCuts.isEmpty {
                             VStack(spacing: 8) {
@@ -284,6 +298,10 @@ struct ProjectsView: View {
                 NewCutView(pending: pending)
                     .environmentObject(appState)
                     .onDisappear { Task { await refreshPendingCuts() } }
+            }
+            .fullScreenCover(item: $shopBoardOpen) { open in
+                ShopBoardFlowView(saved: open.model, onClose: { shopBoardOpen = nil })
+                    .environmentObject(appState)
             }
             .task {
                 await refreshPendingCuts()
@@ -580,6 +598,7 @@ struct ProjectsView: View {
         case .drafts: return "No drafts"
         case .posted: return "Nothing posted yet"
         case .products: return "No products yet"
+        case .shopBoards: return "No Shop boards yet"
         }
     }
 
@@ -829,4 +848,10 @@ struct EditTileMenu: View {
         .accessibilityLabel(L10n.tr("Options for \(project.title)"))
         .accessibilityIdentifier(project.state == "draft_ready" ? "editTileMenuReady" : "editTileMenu")
     }
+}
+
+/// Edits › Shop boards: what the full-screen Shop board opens with (nil = a new board).
+struct ShopBoardOpen: Identifiable {
+    let id = UUID()
+    let model: ShopBoardModel?
 }

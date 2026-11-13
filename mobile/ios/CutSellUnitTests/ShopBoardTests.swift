@@ -480,3 +480,61 @@ final class ShopHandEditTests: XCTestCase {
         XCTAssertTrue(model.raised.isEmpty)
     }
 }
+
+// MARK: - Saved Shop boards (Edits › Shop boards, Figma 3e)
+
+@MainActor
+final class ShopBoardStoreTests: XCTestCase {
+    private func cutout() -> CGImage {
+        let r = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 60))
+        return r.image { ctx in UIColor.systemBlue.setFill(); ctx.fill(CGRect(x: 5, y: 5, width: 30, height: 50)) }.cgImage!
+    }
+
+    func testSaveAndOpenKeepsEverything() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ShopBoardsTest-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ShopBoardStore(root: root)
+        let model = ShopBoardModel()
+        let item = ShopItem(source: .photos, cutout: cutout(), kind: .shoes)
+        model.items = [item]
+        model.bigTitle = "AMAZON FINDS"
+        model.scriptLine = "Fall"
+        model.fontPair = .bold
+        model.style.pick(.texture(.marble))
+        model.adjusts[item.id] = ShopAdjust(offset: CGSize(width: 12, height: -8), scale: 1.5, rotation: 20)
+        model.raise(item.id)
+        model.affiliateLink = "https://amzn.to/x"
+        store.save(model, thumbnail: UIImage(cgImage: cutout()), synchronously: true)
+
+        let again = ShopBoardStore(root: root)                    // read back from disk
+        XCTAssertEqual(again.boards.map(\.id), [model.boardID])
+        XCTAssertEqual(again.boards.first?.displayTitle, "AMAZON FINDS · Fall")
+        XCTAssertNotNil(again.thumbnail(model.boardID))
+        let opened = try XCTUnwrap(again.open(model.boardID))
+        XCTAssertEqual(opened.boardID, model.boardID)
+        XCTAssertEqual(opened.items.count, 1)
+        XCTAssertNotNil(opened.items.first?.cutout)
+        XCTAssertEqual(opened.items.first?.kind, .shoes)
+        XCTAssertEqual(opened.fontPair, .bold)
+        XCTAssertEqual(opened.style.background, .texture(.marble))
+        XCTAssertEqual(opened.adjusts[item.id], model.adjusts[item.id])
+        XCTAssertEqual(opened.raised, [item.id])
+        XCTAssertEqual(opened.affiliateLink, "https://amzn.to/x")
+
+        again.delete(model.boardID)
+        again.flush()
+        XCTAssertTrue(again.boards.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: again.folder(model.boardID).path))
+    }
+
+    func testEmptyBoardIsNotSavedAndDatesRead() {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ShopBoardsTest-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ShopBoardStore(root: root)
+        store.save(ShopBoardModel(), synchronously: true)
+        XCTAssertTrue(store.boards.isEmpty)
+        let now = Date()
+        XCTAssertEqual(ShopBoardsGrid.dateText(now, now: now), L10n.tr("Today"))
+        XCTAssertEqual(ShopBoardsGrid.dateText(now.addingTimeInterval(-86_400), now: now), L10n.tr("Yesterday"))
+    }
+}

@@ -1,3 +1,4 @@
+import Combine
 import PhotosUI
 import SwiftUI
 import UIKit
@@ -182,8 +183,15 @@ struct ShopBoardFlowView: View {
 
     enum Step: Equatable { case add, shape(UUID), style, board, share }
 
-    @StateObject private var model = ShopBoardModel()
-    @State private var step: Step = .add
+    @StateObject private var model: ShopBoardModel
+    @State private var step: Step
+
+    /// A new board (Home, Edits "+ New Shop board"), or a saved one opening on "Your board".
+    init(saved: ShopBoardModel? = nil, onClose: @escaping () -> Void) {
+        self.onClose = onClose
+        _model = StateObject(wrappedValue: saved ?? ShopBoardModel())
+        _step = State(initialValue: saved == nil ? .add : .board)
+    }
     @State private var showingTitle = false
     @State private var showingBackground = false
 
@@ -213,6 +221,15 @@ struct ShopBoardFlowView: View {
         .environment(\.colorScheme, .light)
         .animation(.easeOut(duration: 0.2), value: step)
         .onAppear { ShopFonts.registerIfNeeded() }
+        // Saves itself (Edits › Shop boards) a moment after each change, and when the flow closes.
+        .onReceive(model.objectWillChange.debounce(for: .seconds(1), scheduler: RunLoop.main)) { _ in saveBoard() }
+        .onDisappear { saveBoard() }
+    }
+
+    private func saveBoard() {
+        guard model.busy.isEmpty, !model.items.isEmpty else { return }
+        let thumb = model.items.contains(where: { $0.cutout != nil }) ? ShopBoardThumbnail.image(model.snapshot()) : nil
+        ShopBoardStore.shared.save(model, thumbnail: thumb)
     }
 }
 
