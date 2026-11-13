@@ -2,7 +2,7 @@ import Combine
 import SwiftUI
 import UIKit
 
-// Shop boards saved on the iPhone (Edits › Shop boards, Figma 3e 3055:516). Every board saves itself while it is
+// Shop boards saved on the iPhone (the Shop board tab, Figma 3e 3055:516). Every board saves itself while it is
 // being made: its products (cut-outs as PNG), how they were moved by hand, the template, letters, background, link
 // and caption, plus a small picture for the grid. Nothing leaves the phone.
 // Folder: Application Support/ShopBoards/<board id>/ (board.json, item PNGs, background photo, thumb.jpg).
@@ -227,7 +227,7 @@ enum ShopBoardThumbnail {
     }
 }
 
-// MARK: - Edits › Shop boards (Figma 3e 3055:516)
+// MARK: - Shop board tab (Figma 3e 3055:516)
 
 /// "+ New Shop board" tile (dashed #1769FF on #EEF3FF, radius 16) and the saved boards (110 × 195 9:16 picture,
 /// radius 16, "•••" menu, Bold 12 title, Medium 11 #6B7385 date), three per row.
@@ -327,4 +327,40 @@ private struct ShopBoardTilePicture: View {
         }
         .task(id: version) { image = ShopBoardStore.shared.thumbnail(id) }
     }
+}
+
+/// The Shop board tab (Figma 3e): logo, "Shop boards" + "Your boards, saved as you make them.", then the grid.
+/// "+ New Shop board" and a saved board open the full-screen Shop board.
+struct ShopBoardsTabView: View {
+    @ObservedObject private var store = ShopBoardStore.shared
+    @EnvironmentObject private var appState: AppState
+    @State private var open: ShopBoardOpen?
+
+    var body: some View {
+        ZStack {
+            ScreenBackground()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    WIHeader { EmptyView() }
+                    WIScreenTitle(title: "Shop boards", subtitle: "Your boards, saved as you make them.")
+                        .padding(.top, 2)
+                    ShopBoardsGrid(onNew: { open = ShopBoardOpen(model: nil) },
+                                   onOpen: { id in if let model = store.open(id) { open = ShopBoardOpen(model: model) } })
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
+            }
+        }
+        .fullScreenCover(item: $open) { open in
+            ShopBoardFlowView(saved: open.model, onClose: { self.open = nil })
+                .environmentObject(appState)
+        }
+        .accessibilityIdentifier("shopBoardsTab")
+    }
+}
+
+/// What the full-screen Shop board opens with (nil = a new board).
+struct ShopBoardOpen: Identifiable {
+    let id = UUID()
+    let model: ShopBoardModel?
 }

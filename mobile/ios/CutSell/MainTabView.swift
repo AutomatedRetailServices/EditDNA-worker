@@ -1,13 +1,15 @@
 import SwiftUI
 
-/// The four tabs at the bottom (Figma): Create · Edits · Plan · You. The app opens on Create.
+/// The tabs at the bottom (Figma "App · Barra de abajo" 3012:31): Create · Edits · Shop board · Plan · You.
+/// The app opens on Create. Shop board (PO 12 Nov): its own tab with the saved boards, kept apart from Edits.
 enum MainTab: String, CaseIterable, Hashable {
-    case create, edits, plan, you
+    case create, edits, shopBoard, plan, you
 
     var title: String {
         switch self {
         case .create: return "Create"
         case .edits: return "Edits"
+        case .shopBoard: return "Shop board"
         case .plan: return "Plan"
         case .you: return "Profile"
         }
@@ -18,6 +20,7 @@ enum MainTab: String, CaseIterable, Hashable {
         switch self {
         case .create: return "WITabCreate"
         case .edits: return "WITabEdits"
+        case .shopBoard: return "WITabShopBoard"
         case .plan: return "WITabPlan"
         case .you: return "WITabProfile"
         }
@@ -55,6 +58,8 @@ struct MainTabView: View {
                 EmptyView()
             case .edits:
                 ProjectsView(selectTab: select)
+            case .shopBoard:
+                ShopBoardsTabView()
             case .plan:
                 PlanView(selectTab: select)
             case .you:

@@ -538,3 +538,14 @@ final class ShopBoardStoreTests: XCTestCase {
         XCTAssertEqual(ShopBoardsGrid.dateText(now.addingTimeInterval(-86_400), now: now), L10n.tr("Yesterday"))
     }
 }
+
+// MARK: - Shop board tab (PO 12 Nov: its own tab, between Edits and Plan)
+
+final class ShopBoardTabTests: XCTestCase {
+    func testShopBoardTabSitsBetweenEditsAndPlan() {
+        XCTAssertEqual(MainTab.allCases, [.create, .edits, .shopBoard, .plan, .you])
+        XCTAssertEqual(MainTab.shopBoard.title, "Shop board")
+        XCTAssertNotNil(UIImage(named: MainTab.shopBoard.image))
+        XCTAssertNotNil(L10nES.table["Your boards, saved as you make them."])
+    }
+}
