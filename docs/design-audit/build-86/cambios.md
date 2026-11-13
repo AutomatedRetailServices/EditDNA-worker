@@ -12,7 +12,9 @@
 | Edits | igual que el build 84 (sin el segmento "Shop boards") | ✅ |
 
 ## Barra de abajo
-- Create · Edits · **Shop board** · Plan · Profile. Las 5 pestañas miden 68 de ancho.
+- Create · Edits · **Shop boards** · Plan · Profile. Las 5 pestañas miden 68 de ancho.
+- El nombre va en dos líneas, "Shop" arriba y "boards" abajo (pedido de la PO), con 12 pt entre líneas.
+- Todos los íconos van arriba, a 5 pt del borde, para que queden en la misma línea aunque un nombre tenga dos líneas.
 - Ícono nuevo de Shop board: un cuadro con tres cuadritos adentro (un collage), línea de 1.8 pt, como los otros
   íconos. Archivo: `Assets.xcassets/WhiteIndigo/WITabShopBoard.imageset`.
 - El cambio se hizo en el componente, así que todas las pantallas de Figma ya tienen la barra de 5 pestañas.

@@ -1721,6 +1721,7 @@ enum L10nES {
         "Pick it from your Showcase and post": "Elígelo de tu Showcase y publica",
         "Open TikTok": "Abrir TikTok",
         "Shop boards": "Shop boards",
+        "Shop\nboards": "Shop\nboards",
         "Yesterday": "Ayer",
         "Your boards, saved as you make them.": "Tus boards, guardados mientras los armas.",
         "New Shop board": "Nuevo Shop board",

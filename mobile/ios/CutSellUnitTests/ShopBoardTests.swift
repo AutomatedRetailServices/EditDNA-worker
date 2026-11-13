@@ -544,7 +544,7 @@ final class ShopBoardStoreTests: XCTestCase {
 final class ShopBoardTabTests: XCTestCase {
     func testShopBoardTabSitsBetweenEditsAndPlan() {
         XCTAssertEqual(MainTab.allCases, [.create, .edits, .shopBoard, .plan, .you])
-        XCTAssertEqual(MainTab.shopBoard.title, "Shop board")
+        XCTAssertEqual(MainTab.shopBoard.title, "Shop\nboards")
         XCTAssertNotNil(UIImage(named: MainTab.shopBoard.image))
         XCTAssertNotNil(L10nES.table["Your boards, saved as you make them."])
     }

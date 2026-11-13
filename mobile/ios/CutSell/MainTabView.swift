@@ -9,7 +9,7 @@ enum MainTab: String, CaseIterable, Hashable {
         switch self {
         case .create: return "Create"
         case .edits: return "Edits"
-        case .shopBoard: return "Shop board"
+        case .shopBoard: return "Shop\nboards"     // two lines under the icon (PO 12 Nov)
         case .plan: return "Plan"
         case .you: return "Profile"
         }
@@ -224,6 +224,8 @@ struct CSTabBar: View {
                 Button {
                     select(item)
                 } label: {
+                    // Icons on one line for every tab (Figma 3012:31: top-aligned, 5 pt down), so the two-line
+                    // "Shop / boards" label does not push its icon up.
                     VStack(spacing: 2) {
                         Image(item.image)
                             .renderingMode(.template)
@@ -234,14 +236,18 @@ struct CSTabBar: View {
                         Text(L10n.tr(item.title))
                             .font(CS.inter(11, isActive ? .bold : .medium))
                             .foregroundStyle(isActive ? CS.accent : CS.wiSecondary)
-                            .lineLimit(1)
+                            .lineLimit(2)
+                            .lineSpacing(-2)
                             .minimumScaleFactor(0.8)
                             .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
+                    .padding(.top, 5)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     // 28 Oct (PO, "bubbly"): the active tab sits in a soft blue bubble.
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(isActive ? CS.accentSoft : .clear, in: Capsule())
-                    .padding(.vertical, 7)
+                    .padding(.vertical, 4)
                     .padding(.horizontal, 4)
                     .contentShape(Rectangle())
                     .animation(.spring(response: 0.3, dampingFraction: 0.75), value: isActive)
