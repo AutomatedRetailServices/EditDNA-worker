@@ -386,7 +386,7 @@ enum ShopPalette {
         guard !palette.isEmpty else { return (ShopRGB(hex: 0xF1ECE4), ShopRGB(hex: 0xE4DDD2)) }   // Cream (Figma)
         // Build 87 feedback: the old blend of every hue, capped at 16 % colour, read as the same beige for any
         // products. Now the strongest colour family of the products leads (12 hue families, weighted by how
-        // colourful each colour is) and shows as a clearly tinted light background; all-neutral products
+        // colourful each colour is) and shows as a clearly tinted light background (32-60 % colour, 88 % light); all-neutral products
         // (white, grey, black, cream) keep a near-neutral light background.
         var bins = [Double](repeating: 0, count: 12)
         var hueX = [Double](repeating: 0, count: 12), hueY = [Double](repeating: 0, count: 12)
@@ -410,8 +410,8 @@ enum ShopPalette {
         }
         let h = hue(hueX[lead], hueY[lead])
         let leadSat = satSum[lead] / bins[lead]
-        let s = min(0.45, max(0.22, 0.18 + leadSat * 0.3))
-        return (ShopRGB.fromHSL(h, s, 0.91), ShopRGB.fromHSL(h, min(0.5, s * 1.1), 0.84))
+        let s = min(0.6, max(0.32, 0.26 + leadSat * 0.34))
+        return (ShopRGB.fromHSL(h, s, 0.88), ShopRGB.fromHSL(h, min(0.65, s * 1.1), 0.815))
     }
 
     /// The title colour: the product colour with the best contrast on the background (at least 4.5 : 1); if none

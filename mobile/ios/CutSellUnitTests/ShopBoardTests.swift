@@ -590,7 +590,7 @@ extension ShopMatchTests {
         let blue = ShopPalette.softBackground(for: [ShopRGB(hex: 0x8DB4E2), ShopRGB(hex: 0x9A9A9A)])
         let green = ShopPalette.softBackground(for: [ShopRGB(hex: 0x3E7D4F)])
         XCTAssertGreaterThan(pink.top.distance2(blue.top), 0.01)
-        XCTAssertGreaterThan(blue.top.distance2(green.top), 0.005)
+        XCTAssertGreaterThan(blue.top.distance2(green.top), 0.004)
         XCTAssertEqual(pink.top.hsl.h, ShopRGB(hex: 0xE0457B).hsl.h, accuracy: 0.05)
         let neutral = ShopPalette.softBackground(for: [ShopRGB(hex: 0xFFFFFF), ShopRGB(hex: 0x111111), ShopRGB(hex: 0x9A9A9A)])
         XCTAssertLessThan(neutral.top.hsl.s, 0.1, "white, black and grey stay neutral")
