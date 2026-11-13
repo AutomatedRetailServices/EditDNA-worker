@@ -20,6 +20,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 88 | 2026-11-13 | ✅ subido (pedido) | feature/shop-board | `506020f1` | Shop board: mover/agrandar/girar con los dedos más fácil + fondo automático que sigue el color de los productos |
 | 87 | 2026-11-13 08:29 | ✅ subido | feature/shop-board | `3c9ed3b9` | Arreglo: la pestaña Shop boards muestra la barra de abajo |
 | 86 | 2026-11-12 23:50 | ✅ subido | feature/shop-board | `c1f74b58` | Pestaña "Shop boards" en la barra de abajo; Edits como antes |
 | 85 | 2026-11-12 21:21 | ✅ subido | feature/shop-board | `f8ca1aa8` | Shop board: mover productos a mano + boards guardados en Edits › Shop boards |
@@ -109,6 +110,16 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 | 1 | 2026-10-12 13:01 | ❌ falló | feature/ios-captions-v2 | `d90bfc50` | Primer intento, no llegó a TestFlight |
 
 ---
+
+## Build 88 — 2026-11-13
+- **Resultado:** pedido a TestFlight (si la subida falla, se corrige esta línea)
+- **Rama (según el historial de git):** feature/shop-board  ·  **Commit de la app:** `506020f1`
+- **Qué cambió (reportes de la PO en el build 87):**
+  - **Mover, agrandar y girar (`f14b08cc`):** antes había que tocar el producto primero para poder pellizcarlo o girarlo, y el gesto de mover se peleaba con el de pellizcar. Ahora una sola capa lee todos los dedos a la vez: un dedo mueve el producto que está debajo; dos dedos lo agrandan y lo giran al mismo tiempo, sin tocarlo antes. Los productos chicos tienen un área de 44 pt para agarrarlos.
+  - **"Match my products":** antes mezclaba todos los colores y casi sin color, así que salía beige con cualquier producto. Ahora manda el color principal de los productos: fondo claro con 32–60 % de color (rosa claro, azul claro, verde claro…). Si todos son neutros (blanco, negro, gris, crema), el fondo queda neutro claro.
+  - 75 pruebas automáticas, 0 fallas (nuevas: producto bajo el dedo, fondos distintos para productos distintos).
+- **Pantallas nuevas o cambiadas:** ninguna (mismo diseño; cambian los gestos y el color automático).
+- **Pendiente o con problemas:** los mismos del build 85.
 
 ## Build 87 — 2026-11-13
 - **Resultado:** subido a TestFlight (listo, 08:29 ET)
