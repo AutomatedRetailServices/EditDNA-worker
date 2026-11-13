@@ -22,3 +22,18 @@
 - Línea de ayuda bajo las tarjetas (Medium 12, centrada):
   - sin producto elegido, #6B7385: "Drag a product to move it · pinch to resize · twist to turn";
   - con producto elegido, #1769FF: "Pinch to resize · twist to turn · tap outside to finish".
+
+## Shop boards guardados (Edits › Shop boards)
+- **Figma:** página "📱 App build 78 · 03 Edits, Editor y Export", pantalla nueva `3055:516` "3e · Edits · Shop boards".
+- Cada board **se guarda solo en el iPhone** mientras se arma (1 s después de cada cambio y al cerrar). Guarda:
+  productos sin fondo (PNG), lo movido a mano, plantilla, letras, fondo, link, caption y una miniatura de 270×480.
+  No sale del teléfono.
+- **Edits:** segmento nuevo "Shop boards" (con número) después de Posted. Subtítulo: "Your Shop boards, saved as you
+  make them."
+- **Cuadrícula** de 3 columnas:
+  - primera tarjeta "+ New Shop board": borde punteado #1769FF sobre #EEF3FF, radio 16;
+  - después, los boards: miniatura 9:16 con radio 16, "•••" blanco arriba a la derecha, título Bold 12 #0B1020 y
+    fecha Medium 11 #6B7385 ("Today", "Yesterday" o "Nov 10").
+- Tocar un board lo abre en **"Your board"** tal como quedó.
+- "••• → Delete" pregunta antes: "Delete this Shop board?" / "It is only removed from CutSell. Pictures you saved to
+  Photos stay."
