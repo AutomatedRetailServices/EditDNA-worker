@@ -59,7 +59,7 @@ struct MainTabView: View {
             case .edits:
                 ProjectsView(selectTab: select)
             case .shopBoard:
-                ShopBoardsTabView()
+                ShopBoardsTabView(selectTab: select)
             case .plan:
                 PlanView(selectTab: select)
             case .you:

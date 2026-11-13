@@ -549,3 +549,12 @@ final class ShopBoardTabTests: XCTestCase {
         XCTAssertNotNil(L10nES.table["Your boards, saved as you make them."])
     }
 }
+
+extension ShopBoardTabTests {
+    /// Build 86 bug: the Shop boards tab had no bottom bar, so there was no way back to Create (Home).
+    func testShopBoardsTabShowsTheBottomBar() throws {
+        let source = try String(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("CutSell/ShopBoardStore.swift"), encoding: .utf8)
+        XCTAssertTrue(source.contains("CSTabBar(current: .shopBoard"), "the Shop boards tab must draw the bottom bar")
+    }
+}

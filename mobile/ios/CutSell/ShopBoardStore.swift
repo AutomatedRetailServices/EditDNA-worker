@@ -332,6 +332,8 @@ private struct ShopBoardTilePicture: View {
 /// The Shop board tab (Figma 3e): logo, "Shop boards" + "Your boards, saved as you make them.", then the grid.
 /// "+ New Shop board" and a saved board open the full-screen Shop board.
 struct ShopBoardsTabView: View {
+    /// Like every tab, it draws the bottom bar itself (build 86 forgot it: no way back to Create/Home).
+    let selectTab: (MainTab) -> Void
     @ObservedObject private var store = ShopBoardStore.shared
     @EnvironmentObject private var appState: AppState
     @State private var open: ShopBoardOpen?
@@ -351,6 +353,7 @@ struct ShopBoardsTabView: View {
                 .padding(.bottom, 20)
             }
         }
+        .safeAreaInset(edge: .bottom) { CSTabBar(current: .shopBoard, select: selectTab) }
         .fullScreenCover(item: $open) { open in
             ShopBoardFlowView(saved: open.model, onClose: { self.open = nil })
                 .environmentObject(appState)
