@@ -384,21 +384,34 @@ enum ShopPalette {
     /// item stands out (top and bottom of the gentle board gradient).
     static func softBackground(for palette: [ShopRGB]) -> (top: ShopRGB, bottom: ShopRGB) {
         guard !palette.isEmpty else { return (ShopRGB(hex: 0xF1ECE4), ShopRGB(hex: 0xE4DDD2)) }   // Cream (Figma)
-        // Average hue on the colour circle, weighted by how colourful each colour is.
-        var x = 0.0, y = 0.0, sat = 0.0
+        // Build 87 feedback: the old blend of every hue, capped at 16 % colour, read as the same beige for any
+        // products. Now the strongest colour family of the products leads (12 hue families, weighted by how
+        // colourful each colour is) and shows as a clearly tinted light background; all-neutral products
+        // (white, grey, black, cream) keep a near-neutral light background.
+        var bins = [Double](repeating: 0, count: 12)
+        var hueX = [Double](repeating: 0, count: 12), hueY = [Double](repeating: 0, count: 12)
+        var satSum = [Double](repeating: 0, count: 12)
+        var neutralHueX = 0.0, neutralHueY = 0.0
         for c in palette {
             let hsl = c.hsl
-            let w = max(0.05, hsl.s * (1 - abs(2 * hsl.l - 1)))
-            x += cos(hsl.h * 2 * .pi) * w; y += sin(hsl.h * 2 * .pi) * w
-            sat += hsl.s
+            let chroma = hsl.s * (1 - abs(2 * hsl.l - 1))
+            let angle = hsl.h * 2 * .pi
+            neutralHueX += cos(angle) * max(chroma, 0.01); neutralHueY += sin(angle) * max(chroma, 0.01)
+            guard chroma >= 0.08 else { continue }
+            let bin = min(11, Int(hsl.h * 12))
+            bins[bin] += chroma
+            hueX[bin] += cos(angle) * chroma; hueY[bin] += sin(angle) * chroma
+            satSum[bin] += hsl.s * chroma
         }
-        var hue = atan2(y, x) / (2 * .pi)
-        if hue < 0 { hue += 1 }
-        let avgSat = sat / Double(palette.count)
-        let s = min(0.16, 0.06 + avgSat * 0.12)        // soft: never a strong colour
-        let top = ShopRGB.fromHSL(hue, s, 0.94)
-        let bottom = ShopRGB.fromHSL(hue, s * 1.1, 0.885)
-        return (top, bottom)
+        func hue(_ x: Double, _ y: Double) -> Double { let h = atan2(y, x) / (2 * .pi); return h < 0 ? h + 1 : h }
+        guard let lead = bins.indices.max(by: { bins[$0] < bins[$1] }), bins[lead] > 0 else {
+            let h = hue(neutralHueX, neutralHueY)
+            return (ShopRGB.fromHSL(h, 0.06, 0.93), ShopRGB.fromHSL(h, 0.07, 0.87))
+        }
+        let h = hue(hueX[lead], hueY[lead])
+        let leadSat = satSum[lead] / bins[lead]
+        let s = min(0.45, max(0.22, 0.18 + leadSat * 0.3))
+        return (ShopRGB.fromHSL(h, s, 0.91), ShopRGB.fromHSL(h, min(0.5, s * 1.1), 0.84))
     }
 
     /// The title colour: the product colour with the best contrast on the background (at least 4.5 : 1); if none

@@ -215,7 +215,8 @@ final class ShopMatchTests: XCTestCase {
 
         let bg = ShopPalette.softBackground(for: palette)
         XCTAssertGreaterThan(bg.top.hsl.l, 0.85, "soft = light")
-        XCTAssertLessThan(bg.top.hsl.s, 0.2, "neutral = little colour")
+        XCTAssertGreaterThan(bg.top.hsl.s, 0.15, "navy leads: a clearly blue background")
+        XCTAssertEqual(bg.top.hsl.h, navy.hsl.h, accuracy: 0.05)
         XCTAssertGreaterThan(bg.bottom.hsl.l, 0.8)
 
         let middle = bg.top.mixed(bg.bottom, 0.5)
@@ -579,5 +580,20 @@ extension ShopHandEditTests {
         snap.drawOrder = [0, 1]
         XCTAssertEqual(snap.item(at: center, board: board), 1)
         XCTAssertNil(snap.item(at: CGPoint(x: -50, y: -50), board: board))
+    }
+}
+
+extension ShopMatchTests {
+    /// Build 87 feedback: different products must not all give the same beige.
+    func testMatchedBackgroundFollowsTheProducts() {
+        let pink = ShopPalette.softBackground(for: [ShopRGB(hex: 0xE0457B), ShopRGB(hex: 0x222222)])
+        let blue = ShopPalette.softBackground(for: [ShopRGB(hex: 0x8DB4E2), ShopRGB(hex: 0x9A9A9A)])
+        let green = ShopPalette.softBackground(for: [ShopRGB(hex: 0x3E7D4F)])
+        XCTAssertGreaterThan(pink.top.distance2(blue.top), 0.01)
+        XCTAssertGreaterThan(blue.top.distance2(green.top), 0.005)
+        XCTAssertEqual(pink.top.hsl.h, ShopRGB(hex: 0xE0457B).hsl.h, accuracy: 0.05)
+        let neutral = ShopPalette.softBackground(for: [ShopRGB(hex: 0xFFFFFF), ShopRGB(hex: 0x111111), ShopRGB(hex: 0x9A9A9A)])
+        XCTAssertLessThan(neutral.top.hsl.s, 0.1, "white, black and grey stay neutral")
+        for bg in [pink, blue, green, neutral] { XCTAssertGreaterThan(bg.top.hsl.l, 0.85) }
     }
 }
