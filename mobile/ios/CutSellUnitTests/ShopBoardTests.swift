@@ -441,3 +441,42 @@ final class ShopShareByDestinationTests: XCTestCase {
         }
     }
 }
+
+// MARK: - Move by hand (Figma S4e)
+
+final class ShopHandEditTests: XCTestCase {
+    func testDragPinchTwistAndClamp() {
+        let board = CGSize(width: 195, height: 422)          // half the design size
+        var a = ShopAdjust.dragged(ShopAdjust(), by: CGSize(width: 10, height: -20), board: board)
+        XCTAssertEqual(a.offset.width, 20, accuracy: 0.001)   // design units
+        XCTAssertEqual(a.offset.height, -40, accuracy: 0.001)
+        a = ShopAdjust.pinched(a, by: 10)
+        XCTAssertEqual(a.scale, ShopAdjust.scaleRange.upperBound)
+        a = ShopAdjust.pinched(ShopAdjust(), by: 0.01)
+        XCTAssertEqual(a.scale, ShopAdjust.scaleRange.lowerBound)
+        a = ShopAdjust.twisted(ShopAdjust(), by: 30)
+        XCTAssertEqual(a.rotation, 30)
+    }
+
+    func testFrameUsesOffsetAndScale() {
+        let base = CGRect(x: 0, y: 0, width: 100, height: 50)
+        let a = ShopAdjust(offset: CGSize(width: 39, height: 84.4), scale: 2, rotation: 0)
+        let f = a.frame(base: base, board: CGSize(width: 390, height: 844))
+        XCTAssertEqual(f.width, 200, accuracy: 0.001)
+        XCTAssertEqual(f.midX, 89, accuracy: 0.001)
+        XCTAssertEqual(f.midY, 109.4, accuracy: 0.001)
+    }
+
+    @MainActor
+    func testRaisedProductsDrawLastAndShuffleClearsHandEdits() {
+        let ids = [UUID(), UUID(), UUID()]
+        XCTAssertEqual(ShopDrawOrder.order(itemIDs: ids, raised: [ids[0]]), [1, 2, 0])
+        XCTAssertEqual(ShopDrawOrder.order(itemIDs: ids, raised: []), [0, 1, 2])
+        let model = ShopBoardModel()
+        model.adjusts[ids[0]] = ShopAdjust(scale: 2)
+        model.raise(ids[0])
+        model.shuffle()
+        XCTAssertTrue(model.adjusts.isEmpty)
+        XCTAssertTrue(model.raised.isEmpty)
+    }
+}

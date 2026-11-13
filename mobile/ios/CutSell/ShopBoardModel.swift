@@ -18,6 +18,10 @@ final class ShopBoardModel: ObservableObject {
     @Published var fontPair: ShopFontPair = .classic
     @Published var style = ShopBoardStyle()
     @Published var variant = 0
+    /// Products moved, resized or turned by hand on "Your board" (cleared by Shuffle and a new template).
+    @Published var adjusts: [UUID: ShopAdjust] = [:]
+    /// Products brought to the front by a tap, last on top.
+    @Published var raised: [UUID] = []
     @Published var photoBackground: UIImage?
     @Published private(set) var palette: [ShopRGB] = []
     @Published var affiliateLink = ""
@@ -109,10 +113,24 @@ final class ShopBoardModel: ObservableObject {
         scriptLine = template.scriptLine
         if !style.matchBackground, case .classic = style.background { style.background = .classic(template.background) }
         variant = 0
+        clearHandEdits()
     }
 
-    /// Shuffle: another arrangement of the same items.
-    func shuffle() { variant += 1 }
+    /// Shuffle: another arrangement of the same items (what was moved by hand starts over).
+    func shuffle() {
+        variant += 1
+        clearHandEdits()
+    }
+
+    func clearHandEdits() {
+        adjusts = [:]
+        raised = []
+    }
+
+    func raise(_ id: UUID) {
+        raised.removeAll { $0 == id }
+        raised.append(id)
+    }
 
     func prepareShare() {
         if caption.isEmpty { caption = ShopCaption.defaultCaption(scriptLine: scriptLine) }
@@ -149,12 +167,18 @@ final class ShopBoardModel: ObservableObject {
         }
         let usable = items.filter { $0.cutout != nil }
         let placements = ShopLayout.placements(kinds: usable.map(\.kind), variant: override == nil ? variant : 0)
+        let ids = usable.map(\.id)
+        let handEdited = override == nil
+        let placedIDs = placements.map { ids[$0.itemIndex] }
         let colors = look.backgroundColors(palette: palette)
         var texture: ShopTexture?
         if case .texture(let t) = look.background { texture = t }
         let photo: UIImage? = { if case .photo = look.background, !look.matchBackground { return photoBackground }; return nil }()
         return ShopBoardSnapshot(
             images: usable.compactMap(\.cutout), placements: placements,
+            itemIDs: placedIDs,
+            adjusts: handEdited ? placedIDs.map { adjusts[$0] ?? ShopAdjust() } : placedIDs.map { _ in ShopAdjust() },
+            drawOrder: ShopDrawOrder.order(itemIDs: placedIDs, raised: handEdited ? raised : []),
             top: colors.top, bottom: colors.bottom, texture: texture, textureMatched: look.matchBackground && texture != nil,
             photo: photo, bigTitle: title, scriptLine: script, pair: fontPair,
             titleColor: look.resolvedTitleColor(palette: palette, template: tmpl))
@@ -167,6 +191,10 @@ final class ShopBoardModel: ObservableObject {
 struct ShopBoardSnapshot {
     var images: [CGImage]
     var placements: [ShopPlacement]
+    /// Per place (same order as `placements`): the product's id, its hand edit, and the drawing order.
+    var itemIDs: [UUID] = []
+    var adjusts: [ShopAdjust] = []
+    var drawOrder: [Int] = []
     var top: ShopRGB
     var bottom: ShopRGB
     var texture: ShopTexture?
@@ -178,6 +206,19 @@ struct ShopBoardSnapshot {
     var titleColor: ShopRGB
 
     var isDark: Bool { top.mixed(bottom, 0.5).luminance < 0.25 }
+
+    var order: [Int] { drawOrder.count == placements.count ? drawOrder : Array(placements.indices) }
+
+    /// Where place `index` is drawn on a board of `size` (after the hand edit), and its tilt.
+    func frame(at index: Int, board size: CGSize) -> (rect: CGRect, rotation: Double)? {
+        let placement = placements[index]
+        guard images.indices.contains(placement.itemIndex) else { return nil }
+        let image = images[placement.itemIndex]
+        let aspect = CGFloat(image.width) / CGFloat(max(1, image.height))
+        let base = ShopLayout.frame(for: placement.slot, aspect: aspect, board: size)
+        let adjust = adjusts.indices.contains(index) ? adjusts[index] : ShopAdjust()
+        return (adjust.frame(base: base, board: size), placement.slot.rotation + adjust.rotation)
+    }
 }
 
 /// The board itself (Figma result 3031:4), drawn at any width; its height is width × 16 / 9. Positions come from the
@@ -192,16 +233,15 @@ struct ShopBoardCanvas: View {
         let size = CGSize(width: width, height: height)
         ZStack(alignment: .top) {
             background(size: size)
-            ForEach(Array(snapshot.placements.enumerated()), id: \.offset) { _, placement in
-                if snapshot.images.indices.contains(placement.itemIndex) {
-                    let image = snapshot.images[placement.itemIndex]
-                    let aspect = CGFloat(image.width) / CGFloat(max(1, image.height))
-                    let frame = ShopLayout.frame(for: placement.slot, aspect: aspect, board: size)
-                    Image(decorative: image, scale: 1)
+            ForEach(snapshot.order, id: \.self) { index in
+                if let placed = snapshot.frame(at: index, board: size) {
+                    let frame = placed.rect
+                    let rotation = placed.rotation
+                    Image(decorative: snapshot.images[snapshot.placements[index].itemIndex], scale: 1)
                         .resizable()
                         .interpolation(.high)
                         .frame(width: frame.width, height: frame.height)
-                        .rotationEffect(.degrees(placement.slot.rotation))
+                        .rotationEffect(.degrees(rotation))
                         // Figma: drop shadow 0 8, blur 14, rgba(13,13,26,0.18).
                         .shadow(color: Color(fixed: 0x0D0D1A, opacity: 0.18), radius: 7 * sx, x: 0, y: 8 * sx)
                         .position(x: frame.midX, y: frame.midY)

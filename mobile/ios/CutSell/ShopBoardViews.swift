@@ -642,6 +642,8 @@ struct ShopBoardScreen: View {
     let onTitle: () -> Void
     let onBackground: () -> Void
     let onNext: () -> Void
+    /// The product being moved by hand (Figma S4e 3053:196): blue outline, pinch and twist apply to it.
+    @State private var selected: UUID?
 
     var body: some View {
         ZStack {
@@ -657,7 +659,7 @@ struct ShopBoardScreen: View {
                 GeometryReader { geo in
                     // Figma: 218.4 wide on a 390 screen; smaller when the screen is short.
                     let width = min(218.4, (geo.size.height - 8) * 9 / 16)
-                    ShopBoardCanvas(snapshot: model.snapshot(), width: width)
+                    ShopBoardHandEditor(model: model, selected: $selected, width: width)
                         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                         .shadow(color: Color(fixed: 0xD3DDF5), radius: 0, x: 0, y: 3)
                         .shadow(color: Color(fixed: 0x0D1433, opacity: 0.08), radius: 12, x: 0, y: 10)
@@ -668,12 +670,23 @@ struct ShopBoardScreen: View {
                 HStack(spacing: 10) {
                     actionCard("Title", detail: model.bigTitle + " · " + model.scriptLine, id: "shopTitle", action: onTitle)
                     actionCard("Shuffle", detail: L10n.tr("New layout"), id: "shopShuffle") {
+                        selected = nil
                         withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) { model.shuffle() }
                     }
                     actionCard("Background", detail: model.backgroundName, id: "shopBackground", action: onBackground)
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 14)
+                // Figma S4 / S4e: Medium 12, centred, #6B7385 (nothing picked) or #1769FF (a product picked).
+                Text(L10n.tr(selected == nil ? "Drag a product to move it · pinch to resize · twist to turn"
+                                             : "Pinch to resize · twist to turn · tap outside to finish"))
+                    .font(CS.inter(12, .medium))
+                    .foregroundStyle(Color(fixed: selected == nil ? 0x6B7385 : 0x1769FF))
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 14)
+                    .accessibilityIdentifier("shopMoveHint")
                 Spacer(minLength: 20)
                 ShopBigButton(title: "Next: share", id: "shopNextShare", action: onNext)
                     .padding(.horizontal, 20)
@@ -697,6 +710,83 @@ struct ShopBoardScreen: View {
         }
         .buttonStyle(BubblePress())
         .accessibilityIdentifier(id)
+    }
+}
+
+/// The board on "Your board", with every product movable by hand: drag one to move it (it comes to the front and
+/// gets the blue outline), pinch to resize and twist with two fingers to turn the picked one; tap the board to finish.
+struct ShopBoardHandEditor: View {
+    @ObservedObject var model: ShopBoardModel
+    @Binding var selected: UUID?
+    let width: CGFloat
+    @State private var dragStart: ShopAdjust?
+    @State private var pinchStart: ShopAdjust?
+    @State private var twistStart: ShopAdjust?
+
+    var body: some View {
+        let snapshot = model.snapshot()
+        let size = CGSize(width: width, height: width * 16 / 9)
+        ZStack(alignment: .topLeading) {
+            ShopBoardCanvas(snapshot: snapshot, width: width)
+                .contentShape(Rectangle())
+                .onTapGesture { selected = nil }
+            ForEach(snapshot.order, id: \.self) { index in
+                if let placed = snapshot.frame(at: index, board: size) {
+                    let frame = placed.rect
+                    let rotation = placed.rotation
+                    let id = snapshot.itemIDs[index]
+                    let picked = selected == id
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(picked ? Color(fixed: 0x1769FF) : .clear, lineWidth: 2)
+                        .contentShape(Rectangle())
+                        .frame(width: frame.width + 8, height: frame.height + 8)
+                        .rotationEffect(.degrees(rotation))
+                        .position(x: frame.midX, y: frame.midY)
+                        .onTapGesture { pick(id) }
+                        .gesture(drag(id, board: size))
+                        .accessibilityIdentifier("shopBoardItem\(index)")
+                }
+            }
+        }
+        .frame(width: size.width, height: size.height)
+        .simultaneousGesture(pinch)
+        .simultaneousGesture(twist)
+    }
+
+    private func pick(_ id: UUID) {
+        selected = id
+        model.raise(id)
+    }
+
+    private func current(_ id: UUID) -> ShopAdjust { model.adjusts[id] ?? ShopAdjust() }
+
+    private func drag(_ id: UUID, board: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 2)
+            .onChanged { value in
+                if dragStart == nil { pick(id); dragStart = current(id) }
+                if let start = dragStart { model.adjusts[id] = ShopAdjust.dragged(start, by: value.translation, board: board) }
+            }
+            .onEnded { _ in dragStart = nil }
+    }
+
+    private var pinch: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                guard let id = selected else { return }
+                if pinchStart == nil { pinchStart = current(id) }
+                if let start = pinchStart { model.adjusts[id] = ShopAdjust.pinched(start, by: value.magnification) }
+            }
+            .onEnded { _ in pinchStart = nil }
+    }
+
+    private var twist: some Gesture {
+        RotateGesture()
+            .onChanged { value in
+                guard let id = selected else { return }
+                if twistStart == nil { twistStart = current(id) }
+                if let start = twistStart { model.adjusts[id] = ShopAdjust.twisted(start, by: value.rotation.degrees) }
+            }
+            .onEnded { _ in twistStart = nil }
     }
 }
 

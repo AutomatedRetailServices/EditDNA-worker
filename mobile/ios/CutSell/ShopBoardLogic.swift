@@ -678,6 +678,58 @@ struct ShopPlacement: Equatable {
     let slot: ShopSlot
 }
 
+/// A product moved by hand on "Your board" (Figma S4e 3053:196): on top of its Shuffle place.
+/// Offset is in board design units (390 × 844), so the 1080 × 1920 export matches the screen.
+struct ShopAdjust: Equatable {
+    var offset: CGSize = .zero
+    var scale: CGFloat = 1
+    /// Degrees, added to the place's own tilt.
+    var rotation: Double = 0
+
+    static let scaleRange: ClosedRange<CGFloat> = 0.3...3
+
+    var isIdentity: Bool { self == ShopAdjust() }
+
+    /// The place's frame after the hand edit, on a board of `size`.
+    func frame(base: CGRect, board size: CGSize) -> CGRect {
+        let sx = size.width / ShopLayout.designSize.width, sy = size.height / ShopLayout.designSize.height
+        let w = base.width * scale, h = base.height * scale
+        let c = CGPoint(x: base.midX + offset.width * sx, y: base.midY + offset.height * sy)
+        return CGRect(x: c.x - w / 2, y: c.y - h / 2, width: w, height: h)
+    }
+
+    /// A drag of `points` on a board drawn `size` big, from `start`.
+    static func dragged(_ start: ShopAdjust, by points: CGSize, board size: CGSize) -> ShopAdjust {
+        var a = start
+        a.offset = CGSize(width: start.offset.width + points.width * ShopLayout.designSize.width / max(size.width, 1),
+                          height: start.offset.height + points.height * ShopLayout.designSize.height / max(size.height, 1))
+        return a
+    }
+
+    static func pinched(_ start: ShopAdjust, by factor: CGFloat) -> ShopAdjust {
+        var a = start
+        a.scale = min(max(start.scale * factor, scaleRange.lowerBound), scaleRange.upperBound)
+        return a
+    }
+
+    static func twisted(_ start: ShopAdjust, by degrees: Double) -> ShopAdjust {
+        var a = start
+        a.rotation = start.rotation + degrees
+        return a
+    }
+}
+
+enum ShopDrawOrder {
+    /// Drawing order of `count` places: untouched ones first (Figma order), then the ones raised by a tap, last on top.
+    static func order(itemIDs: [UUID], raised: [UUID]) -> [Int] {
+        let rank = Dictionary(raised.enumerated().map { ($1, $0) }, uniquingKeysWith: { _, last in last })
+        return itemIDs.indices.sorted { a, b in
+            let ra = rank[itemIDs[a]] ?? -1, rb = rank[itemIDs[b]] ?? -1
+            return ra == rb ? a < b : ra < rb
+        }
+    }
+}
+
 enum ShopLayout {
     static let designSize = CGSize(width: 390, height: 844)
 
