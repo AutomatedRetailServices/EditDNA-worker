@@ -730,80 +730,149 @@ struct ShopBoardScreen: View {
     }
 }
 
-/// The board on "Your board", with every product movable by hand: drag one to move it (it comes to the front and
-/// gets the blue outline), pinch to resize and twist with two fingers to turn the picked one; tap the board to finish.
+/// The board on "Your board", with every product movable by hand (Figma S4e 3053:196).
+/// One UIKit layer reads all touches together (build 87 feedback: pinch and twist were hard): one finger moves the
+/// product under it, two fingers resize and turn it at the same time — the pinch can start right on any product, no
+/// tap first. The picked product comes to the front with the blue outline; a tap on the empty board finishes.
 struct ShopBoardHandEditor: View {
     @ObservedObject var model: ShopBoardModel
     @Binding var selected: UUID?
     let width: CGFloat
-    @State private var dragStart: ShopAdjust?
-    @State private var pinchStart: ShopAdjust?
-    @State private var twistStart: ShopAdjust?
 
     var body: some View {
         let snapshot = model.snapshot()
         let size = CGSize(width: width, height: width * 16 / 9)
         ZStack(alignment: .topLeading) {
             ShopBoardCanvas(snapshot: snapshot, width: width)
-                .contentShape(Rectangle())
-                .onTapGesture { selected = nil }
             ForEach(snapshot.order, id: \.self) { index in
-                if let placed = snapshot.frame(at: index, board: size) {
-                    let frame = placed.rect
-                    let rotation = placed.rotation
-                    let id = snapshot.itemIDs[index]
-                    let picked = selected == id
+                if let placed = snapshot.frame(at: index, board: size), selected == snapshot.itemIDs[index] {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(picked ? Color(fixed: 0x1769FF) : .clear, lineWidth: 2)
-                        .contentShape(Rectangle())
-                        .frame(width: frame.width + 8, height: frame.height + 8)
-                        .rotationEffect(.degrees(rotation))
-                        .position(x: frame.midX, y: frame.midY)
-                        .onTapGesture { pick(id) }
-                        .gesture(drag(id, board: size))
-                        .accessibilityIdentifier("shopBoardItem\(index)")
+                        .stroke(Color(fixed: 0x1769FF), lineWidth: 2)
+                        .frame(width: placed.rect.width + 8, height: placed.rect.height + 8)
+                        .rotationEffect(.degrees(placed.rotation))
+                        .position(x: placed.rect.midX, y: placed.rect.midY)
+                        .allowsHitTesting(false)
                 }
             }
+            ShopBoardTouchLayer(
+                itemAt: { point in snapshot.item(at: point, board: size).map { snapshot.itemIDs[$0] } },
+                selected: { selected },
+                onTap: { id in
+                    selected = id
+                    if let id { model.raise(id) }
+                },
+                onBegin: { id in
+                    selected = id
+                    model.raise(id)
+                    return model.adjusts[id] ?? ShopAdjust()
+                },
+                onChange: { id, start, move, pinch, twist in
+                    var a = ShopAdjust.dragged(start, by: move, board: size)
+                    a = ShopAdjust.pinched(a, by: pinch)
+                    model.adjusts[id] = ShopAdjust.twisted(a, by: twist)
+                })
+            .accessibilityIdentifier("shopBoardTouchLayer")
         }
         .frame(width: size.width, height: size.height)
-        .simultaneousGesture(pinch)
-        .simultaneousGesture(twist)
+    }
+}
+
+/// Pan + pinch + rotation recognised together over the board.
+struct ShopBoardTouchLayer: UIViewRepresentable {
+    let itemAt: (CGPoint) -> UUID?
+    let selected: () -> UUID?
+    let onTap: (UUID?) -> Void
+    /// A gesture starts on a product: returns its hand edit before the gesture.
+    let onBegin: (UUID) -> ShopAdjust
+    /// id, start, finger movement (points), pinch factor, twist (degrees).
+    let onChange: (UUID, ShopAdjust, CGSize, CGFloat, Double) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+        let c = context.coordinator
+        let pan = UIPanGestureRecognizer(target: c, action: #selector(Coordinator.pan(_:)))
+        pan.maximumNumberOfTouches = 2
+        let pinch = UIPinchGestureRecognizer(target: c, action: #selector(Coordinator.pinch(_:)))
+        let rotate = UIRotationGestureRecognizer(target: c, action: #selector(Coordinator.rotate(_:)))
+        let tap = UITapGestureRecognizer(target: c, action: #selector(Coordinator.tap(_:)))
+        for g in [pan, pinch, rotate] as [UIGestureRecognizer] { g.delegate = c; view.addGestureRecognizer(g) }
+        view.addGestureRecognizer(tap)
+        return view
     }
 
-    private func pick(_ id: UUID) {
-        selected = id
-        model.raise(id)
-    }
+    func updateUIView(_ uiView: UIView, context: Context) { context.coordinator.parent = self }
 
-    private func current(_ id: UUID) -> ShopAdjust { model.adjusts[id] ?? ShopAdjust() }
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var parent: ShopBoardTouchLayer
+        private var active: UUID?
+        private var start = ShopAdjust()
+        private var move = CGSize.zero, scale: CGFloat = 1, turn: Double = 0
+        private var live = 0
 
-    private func drag(_ id: UUID, board: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 2)
-            .onChanged { value in
-                if dragStart == nil { pick(id); dragStart = current(id) }
-                if let start = dragStart { model.adjusts[id] = ShopAdjust.dragged(start, by: value.translation, board: board) }
+        init(_ parent: ShopBoardTouchLayer) { self.parent = parent }
+
+        func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+
+        /// Starts on the product under the fingers (or the picked one for a two-finger gesture beside it).
+        func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
+            if active != nil { return true }
+            let point = g.location(in: g.view)
+            return parent.itemAt(point) != nil || (g.numberOfTouches >= 2 && parent.selected() != nil)
+        }
+
+        private func begin(_ g: UIGestureRecognizer) {
+            live += 1
+            guard active == nil else { return }
+            let point = g.location(in: g.view)
+            guard let id = parent.itemAt(point) ?? (g.numberOfTouches >= 2 ? parent.selected() : nil) else { return }
+            active = id
+            start = parent.onBegin(id)
+            move = .zero; scale = 1; turn = 0
+        }
+
+        private func end() {
+            live = max(0, live - 1)
+            if live == 0 { active = nil }
+        }
+
+        private func push() { if let id = active { parent.onChange(id, start, move, scale, turn) } }
+
+        @objc func pan(_ g: UIPanGestureRecognizer) {
+            switch g.state {
+            case .began: begin(g)
+            case .changed:
+                let t = g.translation(in: g.view)
+                move = CGSize(width: t.x, height: t.y)
+                push()
+            case .ended, .cancelled, .failed: end()
+            default: break
             }
-            .onEnded { _ in dragStart = nil }
-    }
+        }
 
-    private var pinch: some Gesture {
-        MagnifyGesture()
-            .onChanged { value in
-                guard let id = selected else { return }
-                if pinchStart == nil { pinchStart = current(id) }
-                if let start = pinchStart { model.adjusts[id] = ShopAdjust.pinched(start, by: value.magnification) }
+        @objc func pinch(_ g: UIPinchGestureRecognizer) {
+            switch g.state {
+            case .began: begin(g)
+            case .changed: scale = g.scale; push()
+            case .ended, .cancelled, .failed: end()
+            default: break
             }
-            .onEnded { _ in pinchStart = nil }
-    }
+        }
 
-    private var twist: some Gesture {
-        RotateGesture()
-            .onChanged { value in
-                guard let id = selected else { return }
-                if twistStart == nil { twistStart = current(id) }
-                if let start = twistStart { model.adjusts[id] = ShopAdjust.twisted(start, by: value.rotation.degrees) }
+        @objc func rotate(_ g: UIRotationGestureRecognizer) {
+            switch g.state {
+            case .began: begin(g)
+            case .changed: turn = Double(g.rotation) * 180 / .pi; push()
+            case .ended, .cancelled, .failed: end()
+            default: break
             }
-            .onEnded { _ in twistStart = nil }
+        }
+
+        @objc func tap(_ g: UITapGestureRecognizer) {
+            parent.onTap(parent.itemAt(g.location(in: g.view)))
+        }
     }
 }
 

@@ -214,6 +214,21 @@ struct ShopBoardSnapshot {
 
     var order: [Int] { drawOrder.count == placements.count ? drawOrder : Array(placements.indices) }
 
+    /// The top product under `point` (drawn last wins), testing its turned frame.
+    func item(at point: CGPoint, board size: CGSize) -> Int? {
+        for index in order.reversed() {
+            guard let placed = frame(at: index, board: size) else { continue }
+            let c = CGPoint(x: placed.rect.midX, y: placed.rect.midY)
+            let r = -placed.rotation * .pi / 180
+            let dx = point.x - c.x, dy = point.y - c.y
+            let local = CGPoint(x: dx * cos(r) - dy * sin(r), y: dx * sin(r) + dy * cos(r))
+            // A little room around small products so they are easy to grab.
+            let half = CGSize(width: max(placed.rect.width, 44) / 2, height: max(placed.rect.height, 44) / 2)
+            if abs(local.x) <= half.width && abs(local.y) <= half.height { return index }
+        }
+        return nil
+    }
+
     /// Where place `index` is drawn on a board of `size` (after the hand edit), and its tilt.
     func frame(at index: Int, board size: CGSize) -> (rect: CGRect, rotation: Double)? {
         let placement = placements[index]

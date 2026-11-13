@@ -558,3 +558,26 @@ extension ShopBoardTabTests {
         XCTAssertTrue(source.contains("CSTabBar(current: .shopBoard"), "the Shop boards tab must draw the bottom bar")
     }
 }
+
+extension ShopHandEditTests {
+    /// The touch layer picks the product under the finger: the one drawn on top wins, turned frames count.
+    func testItemUnderFingerTopmostWins() {
+        let r = UIGraphicsImageRenderer(size: CGSize(width: 100, height: 100))
+        let img = r.image { ctx in UIColor.red.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 100, height: 100)) }.cgImage!
+        let ids = [UUID(), UUID()]
+        let slot = ShopLayout.placements(kinds: [.clothing], variant: 0)[0].slot
+        var snap = ShopBoardSnapshot(images: [img, img],
+                                     placements: [ShopPlacement(itemIndex: 0, slot: slot), ShopPlacement(itemIndex: 1, slot: slot)],
+                                     top: ShopRGB(hex: 0xFFFFFF), bottom: ShopRGB(hex: 0xFFFFFF), texture: nil, textureMatched: false,
+                                     bigTitle: "", scriptLine: "", pair: .classic, titleColor: ShopRGB(hex: 0))
+        snap.itemIDs = ids
+        snap.adjusts = [ShopAdjust(), ShopAdjust()]
+        snap.drawOrder = [1, 0]                                   // item 0 on top
+        let board = CGSize(width: 390, height: 693)
+        let center = CGPoint(x: snap.frame(at: 0, board: board)!.rect.midX, y: snap.frame(at: 0, board: board)!.rect.midY)
+        XCTAssertEqual(snap.item(at: center, board: board), 0)
+        snap.drawOrder = [0, 1]
+        XCTAssertEqual(snap.item(at: center, board: board), 1)
+        XCTAssertNil(snap.item(at: CGPoint(x: -50, y: -50), board: board))
+    }
+}
