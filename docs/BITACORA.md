@@ -20,7 +20,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
-| 86 | 2026-11-12 | ✅ subido (pedido) | feature/shop-board | `c1f74b58` | Pestaña "Shop boards" en la barra de abajo; Edits como antes |
+| 86 | 2026-11-12 23:50 | ✅ subido | feature/shop-board | `c1f74b58` | Pestaña "Shop boards" en la barra de abajo; Edits como antes |
 | 85 | 2026-11-12 21:21 | ✅ subido | feature/shop-board | `f8ca1aa8` | Shop board: mover productos a mano + boards guardados en Edits › Shop boards |
 | 84 | 2026-11-12 19:41 | ✅ subido | feature/shop-board | `2ccb453d` | Mismo código que el 83 (re-subida: Apple no procesó el 83) |
 | 83 | 2026-11-12 17:42 | ❌ Apple no lo procesó (no aparece en TestFlight) | feature/shop-board | `2ccb453d` | Shop board: los links se piden según dónde se publica (TikTok Shop / Amazon) |
@@ -110,8 +110,8 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 ---
 
 ## Build 86 — 2026-11-12
-- **Resultado:** pedido a TestFlight (si la subida falla, se corrige esta línea)
-- **Rama (según el historial de git):** feature/shop-board  ·  **Commit de la app:** `c1f74b58`
+- **Resultado:** subido a TestFlight (listo, 23:50 ET)
+- **Rama (según el historial de git):** feature/shop-board  ·  **Commit de la app:** `c1f74b58`  ·  **Commit del pedido a TestFlight:** `9646247a`
 - **Qué cambió (decisión de la PO, 12 nov):**
   - Los Shop boards guardados salen de Edits y tienen su **propia pestaña** en la barra de abajo, entre Edits y Plan: "Shop" arriba y "boards" abajo, con un ícono nuevo de collage. Todos los íconos de la barra quedan en la misma línea.
   - Pestaña Shop boards: título "Shop boards", "Your boards, saved as you make them.", "+ New Shop board" y los boards guardados (tocar abre "Your board"; "••• → Delete").
