@@ -20,7 +20,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
-| 84 | 2026-11-12 | ✅ subido (pedido) | feature/shop-board | `2ccb453d` | Mismo código que el 83 (re-subida: Apple no procesó el 83) |
+| 84 | 2026-11-12 19:41 | ✅ subido | feature/shop-board | `2ccb453d` | Mismo código que el 83 (re-subida: Apple no procesó el 83) |
 | 83 | 2026-11-12 17:42 | ❌ Apple no lo procesó (no aparece en TestFlight) | feature/shop-board | `2ccb453d` | Shop board: los links se piden según dónde se publica (TikTok Shop / Amazon) |
 | 82 | 2026-11-12 15:12 | ✅ subido | feature/shop-board | `e8d4b60f` | Arreglo: elegir una foto ya no cierra todo el Shop board |
 | 81 | 2026-11-12 13:32 | ✅ subido | feature/shop-board | `03fc369f` | Shop board: armar un board de productos 9:16 en el iPhone y compartirlo |
@@ -108,8 +108,8 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 ---
 
 ## Build 84 — 2026-11-12
-- **Resultado:** pedido a TestFlight (si la subida falla, se corrige esta línea)
-- **Rama (según el historial de git):** feature/shop-board  ·  **Commit de la app:** `2ccb453d` (mismo que el 83)
+- **Resultado:** subido a TestFlight (listo, 19:41 ET)
+- **Rama (según el historial de git):** feature/shop-board  ·  **Commit de la app:** `2ccb453d` (mismo que el 83)  ·  **Commit del pedido a TestFlight:** `350b31e8`
 - **Qué cambió:** nada en la app. Es la misma versión del build 83 (links según dónde se publica); se vuelve a subir porque Apple no procesó el 83.
 - **Pantallas nuevas o cambiadas:** las del build 83 (docs/design-audit/build-83/).
 - **Pendiente o con problemas:** ver build 83.
