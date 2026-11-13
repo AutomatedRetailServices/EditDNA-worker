@@ -6,6 +6,7 @@ audios (el repo es público).
 
 | Build | Carpeta | Fecha |
 |---|---|---|
+| 85 | [build-85/](build-85/cambios.md) (solo pantallas cambiadas) | 12 nov 2026 |
 | 83 | [build-83/](build-83/cambios.md) (solo pantallas cambiadas) | 12 nov 2026 |
 | 81 | [build-81/](build-81/cambios.md) (solo pantallas cambiadas) | 12 nov 2026 |
 | 80 | [build-80/](build-80/cambios.md) (solo pantallas cambiadas) | 11 nov 2026 |

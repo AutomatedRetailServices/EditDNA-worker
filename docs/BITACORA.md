@@ -20,6 +20,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 85 | 2026-11-12 | ✅ subido (pedido) | feature/shop-board | `f8ca1aa8` | Shop board: mover productos a mano + boards guardados en Edits › Shop boards |
 | 84 | 2026-11-12 19:41 | ✅ subido | feature/shop-board | `2ccb453d` | Mismo código que el 83 (re-subida: Apple no procesó el 83) |
 | 83 | 2026-11-12 17:42 | ❌ Apple no lo procesó (no aparece en TestFlight) | feature/shop-board | `2ccb453d` | Shop board: los links se piden según dónde se publica (TikTok Shop / Amazon) |
 | 82 | 2026-11-12 15:12 | ✅ subido | feature/shop-board | `e8d4b60f` | Arreglo: elegir una foto ya no cierra todo el Shop board |
@@ -106,6 +107,19 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 | 1 | 2026-10-12 13:01 | ❌ falló | feature/ios-captions-v2 | `d90bfc50` | Primer intento, no llegó a TestFlight |
 
 ---
+
+## Build 85 — 2026-11-12
+- **Resultado:** pedido a TestFlight (si la subida falla, se corrige esta línea)
+- **Rama (según el historial de git):** feature/shop-board  ·  **Commit de la app:** `f8ca1aa8`
+- **Qué cambió (pedido de la PO, diseño hecho en Figma el 12 nov):**
+  - **Your board · mover a mano (S4 / S4e):** arrastrar un producto lo mueve y lo pasa al frente con borde azul; con un producto elegido, pellizcar cambia el tamaño (0.3× a 3×) y girar con dos dedos lo voltea; tocar el board termina. Shuffle y otra plantilla borran lo movido. La imagen de 1080×1920 sale igual que en pantalla.
+  - **Shop boards guardados (Edits › Shop boards, Figma 3e `3055:516`):** cada board se guarda solo en el iPhone mientras se arma (productos, lo movido, plantilla, letras, fondo, link, caption, miniatura). Segmento nuevo "Shop boards" en Edits con "+ New Shop board", los boards guardados (tocar abre "Your board" como quedó) y "••• → Delete" con confirmación.
+  - 71 pruebas automáticas, 0 fallas (nuevas: mover / tamaño / girar, guardar y abrir un board).
+- **Pantallas nuevas o cambiadas:** Your board, Edits › Shop boards. Ver docs/design-audit/build-85/.
+- **Pendiente o con problemas:**
+  - Los boards se guardan solo en el iPhone (no en la nube): si se borra la app, se pierden.
+  - Falla del build 79 al detener una grabación con Auto-pause: todavía sin arreglar.
+  - Shape it: el servidor sigue sin deploy.
 
 ## Build 84 — 2026-11-12
 - **Resultado:** subido a TestFlight (listo, 19:41 ET)
