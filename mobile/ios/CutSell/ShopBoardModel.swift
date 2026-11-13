@@ -219,9 +219,10 @@ struct ShopBoardSnapshot {
         for index in order.reversed() {
             guard let placed = frame(at: index, board: size) else { continue }
             let c = CGPoint(x: placed.rect.midX, y: placed.rect.midY)
-            let r = -placed.rotation * .pi / 180
+            let r = CGFloat(-placed.rotation * Double.pi / 180)
             let dx = point.x - c.x, dy = point.y - c.y
-            let local = CGPoint(x: dx * cos(r) - dy * sin(r), y: dx * sin(r) + dy * cos(r))
+            let cr = CGFloat(Darwin.cos(Double(r))), sr = CGFloat(Darwin.sin(Double(r)))
+            let local = CGPoint(x: dx * cr - dy * sr, y: dx * sr + dy * cr)
             // A little room around small products so they are easy to grab.
             let half = CGSize(width: max(placed.rect.width, 44) / 2, height: max(placed.rect.height, 44) / 2)
             if abs(local.x) <= half.width && abs(local.y) <= half.height { return index }
