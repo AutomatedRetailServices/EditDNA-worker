@@ -22,6 +22,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 92 | 2026-11-14 | ✅ subido (pedido) | feature/shop-board | `90532ee8` | Clon con cámara delantera + cortes fallidos se abren con Try again |
 | 91 | 2026-11-14 14:45 | ✅ subido | feature/shop-board | `4a028623` (pedido `6e7c65c3`) | Arreglo: varias fotos a la vez se quedaban cargando para siempre |
 | 90 | 2026-11-14 11:14 | ✅ subido | feature/shop-board | `56d2fd68` | Shop board: fotos que ya no se quedan cargando + de 1 a 12 productos |
 | 89 | 2026-11-14 07:39 | ✅ subido | feature/shop-board | `861c91b7` | Your board: board grande, tarjetas en una línea, el título se mueve |
@@ -115,6 +116,15 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 | 1 | 2026-10-12 13:01 | ❌ falló | feature/ios-captions-v2 | `d90bfc50` | Primer intento, no llegó a TestFlight |
 
 ---
+
+## Build 92 — 2026-11-14
+- **Resultado:** pedido a TestFlight (si la subida falla, se corrige esta línea)
+- **Rama (según el historial de git):** feature/shop-board  ·  **Commit de la app:** `90532ee8`
+- **Qué cambió:**
+  - **Clon con cámara delantera (PO 14 nov: "debe ser ambas"):** botón para cambiar de cámara arriba a la derecha, solo antes del primer clon (todos los clones usan la misma cámara). Con la cámara delantera el teléfono se queda quieto (soporte), no se escanea el cuarto: el botón de grabar está listo de inmediato, el recorte de la persona lo hace Vision en cada cuadro, los clones de antes se ven en la vista previa (como selfie, en espejo) y el video final queda sin espejo, con cada clon donde estaba. Archivo nuevo `CloneFront.swift`.
+  - **Cortes que fallaron:** ya no abren el editor ("Couldn't open this cut", no hay borrador); abren la pantalla "Processing issue" con Try again (el servidor rehace el corte con los videos que ya tiene).
+  - 87 pruebas automáticas, 0 fallas (3 nuevas del Clon delantero).
+- **Pantallas nuevas o cambiadas:** botón de cambiar cámara en la grabación del Clon (no está en Figma todavía; pendiente agregarlo). Diseño aparte (propuesta, sin programar): E4s "B-roll: sonido por toma" (Figma 3060:354).
 
 ## Build 91 — 2026-11-14
 - **Resultado:** ✅ subido a TestFlight el 14 nov a las 14:45 ET (VALID) · commit del pedido `6e7c65c3`
