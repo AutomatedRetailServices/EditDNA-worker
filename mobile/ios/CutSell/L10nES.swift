@@ -58,6 +58,8 @@ enum L10nES {
         "Clone": "Clon",
         "Start clone 1": "Empezar clon 1",
         "Use headphones to hear your clones": "Usa audífonos para escuchar a tus clones",
+        "Switch camera": "Cambiar cámara",
+        "Put your phone on a stand — keep it still for every clone": "Pon tu teléfono en un soporte — no lo muevas en ningún clon",
         "Don't walk around your clones": "No camines alrededor de tus clones",
         "Stand in a different spot each time": "Párate en un lugar distinto cada vez",
         "Move your phone slowly — small moves are OK": "Mueve el teléfono despacio; los movimientos pequeños están bien",

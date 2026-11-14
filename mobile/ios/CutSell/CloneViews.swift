@@ -107,6 +107,10 @@ final class CloneARModel: ObservableObject {
     let arView = ARView(frame: .zero, cameraMode: .ar, automaticallyConfigureSession: false)
     let engine = CloneCaptureEngine()
     let clones = CloneLiveClones()
+    /// Front camera mode (selfie): phone stays still, Vision cuts you out (see CloneFront.swift).
+    let frontCamera = CloneFrontCamera()
+    let frontPreview = CloneFrontPreviewView()
+    @Published var front = false
     @Published var tracking: CloneCaptureEngine.Tracking = .scanning
     @Published var recording = false
     @Published var elapsed: Double = 0
@@ -114,6 +118,9 @@ final class CloneARModel: ObservableObject {
     private var started = false
     private var routeObserver: NSObjectProtocol?
     private var lockedCamera = false
+
+    /// Front mode needs no room scan: the record button is ready right away.
+    var ready: Bool { front || tracking == .normal }
 
     func start() {
         guard !started else { return }
@@ -123,23 +130,64 @@ final class CloneARModel: ObservableObject {
         try? AVAudioSession.sharedInstance().setActive(true)
         engine.onTracking = { [weak self] t in self?.tracking = t }
         engine.onElapsed = { [weak self] s in self?.elapsed = s }
-        engine.session = arView.session
-        arView.session.delegateQueue = engine.queue
-        arView.session.delegate = engine
-        arView.session.run(CloneSupport.configuration())
-        clones.attach(to: arView)
+        frontCamera.onElapsed = { [weak self] s in self?.elapsed = s }
+        if front { startFront() } else { startBack() }
         routeObserver = NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification,
                                                                object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.headphones = CloneSupport.headphonesConnected
                 self?.clones.refreshSound()
+                self?.frontPreview.refreshSound()
             }
         }
     }
 
-    func show(_ takes: [CloneTake]) { clones.show(takes) }
+    private func startBack() {
+        engine.session = arView.session
+        arView.session.delegateQueue = engine.queue
+        arView.session.delegate = engine
+        arView.session.run(CloneSupport.configuration())
+        clones.attach(to: arView)
+    }
+
+    private func startFront() {
+        do { try frontCamera.configure() } catch { front = false; startBack(); return }
+        frontPreview.previewLayer.session = frontCamera.session
+        frontCamera.startRunning()
+    }
+
+    /// Switches between the back camera (room scan, you can move) and the front camera (phone still).
+    /// Only before the first take: every take of one video uses the same camera.
+    func flip() {
+        guard !recording else { return }
+        if front {
+            frontCamera.stopRunning()
+            if lockedCamera { frontCamera.lockCamera(false); lockedCamera = false }
+            front = false
+            if started { startBack() }
+        } else {
+            guard CloneFrontCamera.isAvailable else { return }
+            clones.clear()
+            arView.session.pause()
+            if lockedCamera { CloneSupport.lockCamera(false); lockedCamera = false }
+            front = true
+            if started { startFront() }
+        }
+    }
+
+    func show(_ takes: [CloneTake]) {
+        if front { frontPreview.show(takes) } else { clones.show(takes) }
+    }
 
     func beginTake() throws {
+        if front {
+            if !lockedCamera { frontCamera.lockCamera(true); lockedCamera = true }
+            try frontCamera.begin()
+            elapsed = 0
+            recording = true
+            frontPreview.play()
+            return
+        }
         if !lockedCamera { CloneSupport.lockCamera(true); lockedCamera = true }
         try engine.begin()
         elapsed = 0
@@ -148,8 +196,12 @@ final class CloneARModel: ObservableObject {
     }
 
     func endTake() async -> CloneTake? {
-        clones.stop()
         recording = false
+        if front {
+            frontPreview.stop()
+            return await frontCamera.end()
+        }
+        clones.stop()
         return await engine.end()
     }
 
@@ -157,8 +209,13 @@ final class CloneARModel: ObservableObject {
         if let routeObserver { NotificationCenter.default.removeObserver(routeObserver) }
         routeObserver = nil
         clones.clear()
+        frontPreview.clear()
         arView.session.pause()
-        if lockedCamera { CloneSupport.lockCamera(false); lockedCamera = false }
+        frontCamera.stopRunning()
+        if lockedCamera {
+            if front { frontCamera.lockCamera(false) } else { CloneSupport.lockCamera(false) }
+            lockedCamera = false
+        }
         started = false
     }
 }
@@ -167,6 +224,12 @@ private struct ARViewHost: UIViewRepresentable {
     let view: ARView
     func makeUIView(context: Context) -> ARView { view }
     func updateUIView(_ uiView: ARView, context: Context) {}
+}
+
+private struct FrontPreviewHost: UIViewRepresentable {
+    let view: CloneFrontPreviewView
+    func makeUIView(context: Context) -> CloneFrontPreviewView { view }
+    func updateUIView(_ uiView: CloneFrontPreviewView, context: Context) {}
 }
 
 // MARK: Flow (A2-A6)
@@ -213,7 +276,11 @@ struct CloneFlowView: View {
     // A3: recording with the earlier clones in the room.
     private var recordScreen: some View {
         ZStack {
-            ARViewHost(view: model.arView).ignoresSafeArea()
+            if model.front {
+                FrontPreviewHost(view: model.frontPreview).ignoresSafeArea()
+            } else {
+                ARViewHost(view: model.arView).ignoresSafeArea()
+            }
             VStack(spacing: 10) {
                 HStack {
                     Button(action: close) {
@@ -226,7 +293,7 @@ struct CloneFlowView: View {
                     Spacer()
                     badge
                     Spacer()
-                    Color.clear.frame(width: 44, height: 44)
+                    flipButton
                 }
                 .padding(.horizontal, 12)
                 if let message { hint(message) }
@@ -241,7 +308,26 @@ struct CloneFlowView: View {
         .preferredColorScheme(.dark)
     }
 
+    /// Front / back camera. Only before the first take (all takes use the same camera).
+    @ViewBuilder private var flipButton: some View {
+        if takes.isEmpty && !model.recording && CloneFrontCamera.isAvailable {
+            Button { model.flip() } label: {
+                Image(systemName: "arrow.triangle.2.circlepath.camera")
+                    .font(.system(size: 18, weight: .bold)).foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(Color.black.opacity(0.35), in: Circle())
+            }
+            .accessibilityLabel(L10n.tr("Switch camera"))
+            .accessibilityIdentifier("cloneFlip")
+        } else {
+            Color.clear.frame(width: 44, height: 44)
+        }
+    }
+
     private var message: String? {
+        if model.front {
+            return model.recording ? nil : "Put your phone on a stand — keep it still for every clone"
+        }
         if model.recording { return model.tracking == .normal ? nil : "Slow down — keep the room in view" }
         return model.tracking == .normal ? nil : "Move your phone slowly to scan the room"
     }
@@ -289,8 +375,8 @@ struct CloneFlowView: View {
         }
         .buttonStyle(.plain)
         // Before a take: the room must be tracked first (REC waits for it).
-        .disabled(!model.recording && model.tracking != .normal)
-        .opacity(!model.recording && model.tracking != .normal ? 0.5 : 1)
+        .disabled(!model.recording && !model.ready)
+        .opacity(!model.recording && !model.ready ? 0.5 : 1)
         .accessibilityLabel(model.recording ? "Stop recording" : "Record")
         .accessibilityIdentifier("cloneRecord")
     }

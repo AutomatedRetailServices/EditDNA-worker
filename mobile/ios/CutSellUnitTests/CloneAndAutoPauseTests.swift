@@ -577,3 +577,42 @@ enum SyntheticVideo {
         return sample
     }
 }
+
+/// Clon with the front camera (PO 14 Nov 2026): the phone stays still, so every take has the same camera and
+/// the clones are drawn exactly where they were filmed.
+final class CloneFrontTests: XCTestCase {
+    private func take(_ frame: CloneTake.Frame) -> CloneTake {
+        CloneTake(folder: URL(fileURLWithPath: "/tmp/x"), width: 1920, height: 1080, maskWidth: 4, maskHeight: 4,
+                  frames: [frame], anchor: CloneFrontMath.anchor, duration: 1)
+    }
+
+    func testFrontTakesKeepTheirPlace() {
+        let a = take(CloneFrontMath.camera(width: 1920, height: 1080))
+        let b = take(CloneFrontMath.camera(width: 1920, height: 1080))
+        let corners = CloneMath.cornersInTarget(clone: a.camera(0), anchor: a.anchorPoint, target: b.camera(0))!
+        let expected = [CGPoint(x: 0, y: 0), CGPoint(x: 1920, y: 0), CGPoint(x: 1920, y: 1080), CGPoint(x: 0, y: 1080)]
+        for (c, e) in zip(corners, expected) {
+            XCTAssertEqual(c.x, e.x, accuracy: 0.5); XCTAssertEqual(c.y, e.y, accuracy: 0.5)
+        }
+    }
+
+    func testTheAnchorIsInFrontOfTheCamera() {
+        let cam = take(CloneFrontMath.camera(width: 1920, height: 1080)).camera(0)
+        let p = CloneMath.project(SIMD3<Float>(CloneFrontMath.anchor[0], CloneFrontMath.anchor[1], CloneFrontMath.anchor[2]), cam)
+        XCTAssertNotNil(p)
+        XCTAssertEqual(p!.x, 960, accuracy: 0.5); XCTAssertEqual(p!.y, 540, accuracy: 0.5)
+    }
+
+    func testFrontPreviewFillsAPortraitScreen() {
+        let fill = CloneFrontLayout.fill(screen: CGSize(width: 390, height: 844))
+        XCTAssertEqual(fill.height, 844, accuracy: 0.01)
+        XCTAssertEqual(fill.width, 844 * 9 / 16, accuracy: 0.01)
+        XCTAssertGreaterThanOrEqual(fill.width, 390)
+        // Landscape video turned upright and mirrored: width and height swap, x flips.
+        let t = CloneFrontLayout.uprightMirrored
+        let r = CGRect(x: -100, y: -50, width: 200, height: 100).applying(t)
+        XCTAssertEqual(r.width, 100, accuracy: 0.01); XCTAssertEqual(r.height, 200, accuracy: 0.01)
+        let p = CGPoint(x: 100, y: 0).applying(t)            // right end of the landscape row
+        XCTAssertEqual(p.x, 0, accuracy: 0.01); XCTAssertEqual(p.y, 100, accuracy: 0.01)
+    }
+}
