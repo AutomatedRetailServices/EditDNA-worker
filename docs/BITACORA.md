@@ -25,6 +25,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 93 | 2026-11-14 | ✅ subido (pedido) | feature/shop-board | `d3e8aaa3` | Wear it + quitar productos + YOUR BRAND editable + bocina del B-roll |
 | 92 | 2026-11-14 16:00 | ✅ subido | feature/shop-board | `90532ee8` (pedido `38803bc9`) | Clon con cámara delantera + cortes fallidos se abren con Try again |
 | 91 | 2026-11-14 14:45 | ✅ subido | feature/shop-board | `4a028623` (pedido `6e7c65c3`) | Arreglo: varias fotos a la vez se quedaban cargando para siempre |
 | 90 | 2026-11-14 11:14 | ✅ subido | feature/shop-board | `56d2fd68` | Shop board: fotos que ya no se quedan cargando + de 1 a 12 productos |
@@ -119,6 +120,17 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 | 1 | 2026-10-12 13:01 | ❌ falló | feature/ios-captions-v2 | `d90bfc50` | Primer intento, no llegó a TestFlight |
 
 ---
+
+## Build 93 — 2026-11-14
+- **Resultado:** pedido a TestFlight (si la subida falla, se corrige esta línea)
+- **Rama (según el historial de git):** feature/shop-board  ·  **Commit de la app:** `d3e8aaa3`
+- **Qué cambió (todo pedido por la PO el 14 nov, diseñado primero en Figma):**
+  - **Shop board · plantilla Wear it:** su foto usando la ropa ocupa todo el board, los productos van a la izquierda y el título va en blanco abajo; la galería se abre sola después de Create board. Reemplaza "+ More soon".
+  - **Shop board · × roja** para quitar el producto elegido en Your board; los demás se quedan en su lugar.
+  - **Shop board · "YOUR BRAND" editable** (Title › Bottom line), guardado con el board.
+  - **B-roll · bocina por toma** en "Ready to edit": apagada por defecto; encendida manda `broll_sound: "1"` y el servidor (ya en vivo desde las 15:58) la pone debajo de la voz al 30 %.
+  - 95 pruebas automáticas, 0 fallas.
+- **Pantallas nuevas o cambiadas:** ver [design-audit/build-93](design-audit/build-93/cambios.md).
 
 ## Build 92 — 2026-11-14
 - **Resultado:** ✅ subido a TestFlight el 14 nov a las 16:00 ET (VALID) · commit del pedido `38803bc9`
