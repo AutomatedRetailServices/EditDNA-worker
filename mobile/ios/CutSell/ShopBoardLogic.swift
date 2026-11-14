@@ -725,6 +725,13 @@ struct ShopAdjust: Equatable {
         return a
     }
 
+    /// The hand edit that draws a product exactly at `rect` / `rotation` (design-size board) from a new `base` place.
+    static func keeping(_ rect: CGRect, rotation: Double, base: CGRect, baseRotation: Double) -> ShopAdjust {
+        ShopAdjust(offset: CGSize(width: rect.midX - base.midX, height: rect.midY - base.midY),
+                   scale: base.width > 0 ? rect.width / base.width : 1,
+                   rotation: rotation - baseRotation)
+    }
+
     static func twisted(_ start: ShopAdjust, by degrees: Double) -> ShopAdjust {
         var a = start
         a.rotation = start.rotation + degrees

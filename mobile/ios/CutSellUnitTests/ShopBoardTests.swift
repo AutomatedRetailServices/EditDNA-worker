@@ -711,3 +711,44 @@ extension ShopPhotoLoadingTests {
         XCTAssertLessThan(Date().timeIntervalSince(started), 3)
     }
 }
+
+/// PO 14 Nov 2026 (Figma S4x 3061:190): the red × on Your board removes a product; the others stay where they are.
+@MainActor
+final class ShopBoardRemoveTests: XCTestCase {
+    func testRemovingAProductLeavesEveryOtherProductInPlace() throws {
+        let model = ShopBoardModel()
+        let colors: [UIColor] = [.red, .blue, .green, .orange, .purple]
+        model.items = colors.enumerated().map { i, c in
+            ShopItem(source: .photos, cutout: ShopSynthetic.cutout(c, w: 100 + i * 20, h: 160))
+        }
+        let ids = model.items.map(\.id)
+        model.adjusts[ids[1]] = ShopAdjust(offset: CGSize(width: 20, height: -30), scale: 1.3, rotation: 12)
+        let board = ShopLayout.designSize
+        func frames() -> [UUID: (CGRect, Double)] {
+            let s = model.snapshot()
+            var out: [UUID: (CGRect, Double)] = [:]
+            for i in s.placements.indices { if let f = s.frame(at: i, board: board) { out[s.itemIDs[i]] = (f.rect, f.rotation) } }
+            return out
+        }
+        let before = frames()
+        model.removeKeepingPlaces(ids[2])
+        let after = frames()
+        XCTAssertEqual(model.items.count, 4)
+        XCTAssertNil(after[ids[2]])
+        XCTAssertNil(model.adjusts[ids[2]])
+        for id in ids where id != ids[2] {
+            let (a, ra) = try XCTUnwrap(after[id]), (b, rb) = try XCTUnwrap(before[id])
+            XCTAssertEqual(a.midX, b.midX, accuracy: 0.5); XCTAssertEqual(a.midY, b.midY, accuracy: 0.5)
+            XCTAssertEqual(a.width, b.width, accuracy: 0.5); XCTAssertEqual(a.height, b.height, accuracy: 0.5)
+            XCTAssertEqual(ra, rb, accuracy: 0.01)
+        }
+    }
+
+    func testTheRemoveButtonSitsOnTheOutlineCornerAndTurnsWithIt() {
+        let rect = CGRect(x: 100, y: 200, width: 80, height: 120)
+        let straight = ShopBoardRemove.corner(of: rect, rotation: 0, outset: 4)
+        XCTAssertEqual(straight.x, 184, accuracy: 0.01); XCTAssertEqual(straight.y, 196, accuracy: 0.01)
+        let turned = ShopBoardRemove.corner(of: rect, rotation: 90, outset: 4)   // top-right goes to bottom-right
+        XCTAssertEqual(turned.x, rect.midX + 64, accuracy: 0.01); XCTAssertEqual(turned.y, rect.midY + 44, accuracy: 0.01)
+    }
+}

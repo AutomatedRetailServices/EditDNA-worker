@@ -780,8 +780,41 @@ struct ShopBoardHandEditor: View {
                     model.adjusts[id] = ShopAdjust.twisted(a, by: twist)
                 })
             .accessibilityIdentifier("shopBoardTouchLayer")
+            // Figma S4x (3061:190, PO 14 Nov): a red × on the picked product's outline removes it from the board.
+            // Hidden when it is the only product (a board keeps at least 1).
+            if let id = selected, id != ShopBoardModel.titleID, model.items.count > 1,
+               let index = snapshot.itemIDs.firstIndex(of: id), let placed = snapshot.frame(at: index, board: size) {
+                let corner = ShopBoardRemove.corner(of: placed.rect, rotation: placed.rotation, outset: 4)
+                Button {
+                    selected = nil
+                    model.removeKeepingPlaces(id)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .heavy))
+                        .foregroundStyle(.white)
+                        .frame(width: 24, height: 24)
+                        .background(Color(fixed: 0xE5484D), in: Circle())
+                        .overlay(Circle().stroke(Color.white, lineWidth: 2))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .position(corner)
+                .accessibilityLabel(L10n.tr("Remove"))
+                .accessibilityIdentifier("shopBoardRemoveItem")
+            }
         }
         .frame(width: size.width, height: size.height)
+    }
+}
+
+enum ShopBoardRemove {
+    /// The top-right corner of a product's outline (`outset` pt outside its frame), turned with the product.
+    static func corner(of rect: CGRect, rotation degrees: Double, outset: CGFloat) -> CGPoint {
+        let dx = Double(rect.width / 2 + outset), dy = Double(-(rect.height / 2 + outset))
+        let r = degrees * .pi / 180
+        return CGPoint(x: rect.midX + CGFloat(dx * Darwin.cos(r) - dy * Darwin.sin(r)),
+                       y: rect.midY + CGFloat(dx * Darwin.sin(r) + dy * Darwin.cos(r)))
     }
 }
 

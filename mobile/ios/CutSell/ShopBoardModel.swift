@@ -162,7 +162,34 @@ final class ShopBoardModel: ObservableObject {
         return (photo, false, ShopVision.kind(of: photo))
     }
 
-    func remove(_ id: UUID) { items.removeAll { $0.id == id } }
+    func remove(_ id: UUID) {
+        items.removeAll { $0.id == id }
+        adjusts[id] = nil
+        raised.removeAll { $0 == id }
+    }
+
+    /// Your board's × (Figma S4x): the product leaves the board and every other product STAYS where it is now
+    /// (the layout for one product fewer is different, so each one gets the hand edit that keeps it in place).
+    func removeKeepingPlaces(_ id: UUID) {
+        let board = ShopLayout.designSize
+        let before = snapshot()
+        var kept: [UUID: (rect: CGRect, rotation: Double)] = [:]
+        for index in before.placements.indices where before.itemIDs[index] != id {
+            if let placed = before.frame(at: index, board: board) { kept[before.itemIDs[index]] = placed }
+        }
+        remove(id)
+        let after = snapshot()
+        for index in after.placements.indices {
+            let itemID = after.itemIDs[index]
+            guard let old = kept[itemID] else { continue }
+            let placement = after.placements[index]
+            let image = after.images[placement.itemIndex]
+            let aspect = CGFloat(image.width) / CGFloat(max(1, image.height))
+            let base = ShopLayout.frame(for: placement.slot, aspect: aspect, board: board)
+            adjusts[itemID] = ShopAdjust.keeping(old.rect, rotation: old.rotation, base: base,
+                                                 baseRotation: placement.slot.rotation)
+        }
+    }
 
     func useShaped(_ image: CGImage, for id: UUID) {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
