@@ -110,9 +110,9 @@ final class ShopBoardModel: ObservableObject {
     func attach(_ image: UIImage, to id: UUID, removeIfFails: Bool = false) {
         busy.insert(id)
         let started = Date()
-        Task.detached(priority: .userInitiated) {
+        Task {
             let result = await Self.processWithTimeout(image)
-            await MainActor.run {
+            do {
                 self.busy.remove(id)
                 CutSellDiagnostics.log(result.map { _ in "shop_photo_processed" } ?? "shop_photo_process_failed", [
                     "ms": String(Int(Date().timeIntervalSince(started) * 1000)),
@@ -136,19 +136,17 @@ final class ShopBoardModel: ObservableObject {
 
     /// `process` with a time limit: after 25 s the photo is used as it is (background kept), so a tile never spins
     /// for ever (PO 14 Nov, build 90: photos still not loading).
+    ///
+    /// Build 90 on the PO's iPhone: ten picked photos all spun for ever. Each photo ran Vision synchronously on a
+    /// Swift-concurrency thread; ten at once used up those few threads, so nothing else (not even the time limits)
+    /// could run. The heavy work now runs on its own queue, one photo at a time (`ShopWork`), and the time limit is
+    /// a plain timer, so it always fires.
     nonisolated static func processWithTimeout(_ image: UIImage, seconds: Double = 25)
         async -> (image: CGImage, removed: Bool, kind: ShopItemKind)? {
-        await withTaskGroup(of: (image: CGImage, removed: Bool, kind: ShopItemKind)?.self) { group in
-            group.addTask { process(image) }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-                CutSellDiagnostics.log("shop_photo_process_timeout", [:])
-                return ShopCutout.normalized(image).map { ($0, false, ShopItemKind.unknown) }
-            }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
-        }
+        await ShopWork.run(timeout: seconds, onTimeout: {
+            CutSellDiagnostics.log("shop_photo_process_timeout", [:])
+            return ShopCutout.normalized(image).map { ($0, false, ShopItemKind.unknown) }
+        }) { process(image) }
     }
 
     nonisolated static func process(_ image: UIImage) -> (image: CGImage, removed: Bool, kind: ShopItemKind)? {

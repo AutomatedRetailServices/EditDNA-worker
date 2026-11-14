@@ -203,26 +203,58 @@ enum ShopCutout {
     }
 }
 
+/// Heavy photo work (decoding, background removal, Vision) runs here, one photo at a time, off the Swift-concurrency
+/// threads — so many photos at once can never block the app (build 90 bug), and every time limit still fires.
+enum ShopWork {
+    static let queue = DispatchQueue(label: "ai.cutsell.shopboard.photos", qos: .userInitiated)
+
+    /// `body` on the photo queue; after `timeout` seconds `onTimeout` answers instead (the work is left to finish).
+    static func run<T>(timeout: TimeInterval, onTimeout: @escaping @Sendable () -> T,
+                       _ body: @escaping @Sendable () -> T) async -> T {
+        await withCheckedContinuation { (continuation: CheckedContinuation<T, Never>) in
+            let once = ShopOnce()
+            let timer = DispatchWorkItem {
+                if once.claim() { continuation.resume(returning: onTimeout()) }
+            }
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + timeout, execute: timer)
+            queue.async {
+                let value = body()
+                timer.cancel()
+                if once.claim() { continuation.resume(returning: value) }
+            }
+        }
+    }
+}
+
+/// Lets exactly one of two racers (the work, the timer) answer.
+final class ShopOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+    func claim() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if done { return false }
+        done = true
+        return true
+    }
+}
+
 /// Loads a picked photo (PNG, JPEG, HEIC…, also from iCloud) with a time limit, so a slow or broken file never
 /// leaves a tile spinning for ever. Big photos are read at most ~2400 px on the long side.
 enum ShopPhotoLoader {
     static func load(_ provider: NSItemProvider, timeout: TimeInterval = 45) async -> UIImage? {
         guard provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) else { return nil }
-        return await withTaskGroup(of: UIImage?.self) { group in
-            group.addTask {
-                await withCheckedContinuation { continuation in
-                    provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
-                        continuation.resume(returning: data.flatMap { ShopPhotoLoader.image(from: $0) })
-                    }
+        return await withCheckedContinuation { (continuation: CheckedContinuation<UIImage?, Never>) in
+            let once = ShopOnce()
+            let timer = DispatchWorkItem { if once.claim() { continuation.resume(returning: nil) } }
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + timeout, execute: timer)
+            provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
+                // Decoding (down-sampled) happens on the photo queue too, one file at a time.
+                ShopWork.queue.async {
+                    let image = data.flatMap { ShopPhotoLoader.image(from: $0) }
+                    timer.cancel()
+                    if once.claim() { continuation.resume(returning: image) }
                 }
             }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                return nil
-            }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
         }
     }
 

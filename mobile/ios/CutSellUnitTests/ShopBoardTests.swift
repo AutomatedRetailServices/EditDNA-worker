@@ -686,3 +686,28 @@ final class ShopPhotoLoadingTests: XCTestCase {
         XCTAssertNil(image)
     }
 }
+
+extension ShopPhotoLoadingTests {
+    /// Build 90 on the PO's iPhone: ten photos at once spun for ever. Twelve at once must all finish.
+    @MainActor
+    func testTwelvePhotosAtOnceAllFinish() async throws {
+        let model = ShopBoardModel()
+        let providers = (0..<12).map { i -> NSItemProvider in
+            let data = png(transparent: i % 2 == 0, size: CGSize(width: 1024, height: 1024))
+            return NSItemProvider(item: data as NSData, typeIdentifier: UTType.png.identifier)
+        }
+        model.addPhotos(providers)
+        XCTAssertEqual(model.items.count, 12)
+        let deadline = Date().addingTimeInterval(120)
+        while !model.busy.isEmpty && Date() < deadline { try await Task.sleep(nanoseconds: 200_000_000) }
+        XCTAssertTrue(model.busy.isEmpty, "every tile stops spinning")
+        XCTAssertEqual(model.items.filter { $0.cutout != nil }.count, 12, "and gets its picture")
+    }
+
+    func testTimeLimitFiresEvenIfTheWorkNeverEnds() async {
+        let started = Date()
+        let value = await ShopWork.run(timeout: 1, onTimeout: { -1 }) { Thread.sleep(forTimeInterval: 5); return 1 }
+        XCTAssertEqual(value, -1)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 3)
+    }
+}
