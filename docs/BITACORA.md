@@ -20,7 +20,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
-| 91 | 2026-11-14 | ✅ subido (pedido) | feature/shop-board | `4a028623` | Arreglo: varias fotos a la vez se quedaban cargando para siempre |
+| 91 | 2026-11-14 14:45 | ✅ subido | feature/shop-board | `4a028623` (pedido `6e7c65c3`) | Arreglo: varias fotos a la vez se quedaban cargando para siempre |
 | 90 | 2026-11-14 11:14 | ✅ subido | feature/shop-board | `56d2fd68` | Shop board: fotos que ya no se quedan cargando + de 1 a 12 productos |
 | 89 | 2026-11-14 07:39 | ✅ subido | feature/shop-board | `861c91b7` | Your board: board grande, tarjetas en una línea, el título se mueve |
 | 88 | 2026-11-13 13:41 | ✅ subido | feature/shop-board | `506020f1` | Shop board: mover/agrandar/girar con los dedos más fácil + fondo automático que sigue el color de los productos |
@@ -115,7 +115,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 ---
 
 ## Build 91 — 2026-11-14
-- **Resultado:** pedido a TestFlight (si la subida falla, se corrige esta línea)
+- **Resultado:** ✅ subido a TestFlight el 14 nov a las 14:45 ET (VALID) · commit del pedido `6e7c65c3`
 - **Rama (según el historial de git):** feature/shop-board  ·  **Commit de la app:** `4a028623`
 - **Qué cambió (reporte de la PO con video del build 90: 10 cuadritos dando vueltas para siempre):**
   - **Causa:** cada foto se procesaba (Vision, quitar fondo) al mismo tiempo en los pocos hilos de trabajo de la app; con 10 fotos se llenaban todos y nada más podía correr, ni siquiera los límites de tiempo. Pasaba igual en builds anteriores al elegir varias fotos.
