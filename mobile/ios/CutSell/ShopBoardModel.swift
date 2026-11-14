@@ -14,6 +14,9 @@ final class ShopBoardModel: ObservableObject {
 
     init(boardID: UUID = UUID()) { self.boardID = boardID }
 
+    /// The title block moves by hand like a product (PO 13 Nov); its hand edit lives in `adjusts` under this id.
+    static let titleID = UUID(uuidString: "7171E000-0000-4000-8000-000000000001")!
+
     @Published var items: [ShopItem] = [] { didSet { if oldValue.map(\.cutout) != items.map(\.cutout) { refreshPalette() } } }
     /// Items whose photo is being cut out now.
     @Published var busy: Set<UUID> = []
@@ -184,6 +187,7 @@ final class ShopBoardModel: ObservableObject {
             itemIDs: placedIDs,
             adjusts: handEdited ? placedIDs.map { adjusts[$0] ?? ShopAdjust() } : placedIDs.map { _ in ShopAdjust() },
             drawOrder: ShopDrawOrder.order(itemIDs: placedIDs, raised: handEdited ? raised : []),
+            titleAdjust: handEdited ? (adjusts[Self.titleID] ?? ShopAdjust()) : ShopAdjust(),
             top: colors.top, bottom: colors.bottom, texture: texture, textureMatched: look.matchBackground && texture != nil,
             photo: photo, bigTitle: title, scriptLine: script, pair: fontPair,
             titleColor: look.resolvedTitleColor(palette: palette, template: tmpl))
@@ -200,6 +204,8 @@ struct ShopBoardSnapshot {
     var itemIDs: [UUID] = []
     var adjusts: [ShopAdjust] = []
     var drawOrder: [Int] = []
+    /// The title block moved, resized or turned by hand.
+    var titleAdjust = ShopAdjust()
     var top: ShopRGB
     var bottom: ShopRGB
     var texture: ShopTexture?
@@ -213,6 +219,28 @@ struct ShopBoardSnapshot {
     var isDark: Bool { top.mixed(bottom, 0.5).luminance < 0.25 }
 
     var order: [Int] { drawOrder.count == placements.count ? drawOrder : Array(placements.indices) }
+
+    /// Where the title block is on a board of `size` (after the hand edit), and its tilt.
+    func titleFrame(board size: CGSize) -> (rect: CGRect, rotation: Double) {
+        let sx = size.width / ShopLayout.designSize.width, sy = size.height / ShopLayout.designSize.height
+        let r = ShopLayout.titleRect
+        let base = CGRect(x: r.minX * sx, y: r.minY * sy, width: r.width * sx, height: r.height * sy)
+        return (titleAdjust.frame(base: base, board: size), titleAdjust.rotation)
+    }
+
+    /// Is `point` on the title block (its turned frame)?
+    func isOnTitle(_ point: CGPoint, board size: CGSize) -> Bool {
+        let placed = titleFrame(board: size)
+        return Self.contains(placed.rect, rotation: placed.rotation, point, minimum: 0)
+    }
+
+    static func contains(_ rect: CGRect, rotation: Double, _ point: CGPoint, minimum: CGFloat) -> Bool {
+        let c = CGPoint(x: rect.midX, y: rect.midY)
+        let r = -rotation * Double.pi / 180
+        let dx = Double(point.x - c.x), dy = Double(point.y - c.y)
+        let lx = dx * Darwin.cos(r) - dy * Darwin.sin(r), ly = dx * Darwin.sin(r) + dy * Darwin.cos(r)
+        return abs(lx) <= Double(max(rect.width, minimum)) / 2 && abs(ly) <= Double(max(rect.height, minimum)) / 2
+    }
 
     /// The top product under `point` (drawn last wins), testing its turned frame.
     func item(at point: CGPoint, board size: CGSize) -> Int? {
@@ -293,7 +321,27 @@ struct ShopBoardCanvas: View {
         let ink = snapshot.titleColor.color
         let footerInk = snapshot.isDark || snapshot.photo != nil ? Color(fixed: 0xFFFFFF, opacity: 0.85) : ShopTemplate.footerInk.color
         let titleSize = 44 * sx * snapshot.pair.titleScale
+        let t = snapshot.titleAdjust
         return ZStack(alignment: .top) {
+            titleBlock(sx: sx, sy: sy, ink: ink, titleSize: titleSize)
+                // Moved by hand (PO 13 Nov): around the title block's centre, in design units.
+                .scaleEffect(t.scale, anchor: UnitPoint(x: ShopLayout.titleRect.midX / ShopLayout.designSize.width,
+                                                        y: ShopLayout.titleRect.midY / 140))
+                .rotationEffect(.degrees(t.rotation), anchor: UnitPoint(x: ShopLayout.titleRect.midX / ShopLayout.designSize.width,
+                                                                        y: ShopLayout.titleRect.midY / 140))
+                .offset(x: t.offset.width * sx, y: t.offset.height * sy)
+            Text(verbatim: ShopTemplate.footer)
+                .font(ShopFonts.font(ShopFontPair.footerFace, size: 14 * sx))
+                .tracking(4.2 * sx)
+                .foregroundStyle(footerInk)
+                .padding(.top, 810 * sy)
+        }
+        .frame(width: width, alignment: .top)
+    }
+
+    /// "CUTSELL" + "Everyday chic", in a 140-design-unit-high block from the top of the board.
+    private func titleBlock(sx: CGFloat, sy: CGFloat, ink: Color, titleSize: CGFloat) -> some View {
+        ZStack(alignment: .top) {
             Text(verbatim: snapshot.bigTitle)
                 .font(ShopFonts.font(snapshot.pair.titleFace, size: titleSize, opticalSize: 44 * snapshot.pair.titleScale))
                 .tracking(3.52 * sx)
@@ -307,13 +355,8 @@ struct ShopBoardCanvas: View {
                 .lineLimit(1).minimumScaleFactor(0.4)
                 .frame(width: width - 24 * sx)
                 .padding(.top, 84 * sy)
-            Text(verbatim: ShopTemplate.footer)
-                .font(ShopFonts.font(ShopFontPair.footerFace, size: 14 * sx))
-                .tracking(4.2 * sx)
-                .foregroundStyle(footerInk)
-                .padding(.top, 810 * sy)
         }
-        .frame(width: width, alignment: .top)
+        .frame(width: width, height: 140 * sy, alignment: .top)
     }
 }
 

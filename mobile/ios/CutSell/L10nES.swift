@@ -1728,6 +1728,7 @@ enum L10nES {
         "Delete this Shop board?": "¿Eliminar este Shop board?",
         "It is only removed from CutSell. Pictures you saved to Photos stay.": "Solo se quita de CutSell. Las imágenes que guardaste en Fotos se quedan.",
         "Drag a product to move it · pinch to resize · twist to turn": "Arrastra un producto para moverlo · pellizca para cambiar el tamaño · gira con dos dedos",
+        "Drag a product or the title · pinch to resize · twist to turn": "Arrastra un producto o el título · pellizca para el tamaño · gira con dos dedos",
         "Pinch to resize · twist to turn · tap outside to finish": "Pellizca para cambiar el tamaño · gira con dos dedos · toca afuera para terminar",
         "Using Amazon instead? Put your link in your bio — the caption already says \"link in bio\".": "¿Usas Amazon? Pon tu link en tu bio: el caption ya dice \"link in bio\".",
         "Saved to Photos. Link and caption copied.": "Guardado en Fotos. Link y caption copiados.",

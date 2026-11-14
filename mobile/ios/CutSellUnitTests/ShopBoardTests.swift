@@ -597,3 +597,24 @@ extension ShopMatchTests {
         for bg in [pink, blue, green, neutral] { XCTAssertGreaterThan(bg.top.hsl.l, 0.85) }
     }
 }
+
+extension ShopHandEditTests {
+    /// PO 13 Nov: the title moves by hand too.
+    @MainActor
+    func testTitleIsGrabbedAndMoves() {
+        let model = ShopBoardModel()
+        let board = CGSize(width: 390, height: 693.33)
+        var snap = model.snapshot()
+        let start = snap.titleFrame(board: board).rect
+        XCTAssertTrue(snap.isOnTitle(CGPoint(x: start.midX, y: start.midY), board: board))
+        XCTAssertFalse(snap.isOnTitle(CGPoint(x: start.midX, y: board.height - 20), board: board))
+        model.adjusts[ShopBoardModel.titleID] = ShopAdjust(offset: CGSize(width: 0, height: 300), scale: 1.5, rotation: 10)
+        snap = model.snapshot()
+        let moved = snap.titleFrame(board: board).rect
+        XCTAssertGreaterThan(moved.midY, start.midY + 200)
+        XCTAssertEqual(moved.width, start.width * 1.5, accuracy: 0.01)
+        XCTAssertTrue(snap.isOnTitle(CGPoint(x: moved.midX, y: moved.midY), board: board))
+        model.shuffle()
+        XCTAssertEqual(model.snapshot().titleAdjust, ShopAdjust(), "Shuffle starts the title over too")
+    }
+}

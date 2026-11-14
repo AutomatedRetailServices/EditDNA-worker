@@ -745,6 +745,8 @@ enum ShopDrawOrder {
 
 enum ShopLayout {
     static let designSize = CGSize(width: 390, height: 844)
+    /// Where the title and script line sit (design units): what a finger grabs to move them (PO 13 Nov).
+    static let titleRect = CGRect(x: 30, y: 14, width: 330, height: 124)
 
     /// The six places of the Figma board (shirt, sweater, earrings, pants, bag, shoes), in Figma's drawing order.
     static let figmaSlots: [ShopSlot] = [

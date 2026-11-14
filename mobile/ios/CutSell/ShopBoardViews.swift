@@ -686,17 +686,18 @@ struct ShopBoardScreen: View {
                 }
                 .padding(.top, 16)
                 HStack(spacing: 10) {
-                    actionCard("Title", detail: model.bigTitle + " · " + model.scriptLine, id: "shopTitle", action: onTitle)
+                    actionCard("Title", detail: model.bigTitle, id: "shopTitle", action: onTitle)
                     actionCard("Shuffle", detail: L10n.tr("New layout"), id: "shopShuffle") {
                         selected = nil
                         withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) { model.shuffle() }
                     }
-                    actionCard("Background", detail: model.backgroundName, id: "shopBackground", action: onBackground)
+                    actionCard("Background", detail: model.style.matchBackground ? L10n.tr("✨ Match") : model.backgroundName,
+                               id: "shopBackground", action: onBackground)
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 14)
                 // Figma S4 / S4e: Medium 12, centred, #6B7385 (nothing picked) or #1769FF (a product picked).
-                Text(L10n.tr(selected == nil ? "Drag a product to move it · pinch to resize · twist to turn"
+                Text(L10n.tr(selected == nil ? "Drag a product or the title · pinch to resize · twist to turn"
                                              : "Pinch to resize · twist to turn · tap outside to finish"))
                     .font(CS.inter(12, .medium))
                     .foregroundStyle(Color(fixed: selected == nil ? 0x6B7385 : 0x1769FF))
@@ -719,11 +720,12 @@ struct ShopBoardScreen: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(L10n.tr(title)).font(CS.inter(13, .bold)).foregroundStyle(Color(fixed: 0x0B1020))
+                // One line, cut with "…" (build 88: long titles wrapped and broke the card).
                 Text(verbatim: detail).font(CS.inter(10, .medium)).foregroundStyle(Color(fixed: 0x6B7385))
-                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1).truncationMode(.tail).minimumScaleFactor(0.85)
             }
-            .padding(.horizontal, 12).padding(.top, 8)
-            .frame(maxWidth: .infinity, minHeight: 52, maxHeight: 52, alignment: .topLeading)
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, minHeight: 52, maxHeight: 52, alignment: .leading)
             .shopCard(radius: 16)
         }
         .buttonStyle(BubblePress())
@@ -745,6 +747,15 @@ struct ShopBoardHandEditor: View {
         let size = CGSize(width: width, height: width * 16 / 9)
         ZStack(alignment: .topLeading) {
             ShopBoardCanvas(snapshot: snapshot, width: width)
+            if selected == ShopBoardModel.titleID {
+                let placed = snapshot.titleFrame(board: size)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color(fixed: 0x1769FF), lineWidth: 2)
+                    .frame(width: placed.rect.width + 8, height: placed.rect.height + 8)
+                    .rotationEffect(.degrees(placed.rotation))
+                    .position(x: placed.rect.midX, y: placed.rect.midY)
+                    .allowsHitTesting(false)
+            }
             ForEach(snapshot.order, id: \.self) { index in
                 if let placed = snapshot.frame(at: index, board: size), selected == snapshot.itemIDs[index] {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -756,7 +767,11 @@ struct ShopBoardHandEditor: View {
                 }
             }
             ShopBoardTouchLayer(
-                itemAt: { point in snapshot.item(at: point, board: size).map { snapshot.itemIDs[$0] } },
+                // The title is drawn over the products, so it is grabbed first.
+                itemAt: { point in
+                    snapshot.isOnTitle(point, board: size) ? ShopBoardModel.titleID
+                        : snapshot.item(at: point, board: size).map { snapshot.itemIDs[$0] }
+                },
                 selected: { selected },
                 onTap: { id in
                     selected = id
