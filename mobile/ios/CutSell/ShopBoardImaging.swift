@@ -1,8 +1,10 @@
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import CoreText
+import ImageIO
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 import Vision
 
 // Shop board pictures, all on the iPhone: background removal (Vision), item kind (Vision labels), the products'
@@ -175,15 +177,65 @@ enum ShopCutout {
     }
 
     /// A photo from Photos, upright and at most 2048 px long side.
+    /// True when at least 5 % of the photo is see-through (a product PNG whose background is already gone).
+    static func hasTransparentBackground(_ image: CGImage) -> Bool {
+        switch image.alphaInfo {
+        case .none, .noneSkipFirst, .noneSkipLast: return false
+        default: break
+        }
+        guard let (bytes, w, h) = rgba(image, maxSide: 96) else { return false }
+        var clear = 0
+        for i in stride(from: 3, to: w * h * 4, by: 4) where bytes[i] < 16 { clear += 1 }
+        return Double(clear) / Double(max(1, w * h)) >= 0.05
+    }
+
     static func normalized(_ image: UIImage, maxSide: CGFloat = 2048) -> CGImage? {
         let long = max(image.size.width, image.size.height)
         let scale = min(1, maxSide / max(1, long))
         let size = CGSize(width: (image.size.width * scale).rounded(), height: (image.size.height * scale).rounded())
         let format = UIGraphicsImageRendererFormat.default()
         format.scale = 1
+        format.opaque = false
+        format.preferredRange = .standard        // 8-bit sRGB even for wide-colour / 16-bit PNGs
         return UIGraphicsImageRenderer(size: size, format: format).image { _ in
             image.draw(in: CGRect(origin: .zero, size: size))
         }.cgImage
+    }
+}
+
+/// Loads a picked photo (PNG, JPEG, HEIC…, also from iCloud) with a time limit, so a slow or broken file never
+/// leaves a tile spinning for ever. Big photos are read at most ~2400 px on the long side.
+enum ShopPhotoLoader {
+    static func load(_ provider: NSItemProvider, timeout: TimeInterval = 45) async -> UIImage? {
+        guard provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) else { return nil }
+        return await withTaskGroup(of: UIImage?.self) { group in
+            group.addTask {
+                await withCheckedContinuation { continuation in
+                    provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
+                        continuation.resume(returning: data.flatMap(Self.image(from:)))
+                    }
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+    }
+
+    /// Decodes the file, down-sampled so a 50-megapixel PNG does not run out of memory.
+    static func image(from data: Data, maxSide: Int = 2400) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxSide,
+        ]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return UIImage(cgImage: cg)
     }
 }
 

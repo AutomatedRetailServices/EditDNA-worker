@@ -92,9 +92,11 @@ struct ShopNotice: View {
 }
 
 /// The iPhone's photo library, photos only.
+/// Photos picker. It hands back the picked items right away (PO 14 Nov: with PNGs the picker stayed up "uploading"
+/// while every photo loaded); each photo then loads on its own with a time limit (`ShopPhotoLoader`).
 struct ShopPhotoPicker: UIViewControllerRepresentable {
     var limit: Int
-    let onPicked: ([UIImage]) -> Void
+    let onPicked: ([NSItemProvider]) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -114,21 +116,9 @@ struct ShopPhotoPicker: UIViewControllerRepresentable {
         init(_ parent: ShopPhotoPicker) { self.parent = parent }
 
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
-            let parent = self.parent
-            Task {
-                var images: [UIImage] = []
-                for result in results where result.itemProvider.canLoadObject(ofClass: UIImage.self) {
-                    let image: UIImage? = await withCheckedContinuation { continuation in
-                        result.itemProvider.loadObject(ofClass: UIImage.self) { object, _ in
-                            continuation.resume(returning: object as? UIImage)
-                        }
-                    }
-                    if let image { images.append(image) }
-                }
-                // The sheet's binding closes the picker. Calling picker.dismiss here as well closed the sheet
-                // AND the screen under it (build 81: Shop board closed right after picking a photo).
-                await MainActor.run { parent.onPicked(images) }
-            }
+            // The sheet's binding closes the picker. Calling picker.dismiss here as well closed the sheet
+            // AND the screen under it (build 81: Shop board closed right after picking a photo).
+            parent.onPicked(results.map(\.itemProvider))
         }
     }
 }
@@ -318,17 +308,17 @@ struct ShopAddProductsView: View {
             if let notice { ShopNotice(text: notice).padding(.bottom, 96).transition(.opacity) }
         }
         .sheet(isPresented: $pickingPhotos) {
-            ShopPhotoPicker(limit: ShopBoardRules.remaining(model.items)) { images in
+            ShopPhotoPicker(limit: ShopBoardRules.remaining(model.items)) { providers in
                 pickingPhotos = false
                 lastSource = .photos
-                model.addPhotos(images)
+                model.addPhotos(providers)
             }
             .ignoresSafeArea()
         }
         .sheet(item: Binding(get: { photoFor.map(PhotoTarget.init) }, set: { photoFor = $0?.id })) { target in
-            ShopPhotoPicker(limit: 1) { images in
+            ShopPhotoPicker(limit: 1) { providers in
                 photoFor = nil
-                if let image = images.first { model.attach(image, to: target.id) }
+                if let provider = providers.first { model.attach(provider, to: target.id) }
             }
             .ignoresSafeArea()
         }
@@ -343,6 +333,7 @@ struct ShopAddProductsView: View {
             }
             .environmentObject(appState)
         }
+        .onChange(of: model.photoFailures) { _, _ in show(L10n.tr("A photo couldn't be opened. Try another one.")) }
         .accessibilityIdentifier("shopAddProducts")
     }
 
@@ -1039,9 +1030,11 @@ struct ShopBackgroundSheet: View {
             if case .photo = model.style.background, !model.style.matchBackground { tab = .photo }
         }
         .sheet(isPresented: $pickingPhoto) {
-            ShopPhotoPicker(limit: 1) { images in
+            ShopPhotoPicker(limit: 1) { providers in
                 pickingPhoto = false
-                if let image = images.first {
+                guard let provider = providers.first else { return }
+                Task {
+                    guard let image = await ShopPhotoLoader.load(provider) else { model.photoFailures += 1; return }
                     model.photoBackground = image
                     model.style.pick(.photo)
                 }

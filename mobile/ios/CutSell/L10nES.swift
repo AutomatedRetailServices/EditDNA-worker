@@ -1720,6 +1720,7 @@ enum L10nES {
         "Tap \"Add link\" → \"Products\"": "Toca \"Add link\" → \"Products\"",
         "Pick it from your Showcase and post": "Elígelo de tu Showcase y publica",
         "Open TikTok": "Abrir TikTok",
+        "A photo couldn't be opened. Try another one.": "No se pudo abrir una foto. Prueba con otra.",
         "Shop boards": "Shop boards",
         "Shop\nboards": "Shop\nboards",
         "Yesterday": "Ayer",

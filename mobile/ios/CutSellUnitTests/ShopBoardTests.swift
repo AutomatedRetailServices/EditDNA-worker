@@ -1,6 +1,7 @@
 import CoreImage
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 import Vision
 import XCTest
 @testable import CutSell
@@ -616,5 +617,47 @@ extension ShopHandEditTests {
         XCTAssertTrue(snap.isOnTitle(CGPoint(x: moved.midX, y: moved.midY), board: board))
         model.shuffle()
         XCTAssertEqual(model.snapshot().titleAdjust, ShopAdjust(), "Shuffle starts the title over too")
+    }
+}
+
+// MARK: - Photos from the picker (PO 14 Nov: PNG stuck "uploading")
+
+final class ShopPhotoLoadingTests: XCTestCase {
+    private func png(transparent: Bool, size: CGSize = CGSize(width: 200, height: 300)) -> Data {
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        format.opaque = !transparent
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+            if !transparent { UIColor.white.setFill(); ctx.fill(CGRect(origin: .zero, size: size)) }
+            UIColor.systemPink.setFill()
+            ctx.fill(CGRect(x: 50, y: 60, width: 100, height: 150))
+        }
+        return image.pngData()!
+    }
+
+    func testTransparentPNGKeepsItsShapeWithoutVision() throws {
+        let image = try XCTUnwrap(ShopPhotoLoader.image(from: png(transparent: true)))
+        let photo = try XCTUnwrap(ShopCutout.normalized(image))
+        XCTAssertTrue(ShopCutout.hasTransparentBackground(photo))
+        let result = try XCTUnwrap(ShopBoardModel.process(image))
+        XCTAssertTrue(result.removed)
+        XCTAssertLessThan(result.image.width, 120, "trimmed to the pink product")
+    }
+
+    func testOpaquePhotoIsNotTakenAsCutOut() throws {
+        let image = try XCTUnwrap(ShopPhotoLoader.image(from: png(transparent: false)))
+        let photo = try XCTUnwrap(ShopCutout.normalized(image))
+        XCTAssertFalse(ShopCutout.hasTransparentBackground(photo))
+    }
+
+    func testHugePNGIsReadSmaller() throws {
+        let image = try XCTUnwrap(ShopPhotoLoader.image(from: png(transparent: true, size: CGSize(width: 4000, height: 6000))))
+        XCTAssertLessThanOrEqual(max(image.size.width, image.size.height), 2400)
+    }
+
+    func testBrokenFileFailsInsteadOfSpinning() async {
+        let provider = NSItemProvider(item: Data("not an image".utf8) as NSData, typeIdentifier: UTType.png.identifier)
+        let image = await ShopPhotoLoader.load(provider, timeout: 5)
+        XCTAssertNil(image)
     }
 }

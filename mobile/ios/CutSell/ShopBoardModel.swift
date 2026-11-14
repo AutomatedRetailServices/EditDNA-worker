@@ -55,6 +55,32 @@ final class ShopBoardModel: ObservableObject {
         }
     }
 
+    /// Photos picked in the picker: each gets its tile (with the spinner) at once and loads on its own.
+    /// A photo that cannot load in time is removed and counted in `photoFailures` (the screen says so).
+    func addPhotos(_ providers: [NSItemProvider]) {
+        for provider in providers.prefix(ShopBoardRules.remaining(items)) {
+            let item = ShopItem(source: .photos)
+            items.append(item)
+            attach(provider, to: item.id, removeIfFails: true)
+        }
+    }
+
+    /// Bumped each time a picked photo could not be loaded.
+    @Published var photoFailures = 0
+
+    func attach(_ provider: NSItemProvider, to id: UUID, removeIfFails: Bool = false) {
+        busy.insert(id)
+        Task {
+            guard let image = await ShopPhotoLoader.load(provider) else {
+                busy.remove(id)
+                if removeIfFails { remove(id) }
+                photoFailures += 1
+                return
+            }
+            attach(image, to: id)
+        }
+    }
+
     /// "From my products": the product (its name, its id). Its photo comes from Photos next.
     @discardableResult
     func addProduct(name: String, productID: String) -> UUID? {
@@ -92,6 +118,10 @@ final class ShopBoardModel: ObservableObject {
 
     nonisolated static func process(_ image: UIImage) -> (image: CGImage, removed: Bool, kind: ShopItemKind)? {
         guard let photo = ShopCutout.normalized(image) else { return nil }
+        // A PNG that already has no background (transparent): kept as it is, no Vision pass.
+        if ShopCutout.hasTransparentBackground(photo), let trimmed = ShopCutout.trimmed(photo) {
+            return (trimmed, true, ShopVision.kind(of: trimmed))
+        }
         if let cut = try? ShopCutout.removeBackground(photo) {
             return (cut, true, ShopVision.kind(of: cut))
         }
