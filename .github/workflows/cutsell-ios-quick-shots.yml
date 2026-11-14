@@ -7,7 +7,7 @@ on:
     branches: [ios-shots/request]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   shots:
@@ -58,8 +58,10 @@ jobs:
             xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/shots/$s.png" >/dev/null 2>&1 || true
           done
           ls -la "$RUNNER_TEMP/shots"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: quick-shots
-          path: ${{ runner.temp }}/shots
-          retention-days: 3
+      - name: Push the screenshots to the ios-shots/result branch
+        run: |
+          cd "$RUNNER_TEMP/shots"
+          git init -q && git checkout -q -b ios-shots/result
+          git add -A
+          git -c user.name="cutsell-ci" -c user.email="ci@cutsell.invalid" commit -q -m "quick shots for ${{ github.sha }}"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ios-shots/result
