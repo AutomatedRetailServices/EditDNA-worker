@@ -114,7 +114,7 @@ final class ShopBoardModel: ObservableObject {
             let result = await Self.processWithTimeout(image)
             await MainActor.run {
                 self.busy.remove(id)
-                CutSellDiagnostics.log(result == nil ? "shop_photo_process_failed" : "shop_photo_processed", [
+                CutSellDiagnostics.log(result.map { _ in "shop_photo_processed" } ?? "shop_photo_process_failed", [
                     "ms": String(Int(Date().timeIntervalSince(started) * 1000)),
                     "removed": String(result?.removed ?? false),
                 ])
