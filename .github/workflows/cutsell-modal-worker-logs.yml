@@ -24,7 +24,7 @@ jobs:
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
         run: |
           pip install -q modal
-          modal app logs cutsell-worker --since 2h --tail 5000 --timestamps > "$RUNNER_TEMP/raw.txt" 2>&1 || true
+          modal app logs cutsell-worker --since 3h --tail 5000 --timestamps > "$RUNNER_TEMP/raw.txt" 2>&1 || true
           wc -l "$RUNNER_TEMP/raw.txt"
           python3 - <<'PY'
           import os, re
