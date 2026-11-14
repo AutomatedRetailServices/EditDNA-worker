@@ -61,11 +61,11 @@ struct ShopItem: Identifiable, Equatable {
 }
 
 enum ShopBoardRules {
-    /// "Pick 3–8 items for your board."
+    /// "Pick 3–12 items for your board." (PO 14 Nov: up to 12; was 8.)
     static let minItems = 3
-    static let maxItems = 8
+    static let maxItems = 12
 
-    /// "Choose a style" works with 3–8 items that all have their photo.
+    /// "Choose a style" works with 3–12 items that all have their photo.
     static func canChooseStyle(_ items: [ShopItem]) -> Bool {
         (minItems...maxItems).contains(items.count) && items.allSatisfy { !$0.needsPhoto }
     }
@@ -768,6 +768,7 @@ enum ShopLayout {
     /// odd variants mirror the board).
     static func placements(kinds: [ShopItemKind], variant: Int = 0) -> [ShopPlacement] {
         guard !kinds.isEmpty else { return [] }
+        if kinds.count > figmaSlots.count + extraSlots.count { return gridPlacements(count: kinds.count, variant: variant) }
         // The six Figma places always (each kind finds its own), the two extra ones only for items 7 and 8.
         let slots = figmaSlots + extraSlots.prefix(max(0, kinds.count - figmaSlots.count))
         var order = slots.indices.map { $0 }
@@ -802,6 +803,31 @@ enum ShopLayout {
                 slot.rotation = -slot.rotation
             }
             return ShopPlacement(itemIndex: item, slot: slot)
+        }
+    }
+
+    /// 9 to 12 items (PO 14 Nov): three per row between the title and "YOUR BRAND", each a little tilted;
+    /// Shuffle swaps their places. Every one can then be moved by hand.
+    static func gridPlacements(count: Int, variant: Int) -> [ShopPlacement] {
+        let columns = 3, rows = Int((Double(count) / 3).rounded(.up))
+        let area = CGRect(x: 18, y: 150, width: 354, height: 640)
+        let cell = CGSize(width: area.width / CGFloat(columns), height: area.height / CGFloat(rows))
+        var order = Array(0..<count)
+        if variant > 0 {
+            var rng = ShopRandom(seed: UInt64(variant) &* 0x9E3779B97F4A7C15)
+            order.shuffle(using: &rng)
+        }
+        let tilts: [Double] = [-4, 3, -2, 5, -3, 2]
+        return (0..<count).map { place in
+            let row = place / columns, column = place % columns
+            // The last row, if it is not full, is centred.
+            let inRow = row == rows - 1 ? count - row * columns : columns
+            let x = area.minX + cell.width * (CGFloat(column) + 0.5 + CGFloat(columns - inRow) / 2)
+            let y = area.minY + cell.height * (CGFloat(row) + 0.5)
+            let slot = ShopSlot(center: CGPoint(x: variant % 2 == 1 ? designSize.width - x : x, y: y),
+                                size: CGSize(width: cell.width * 0.92, height: cell.height * 0.9),
+                                rotation: tilts[(place + variant) % tilts.count], prefers: [])
+            return ShopPlacement(itemIndex: order[place], slot: slot)
         }
     }
 

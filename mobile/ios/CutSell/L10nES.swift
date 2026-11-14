@@ -1646,7 +1646,7 @@ enum L10nES {
         "Shoppable outfit posts for TikTok & Instagram": "Posts de outfits con compras para TikTok e Instagram",
         "NEW": "NUEVO",
         "Add products": "Agregar productos",
-        "Pick 3–8 items for your board.": "Elige de 3 a 8 artículos para tu board.",
+        "Pick 3–12 items for your board.": "Elige de 3 a 12 artículos para tu board.",
         "From my products": "De mis productos",
         "CeraVe, Dior… (your product list)": "CeraVe, Dior… (tu lista de productos)",
         "From photos": "De fotos",

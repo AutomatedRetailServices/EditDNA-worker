@@ -408,13 +408,29 @@ final class ShopLayoutTests: XCTestCase {
         XCTAssertEqual(ShopLayout.placements(kinds: kinds, variant: 2), ShopLayout.placements(kinds: kinds, variant: 2), "repeatable")
     }
 
-    func testThreeToEightItems() {
+    func testThreeToTwelveItems() {
         XCTAssertEqual(ShopLayout.placements(kinds: Array(repeating: .unknown, count: 3)).count, 3)
         XCTAssertEqual(Set(ShopLayout.placements(kinds: Array(repeating: .unknown, count: 8)).map(\.itemIndex)), Set(0..<8))
         let items = (0..<3).map { _ in ShopItem(source: .photos, cutout: ShopSynthetic.cutout(.red)) }
         XCTAssertTrue(ShopBoardRules.canChooseStyle(items))
         XCTAssertFalse(ShopBoardRules.canChooseStyle(Array(items.prefix(2))))
-        XCTAssertEqual(ShopBoardRules.remaining(items), 5)
+        XCTAssertEqual(ShopBoardRules.remaining(items), 9, "up to 12 (PO 14 Nov)")
+    }
+
+    func testNineToTwelveItemsAllGetAPlaceOnTheBoard() {
+        for count in 9...12 {
+            let placed = ShopLayout.placements(kinds: Array(repeating: .unknown, count: count))
+            XCTAssertEqual(Set(placed.map(\.itemIndex)), Set(0..<count))
+            for p in placed {
+                XCTAssertGreaterThan(p.slot.center.y, 140, "below the title")
+                XCTAssertLessThan(p.slot.center.y + p.slot.size.height / 2, 800, "above YOUR BRAND")
+                XCTAssertGreaterThan(p.slot.center.x - p.slot.size.width / 2, 0)
+                XCTAssertLessThan(p.slot.center.x + p.slot.size.width / 2, ShopLayout.designSize.width)
+            }
+            let shuffled = ShopLayout.placements(kinds: Array(repeating: .unknown, count: count), variant: 3)
+            XCTAssertEqual(Set(shuffled.map(\.itemIndex)), Set(0..<count))
+        }
+        XCTAssertEqual(ShopBoardRules.maxItems, 12)
     }
 
     func testItemsFitTheirPlaceOnA916Board() {
