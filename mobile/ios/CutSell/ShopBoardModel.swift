@@ -70,14 +70,21 @@ final class ShopBoardModel: ObservableObject {
 
     func attach(_ provider: NSItemProvider, to id: UUID, removeIfFails: Bool = false) {
         busy.insert(id)
+        let started = Date()
+        CutSellDiagnostics.log("shop_photo_load_start", ["types": provider.registeredTypeIdentifiers.joined(separator: ",")])
         Task {
             guard let image = await ShopPhotoLoader.load(provider) else {
+                CutSellDiagnostics.log("shop_photo_load_failed", ["ms": String(Int(Date().timeIntervalSince(started) * 1000))])
                 busy.remove(id)
                 if removeIfFails { remove(id) }
                 photoFailures += 1
                 return
             }
-            attach(image, to: id)
+            CutSellDiagnostics.log("shop_photo_loaded", [
+                "ms": String(Int(Date().timeIntervalSince(started) * 1000)),
+                "w": String(Int(image.size.width * image.scale)), "h": String(Int(image.size.height * image.scale)),
+            ])
+            attach(image, to: id, removeIfFails: removeIfFails)
         }
     }
 
@@ -100,19 +107,47 @@ final class ShopBoardModel: ObservableObject {
     }
 
     /// The photo of an item (picked in Photos): background removed, kind read by Vision.
-    func attach(_ image: UIImage, to id: UUID) {
+    func attach(_ image: UIImage, to id: UUID, removeIfFails: Bool = false) {
         busy.insert(id)
+        let started = Date()
         Task.detached(priority: .userInitiated) {
-            let result = Self.process(image)
+            let result = await Self.processWithTimeout(image)
             await MainActor.run {
                 self.busy.remove(id)
-                guard let index = self.items.firstIndex(where: { $0.id == id }), let result else { return }
+                CutSellDiagnostics.log(result == nil ? "shop_photo_process_failed" : "shop_photo_processed", [
+                    "ms": String(Int(Date().timeIntervalSince(started) * 1000)),
+                    "removed": String(result?.removed ?? false),
+                ])
+                guard let index = self.items.firstIndex(where: { $0.id == id }) else { return }
+                guard let result else {
+                    // Never leave an empty tile behind (PO 14 Nov).
+                    if removeIfFails { self.remove(id) }
+                    self.photoFailures += 1
+                    return
+                }
                 self.items[index].cutout = result.image
                 self.items[index].flat = result.image
                 self.items[index].backgroundRemoved = result.removed
                 self.items[index].kind = result.kind
                 self.items[index].shaped = false
             }
+        }
+    }
+
+    /// `process` with a time limit: after 25 s the photo is used as it is (background kept), so a tile never spins
+    /// for ever (PO 14 Nov, build 90: photos still not loading).
+    nonisolated static func processWithTimeout(_ image: UIImage, seconds: Double = 25)
+        async -> (image: CGImage, removed: Bool, kind: ShopItemKind)? {
+        await withTaskGroup(of: (image: CGImage, removed: Bool, kind: ShopItemKind)?.self) { group in
+            group.addTask { process(image) }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                CutSellDiagnostics.log("shop_photo_process_timeout", [:])
+                return ShopCutout.normalized(image).map { ($0, false, ShopItemKind.unknown) }
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
         }
     }
 

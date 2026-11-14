@@ -118,6 +118,7 @@ struct ShopPhotoPicker: UIViewControllerRepresentable {
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
             // The sheet's binding closes the picker. Calling picker.dismiss here as well closed the sheet
             // AND the screen under it (build 81: Shop board closed right after picking a photo).
+            CutSellDiagnostics.log("shop_photo_picked", ["count": String(results.count)])
             parent.onPicked(results.map(\.itemProvider))
         }
     }
