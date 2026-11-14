@@ -185,6 +185,7 @@ struct ShopBoardFlowView: View {
     }
     @State private var showingTitle = false
     @State private var showingBackground = false
+    @State private var pickingWearPhoto = false
 
     var body: some View {
         ZStack {
@@ -197,7 +198,11 @@ struct ShopBoardFlowView: View {
                                   onKeepFlat: { model.keepFlat(id); step = .add })
                 }
             case .style:
-                ShopStyleView(model: model, onBack: { step = .add }, onNext: { step = .board })
+                ShopStyleView(model: model, onBack: { step = .add }, onNext: {
+                    // Wear it (PO 14 Nov): the gallery opens by itself for her photo wearing the outfit.
+                    if model.template == .wearIt && model.photoBackground == nil { pickingWearPhoto = true }
+                    else { step = .board }
+                })
             case .board:
                 ShopBoardScreen(model: model, onBack: { step = .style }, onTitle: { showingTitle = true },
                                 onBackground: { showingBackground = true }, onNext: { model.prepareShare(); step = .share })
@@ -208,6 +213,19 @@ struct ShopBoardFlowView: View {
             BottomSheetOverlay(isPresented: $showingBackground) {
                 ShopBackgroundSheet(model: model, onDone: { showingBackground = false })
             }
+        }
+        .sheet(isPresented: $pickingWearPhoto) {
+            ShopPhotoPicker(limit: 1) { providers in
+                pickingWearPhoto = false
+                step = .board
+                guard let provider = providers.first else { return }
+                Task {
+                    guard let image = await ShopPhotoLoader.load(provider) else { model.photoFailures += 1; return }
+                    model.photoBackground = image
+                    model.style.pick(.photo)
+                }
+            }
+            .ignoresSafeArea()
         }
         .environment(\.colorScheme, .light)
         .animation(.easeOut(duration: 0.2), value: step)
@@ -603,12 +621,8 @@ struct ShopStyleView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         Text(L10n.tr("Templates")).font(CS.inter(13, .bold)).foregroundStyle(Color(fixed: 0x6B7385))
                         LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 12) {
+                            // Figma S3w (3064:206): the 4th tile is Wear it (was "+ More soon").
                             ForEach(ShopTemplate.allCases) { template in templateCard(template) }
-                            Text(L10n.tr("+ More soon"))
-                                .font(CS.inter(14, .bold)).foregroundStyle(Color(fixed: 0x6B7385))
-                                .frame(maxWidth: .infinity).frame(height: 258)
-                                .shopCard(radius: 18)
-                                .accessibilityIdentifier("shopMoreSoon")
                         }
                         .padding(.top, 12)
                     }

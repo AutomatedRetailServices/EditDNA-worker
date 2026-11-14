@@ -759,6 +759,7 @@ final class ShopBoardBottomLineTests: XCTestCase {
     func testBottomLineIsEditableAndSaved() throws {
         let model = ShopBoardModel()
         XCTAssertEqual(model.snapshot().bottomLine, "YOUR BRAND")
+        model.items = [ShopItem(source: .photos, cutout: ShopSynthetic.cutout(.red))]
         model.bottomLine = "Bloom by Susana"
         XCTAssertEqual(model.snapshot().bottomLine, "Bloom by Susana")
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("ShopBottom-\(UUID().uuidString)")
@@ -773,5 +774,57 @@ final class ShopBoardBottomLineTests: XCTestCase {
         struct Probe: Decodable { var bottomLine: String? }
         XCTAssertNil(try JSONDecoder().decode(Probe.self, from: json).bottomLine)
         XCTAssertEqual(ShopTemplate.footer, "YOUR BRAND")
+    }
+}
+
+
+/// PO 14 Nov 2026 (Figma 3064:197 / S3w 3064:206): the Wear it template.
+@MainActor
+final class ShopWearItTests: XCTestCase {
+    private func model(_ n: Int) -> ShopBoardModel {
+        let m = ShopBoardModel()
+        m.items = (0..<n).map { _ in ShopItem(source: .photos, cutout: ShopSynthetic.cutout(.blue)) }
+        return m
+    }
+
+    func testWearItIsTheFourthTemplate() {
+        XCTAssertEqual(ShopTemplate.allCases.last, .wearIt)
+        XCTAssertEqual(ShopTemplate.wearIt.title, "Wear it")
+    }
+
+    func testChoosingWearItUsesHerPhotoAndAWhiteTitleLowDown() {
+        let m = model(2)
+        m.choose(.wearIt)
+        XCTAssertEqual(m.style.background, .photo)
+        XCTAssertFalse(m.style.matchBackground)
+        XCTAssertEqual(m.style.titleColor, ShopRGB(hex: 0xFFFFFF))
+        let s = m.snapshot()
+        XCTAssertTrue(s.wearIt)
+        XCTAssertNil(s.photo)                                         // no photo yet: the warm placeholder
+        XCTAssertEqual(s.top, ShopTemplate.wearItPlaceholder.top)
+        XCTAssertEqual(s.titleFrame(board: ShopLayout.designSize).rect.minY, 610, accuracy: 0.5)
+        m.photoBackground = UIImage(cgImage: ShopSynthetic.cutout(.green))
+        XCTAssertNotNil(m.snapshot().photo)
+        // Back to another template: the usual look again.
+        m.choose(.everydayChic)
+        XCTAssertTrue(m.style.matchBackground)
+        XCTAssertFalse(m.snapshot().wearIt)
+        XCTAssertEqual(m.snapshot().titleFrame(board: ShopLayout.designSize).rect.minY, 14, accuracy: 0.5)
+    }
+
+    func testProductsStayOnTheLeftAboveTheTitle() {
+        for n in 1...12 {
+            let places = ShopLayout.wearItPlacements(count: n, variant: 0)
+            XCTAssertEqual(places.count, n)
+            XCTAssertEqual(Set(places.map(\.itemIndex)).count, n)
+            for p in places {
+                XCTAssertLessThanOrEqual(p.slot.center.x, 195, "n=\(n): left half")
+                XCTAssertLessThanOrEqual(p.slot.center.y + p.slot.size.height / 2, 650, "n=\(n): above the title")
+            }
+        }
+        // Shuffle swaps which product goes where, never the side.
+        let a = ShopLayout.wearItPlacements(count: 3, variant: 0).map(\.itemIndex)
+        let b = ShopLayout.wearItPlacements(count: 3, variant: 1).map(\.itemIndex)
+        XCTAssertNotEqual(a, b)
     }
 }

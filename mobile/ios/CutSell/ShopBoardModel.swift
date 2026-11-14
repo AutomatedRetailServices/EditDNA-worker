@@ -208,10 +208,20 @@ final class ShopBoardModel: ObservableObject {
     // MARK: Template, title, look
 
     func choose(_ template: ShopTemplate) {
+        let leavingWearIt = self.template == .wearIt && template != .wearIt
         self.template = template
         bigTitle = template.bigTitle
         scriptLine = template.scriptLine
         if !style.matchBackground, case .classic = style.background { style.background = .classic(template.background) }
+        if template == .wearIt {
+            // Her photo is the background; the title is white over it (she can change both).
+            style.matchBackground = false
+            style.background = .photo
+            style.matchTitle = false
+            style.titleColor = ShopTemplate.wearIt.ink
+        } else if leavingWearIt {
+            style = ShopBoardStyle(background: .classic(template.background))
+        }
         variant = 0
         clearHandEdits()
     }
@@ -266,14 +276,21 @@ final class ShopBoardModel: ObservableObject {
             script = tmpl.scriptLine
         }
         let usable = items.filter { $0.cutout != nil }
-        let placements = ShopLayout.placements(kinds: usable.map(\.kind), variant: override == nil ? variant : 0)
+        let wear = tmpl == .wearIt
+        let placements = wear ? ShopLayout.wearItPlacements(count: usable.count, variant: override == nil ? variant : 0)
+            : ShopLayout.placements(kinds: usable.map(\.kind), variant: override == nil ? variant : 0)
         let ids = usable.map(\.id)
         let handEdited = override == nil
         let placedIDs = placements.map { ids[$0.itemIndex] }
-        let colors = look.backgroundColors(palette: palette)
+        var colors = look.backgroundColors(palette: palette)
         var texture: ShopTexture?
         if case .texture(let t) = look.background { texture = t }
-        let photo: UIImage? = { if case .photo = look.background, !look.matchBackground { return photoBackground }; return nil }()
+        var photo: UIImage? = { if case .photo = look.background, !look.matchBackground { return photoBackground }; return nil }()
+        if wear {
+            if override != nil { photo = photoBackground }       // the style tile shows her photo once she has one
+            if photo == nil, case .photo = look.background { colors = ShopTemplate.wearItPlaceholder }
+            if override != nil, photo == nil { colors = ShopTemplate.wearItPlaceholder }
+        }
         return ShopBoardSnapshot(
             images: usable.compactMap(\.cutout), placements: placements,
             itemIDs: placedIDs,
@@ -281,7 +298,7 @@ final class ShopBoardModel: ObservableObject {
             drawOrder: ShopDrawOrder.order(itemIDs: placedIDs, raised: handEdited ? raised : []),
             titleAdjust: handEdited ? (adjusts[Self.titleID] ?? ShopAdjust()) : ShopAdjust(),
             top: colors.top, bottom: colors.bottom, texture: texture, textureMatched: look.matchBackground && texture != nil,
-            photo: photo, bigTitle: title, scriptLine: script, bottomLine: bottomLine, pair: fontPair,
+            photo: photo, bigTitle: title, scriptLine: script, bottomLine: bottomLine, wearIt: wear, pair: fontPair,
             titleColor: look.resolvedTitleColor(palette: palette, template: tmpl))
     }
 }
@@ -306,10 +323,15 @@ struct ShopBoardSnapshot {
     var bigTitle: String
     var scriptLine: String
     var bottomLine: String = ShopTemplate.footer
+    /// Wear it (Figma 3064:197): title in the lower third, a soft shade under it, bottom line just below.
+    var wearIt = false
     var pair: ShopFontPair
     var titleColor: ShopRGB
 
     var isDark: Bool { top.mixed(bottom, 0.5).luminance < 0.25 }
+
+    /// Wear it: the title block is 596 design units lower (Figma: "Stylist-approved" at y 610).
+    var titleShift: CGFloat { wearIt ? 596 : 0 }
 
     var order: [Int] { drawOrder.count == placements.count ? drawOrder : Array(placements.indices) }
 
@@ -317,7 +339,7 @@ struct ShopBoardSnapshot {
     func titleFrame(board size: CGSize) -> (rect: CGRect, rotation: Double) {
         let sx = size.width / ShopLayout.designSize.width, sy = size.height / ShopLayout.designSize.height
         let r = ShopLayout.titleRect
-        let base = CGRect(x: r.minX * sx, y: r.minY * sy, width: r.width * sx, height: r.height * sy)
+        let base = CGRect(x: r.minX * sx, y: (r.minY + titleShift) * sy, width: r.width * sx, height: r.height * sy)
         return (titleAdjust.frame(base: base, board: size), titleAdjust.rotation)
     }
 
@@ -399,6 +421,11 @@ struct ShopBoardCanvas: View {
     private func background(size: CGSize) -> some View {
         if let photo = snapshot.photo {
             Image(uiImage: photo).resizable().scaledToFill().frame(width: size.width, height: size.height).clipped()
+                .overlay(alignment: .bottom) { if snapshot.wearIt { wearItShade(size: size) } }
+        } else if snapshot.wearIt {
+            LinearGradient(colors: [snapshot.top.color, snapshot.bottom.color], startPoint: .top, endPoint: .bottom)
+                .frame(width: size.width, height: size.height)
+                .overlay(alignment: .bottom) { wearItShade(size: size) }
         } else if let texture = snapshot.texture {
             Image(uiImage: ShopTextureRenderer.image(texture, size: size,
                                                      base: snapshot.textureMatched ? (snapshot.top, snapshot.bottom) : nil))
@@ -408,6 +435,13 @@ struct ShopBoardCanvas: View {
             LinearGradient(colors: [snapshot.top.color, snapshot.bottom.color], startPoint: .top, endPoint: .bottom)
                 .frame(width: size.width, height: size.height)
         }
+    }
+
+    /// Figma 3064:197 "Sombra abajo": clear → 45 % black over the lower 420 of 844, so white text always reads.
+    private func wearItShade(size: CGSize) -> some View {
+        LinearGradient(colors: [Color.black.opacity(0), Color.black.opacity(0.45)], startPoint: .top, endPoint: .bottom)
+            .frame(width: size.width, height: size.height * 420 / 844)
+            .allowsHitTesting(false)
     }
 
     private func texts(sx: CGFloat, sy: CGFloat) -> some View {
@@ -422,18 +456,43 @@ struct ShopBoardCanvas: View {
                                                         y: ShopLayout.titleRect.midY / 140))
                 .rotationEffect(.degrees(t.rotation), anchor: UnitPoint(x: ShopLayout.titleRect.midX / ShopLayout.designSize.width,
                                                                         y: ShopLayout.titleRect.midY / 140))
-                .offset(x: t.offset.width * sx, y: t.offset.height * sy)
+                .offset(x: t.offset.width * sx, y: (t.offset.height + snapshot.titleShift) * sy)
             Text(verbatim: snapshot.bottomLine.trimmingCharacters(in: .whitespaces).uppercased())
                 .font(ShopFonts.font(ShopFontPair.footerFace, size: 14 * sx))
                 .tracking(4.2 * sx)
-                .foregroundStyle(footerInk)
-                .padding(.top, 810 * sy)
+                .foregroundStyle(snapshot.wearIt ? Color.white : footerInk)
+                .padding(.top, (snapshot.wearIt ? 712 : 810) * sy)
         }
         .frame(width: width, alignment: .top)
     }
 
     /// "CUTSELL" + "Everyday chic", in a 140-design-unit-high block from the top of the board.
+    @ViewBuilder
     private func titleBlock(sx: CGFloat, sy: CGFloat, ink: Color, titleSize: CGFloat) -> some View {
+        if snapshot.wearIt {
+            // Figma 3064:197: both lines in the script face, 30 and 34, centred (a light shadow keeps them clear).
+            ZStack(alignment: .top) {
+                Text(verbatim: snapshot.bigTitle)
+                    .font(ShopFonts.font(snapshot.pair.scriptFace, size: 30 * sx))
+                    .foregroundStyle(ink)
+                    .lineLimit(1).minimumScaleFactor(0.4)
+                    .frame(width: width - 24 * sx)
+                    .padding(.top, 14 * sy)
+                Text(verbatim: snapshot.scriptLine)
+                    .font(ShopFonts.font(snapshot.pair.scriptFace, size: 34 * sx))
+                    .foregroundStyle(ink)
+                    .lineLimit(1).minimumScaleFactor(0.4)
+                    .frame(width: width - 24 * sx)
+                    .padding(.top, 50 * sy)
+            }
+            .shadow(color: Color.black.opacity(0.25), radius: 4 * sx, x: 0, y: 1 * sx)
+            .frame(width: width, height: 140 * sy, alignment: .top)
+        } else {
+            classicTitleBlock(sx: sx, sy: sy, ink: ink, titleSize: titleSize)
+        }
+    }
+
+    private func classicTitleBlock(sx: CGFloat, sy: CGFloat, ink: Color, titleSize: CGFloat) -> some View {
         ZStack(alignment: .top) {
             Text(verbatim: snapshot.bigTitle)
                 .font(ShopFonts.font(snapshot.pair.titleFace, size: titleSize, opticalSize: 44 * snapshot.pair.titleScale))

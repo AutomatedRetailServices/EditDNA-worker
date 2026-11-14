@@ -640,6 +640,9 @@ struct ShopFontCredit: Identifiable, Equatable {
 /// "Choose a style" (Figma 3 and the example results 3031:4 / 3031:29 / 3031:54).
 enum ShopTemplate: String, CaseIterable, Identifiable {
     case everydayChic, trendyInspo, lookForLess
+    /// PO 14 Nov 2026 (Figma "Resultado · plantilla 4 · Wear it" 3064:197): her own photo wearing the outfit fills the
+    /// board, the products are on the left, the title is white in the lower third.
+    case wearIt
     var id: String { rawValue }
 
     var title: String {
@@ -647,20 +650,28 @@ enum ShopTemplate: String, CaseIterable, Identifiable {
         case .everydayChic: "Everyday chic"
         case .trendyInspo: "Trendy inspo"
         case .lookForLess: "Look for less"
+        case .wearIt: "Wear it"
         }
     }
     /// The board's own texts (Figma results).
-    var bigTitle: String { self == .lookForLess ? "HOLIDAY" : "CUTSELL" }
+    var bigTitle: String {
+        switch self {
+        case .lookForLess: "HOLIDAY"
+        case .wearIt: "Stylist-approved"
+        default: "CUTSELL"
+        }
+    }
     var scriptLine: String {
         switch self {
         case .everydayChic: "Everyday chic"
         case .trendyInspo: "trendy outfit inspo"
         case .lookForLess: "look for less"
+        case .wearIt: "weekend outfits"
         }
     }
     var background: ShopClassicColor {
         switch self {
-        case .everydayChic: .cream
+        case .everydayChic, .wearIt: .cream
         case .trendyInspo: .beige
         case .lookForLess: .white
         }
@@ -671,8 +682,11 @@ enum ShopTemplate: String, CaseIterable, Identifiable {
         case .everydayChic: ShopRGB(hex: 0x2A2320)
         case .trendyInspo: ShopRGB(hex: 0x3A2416)
         case .lookForLess: ShopRGB(hex: 0x2F4A7A)
+        case .wearIt: ShopRGB(hex: 0xFFFFFF)
         }
     }
+    /// Wear it before her photo is picked: the warm placeholder of the Figma board (3064:197).
+    static let wearItPlaceholder = (top: ShopRGB(hex: 0xC7B39E), bottom: ShopRGB(hex: 0x6B5445))
     static let footerInk = ShopRGB(hex: 0x4A403A)
     static let footer = "YOUR BRAND"
 }
@@ -825,6 +839,40 @@ enum ShopLayout {
 
     /// 9 to 12 items (PO 14 Nov): three per row between the title and "YOUR BRAND", each a little tilted;
     /// Shuffle swaps their places. Every one can then be moved by hand.
+    /// Wear it (Figma 3064:197): the products on the LEFT of her photo, above the title (which starts at y 610).
+    /// 1–4 items have their own places (2 = the Figma board); more go in two small columns. Shuffle changes which
+    /// product goes where, never the side.
+    static func wearItPlacements(count: Int, variant: Int) -> [ShopPlacement] {
+        guard count > 0 else { return [] }
+        let places: [(CGPoint, CGSize, Double)]
+        switch count {
+        case 1: places = [(CGPoint(x: 114, y: 380), CGSize(width: 220, height: 420), 0)]
+        case 2: places = [(CGPoint(x: 114, y: 296), CGSize(width: 220, height: 292), 0),
+                          (CGPoint(x: 103, y: 510), CGSize(width: 170, height: 260), 0)]
+        case 3: places = [(CGPoint(x: 104, y: 236), CGSize(width: 190, height: 200), -2),
+                          (CGPoint(x: 124, y: 400), CGSize(width: 190, height: 220), 2),
+                          (CGPoint(x: 96, y: 540), CGSize(width: 170, height: 150), -1)]
+        case 4: places = [(CGPoint(x: 68, y: 250), CGSize(width: 125, height: 170), -2),
+                          (CGPoint(x: 172, y: 300), CGSize(width: 125, height: 170), 3),
+                          (CGPoint(x: 72, y: 460), CGSize(width: 130, height: 190), 2),
+                          (CGPoint(x: 170, y: 520), CGSize(width: 120, height: 150), -3)]
+        default:
+            let rows = (count + 1) / 2
+            let top: CGFloat = 130, bottom: CGFloat = 600
+            let h = (bottom - top) / CGFloat(rows)
+            places = (0..<count).map { i in
+                let row = i / 2, col = i % 2
+                return (CGPoint(x: col == 0 ? 64 : 166, y: top + h * (CGFloat(row) + 0.5)),
+                        CGSize(width: 104, height: h * 0.95), Double(col == 0 ? -2 : 2))
+            }
+        }
+        return places.indices.map { i in
+            let item = (i + variant) % count
+            return ShopPlacement(itemIndex: item, slot: ShopSlot(center: places[i].0, size: places[i].1,
+                                                                 rotation: places[i].2, prefers: []))
+        }
+    }
+
     static func gridPlacements(count: Int, variant: Int) -> [ShopPlacement] {
         let columns = 3, rows = Int((Double(count) / 3).rounded(.up))
         let area = CGRect(x: 18, y: 150, width: 354, height: 640)

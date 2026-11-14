@@ -1643,6 +1643,7 @@ enum L10nES {
         "Everyday chic": "Chic de todos los días",
         "Trendy inspo": "Inspo en tendencia",
         "Look for less": "Look por menos",
+        "Wear it": "Wear it",
         "Editorial": "Editorial",
         "Bold": "Fuerte",
         "Elegant": "Elegante",
