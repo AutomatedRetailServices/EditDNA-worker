@@ -1,0 +1,194 @@
+2026-11-14 19:37:09+00:00 19:37:09 Worker f605ceae26c74e289a32e659b5a6c09f: job f74532bc-4907-4d60-9b7f-e048c92813bd: exception raised while executing (cutsell_worker.worker_job.run_flow_b_job)
+2026-11-14 19:37:09+00:00 Traceback (most recent call last):
+2026-11-14 19:37:09+00:00   File "/root/cutsell_worker/storage_routing.py", line 143, in download
+2026-11-14 19:37:09+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/context.py", line 123, in wrapper
+2026-11-14 19:37:09+00:00   File "/usr/local/lib/python3.11/site-packages/boto3/s3/inject.py", line 223, in download_file
+2026-11-14 19:37:09+00:00   File "/usr/local/lib/python3.11/site-packages/boto3/s3/transfer.py", line 484, in download_file
+2026-11-14 19:37:09+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/futures.py", line 111, in result
+2026-11-14 19:37:09+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/futures.py", line 287, in result
+2026-11-14 19:37:09+00:00     raise self._exception
+2026-11-14 19:37:09+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/tasks.py", line 272, in _main
+2026-11-14 19:37:09+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/download.py", line 379, in _submit
+2026-11-14 19:37:09+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/client.py", line 606, in _api_call
+2026-11-14 19:37:09+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/context.py", line 123, in wrapper
+2026-11-14 19:37:09+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/client.py", line 1094, in _make_api_call
+2026-11-14 19:37:09+00:00     raise error_class(parsed_response, operation_name)
+2026-11-14 19:37:09+00:00 botocore.exceptions.ClientError: An error occurred (404) when calling the HeadObject operation: Not Found
+2026-11-14 19:37:09+00:00 During handling of the above exception, another exception occurred:
+2026-11-14 19:37:09+00:00 Traceback (most recent call last):
+2026-11-14 19:37:09+00:00   File "/usr/local/lib/python3.11/site-packages/rq/worker/base.py", line 1671, in perform_job
+2026-11-14 19:37:09+00:00   File "/usr/local/lib/python3.11/site-packages/rq/job.py", line 1478, in perform
+2026-11-14 19:37:09+00:00   File "/usr/local/lib/python3.11/site-packages/rq/job.py", line 1539, in _execute
+2026-11-14 19:37:09+00:00   File "/root/cutsell_worker/worker_job.py", line 590, in run_flow_b_job
+2026-11-14 19:37:09+00:00   File "/root/cutsell_worker/storage.py", line 27, in download_source
+2026-11-14 19:37:09+00:00   File "/root/cutsell_worker/storage_routing.py", line 147, in download
+2026-11-14 19:37:09+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/context.py", line 123, in wrapper
+2026-11-14 19:37:09+00:00   File "/usr/local/lib/python3.11/site-packages/boto3/s3/inject.py", line 223, in download_file
+2026-11-14 19:37:09+00:00   File "/usr/local/lib/python3.11/site-packages/boto3/s3/transfer.py", line 484, in download_file
+2026-11-14 19:37:09+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/futures.py", line 111, in result
+2026-11-14 19:37:09+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/futures.py", line 287, in result
+2026-11-14 19:37:09+00:00     raise self._exception
+2026-11-14 19:37:09+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/tasks.py", line 272, in _main
+2026-11-14 19:37:09+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/download.py", line 379, in _submit
+2026-11-14 19:37:09+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/client.py", line 606, in _api_call
+2026-11-14 19:37:09+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/context.py", line 123, in wrapper
+2026-11-14 19:37:09+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/client.py", line 1094, in _make_api_call
+2026-11-14 19:37:09+00:00     raise error_class(parsed_response, operation_name)
+2026-11-14 19:37:09+00:00 botocore.exceptions.ClientError: An error occurred (404) when calling the HeadObject operation: Not Found
+2026-11-14 19:37:37+00:00 19:37:37 Worker a9617c2a01be42beb09cf474d6488dec: job d4972522-cac0-478f-a4aa-82c104876709: exception raised while executing (cutsell_worker.worker_job.run_flow_b_job)
+2026-11-14 19:37:37+00:00 Traceback (most recent call last):
+2026-11-14 19:37:37+00:00   File "/root/cutsell_worker/storage_routing.py", line 143, in download
+2026-11-14 19:37:37+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/context.py", line 123, in wrapper
+2026-11-14 19:37:37+00:00   File "/usr/local/lib/python3.11/site-packages/boto3/s3/inject.py", line 223, in download_file
+2026-11-14 19:37:37+00:00   File "/usr/local/lib/python3.11/site-packages/boto3/s3/transfer.py", line 484, in download_file
+2026-11-14 19:37:37+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/futures.py", line 111, in result
+2026-11-14 19:37:37+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/futures.py", line 287, in result
+2026-11-14 19:37:37+00:00     raise self._exception
+2026-11-14 19:37:37+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/tasks.py", line 272, in _main
+2026-11-14 19:37:37+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/download.py", line 379, in _submit
+2026-11-14 19:37:37+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/client.py", line 606, in _api_call
+2026-11-14 19:37:37+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/context.py", line 123, in wrapper
+2026-11-14 19:37:37+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/client.py", line 1094, in _make_api_call
+2026-11-14 19:37:37+00:00     raise error_class(parsed_response, operation_name)
+2026-11-14 19:37:37+00:00 botocore.exceptions.ClientError: An error occurred (404) when calling the HeadObject operation: Not Found
+2026-11-14 19:37:37+00:00 During handling of the above exception, another exception occurred:
+2026-11-14 19:37:37+00:00 Traceback (most recent call last):
+2026-11-14 19:37:37+00:00   File "/usr/local/lib/python3.11/site-packages/rq/worker/base.py", line 1671, in perform_job
+2026-11-14 19:37:37+00:00   File "/usr/local/lib/python3.11/site-packages/rq/job.py", line 1478, in perform
+2026-11-14 19:37:37+00:00   File "/usr/local/lib/python3.11/site-packages/rq/job.py", line 1539, in _execute
+2026-11-14 19:37:37+00:00   File "/root/cutsell_worker/worker_job.py", line 590, in run_flow_b_job
+2026-11-14 19:37:37+00:00   File "/root/cutsell_worker/storage.py", line 27, in download_source
+2026-11-14 19:37:37+00:00   File "/root/cutsell_worker/storage_routing.py", line 147, in download
+2026-11-14 19:37:37+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/context.py", line 123, in wrapper
+2026-11-14 19:37:37+00:00   File "/usr/local/lib/python3.11/site-packages/boto3/s3/inject.py", line 223, in download_file
+2026-11-14 19:37:37+00:00   File "/usr/local/lib/python3.11/site-packages/boto3/s3/transfer.py", line 484, in download_file
+2026-11-14 19:37:37+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/futures.py", line 111, in result
+2026-11-14 19:37:37+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/futures.py", line 287, in result
+2026-11-14 19:37:37+00:00     raise self._exception
+2026-11-14 19:37:37+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/tasks.py", line 272, in _main
+2026-11-14 19:37:37+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/download.py", line 379, in _submit
+2026-11-14 19:37:37+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/client.py", line 606, in _api_call
+2026-11-14 19:37:37+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/context.py", line 123, in wrapper
+2026-11-14 19:37:37+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/client.py", line 1094, in _make_api_call
+2026-11-14 19:37:37+00:00     raise error_class(parsed_response, operation_name)
+2026-11-14 19:37:37+00:00 botocore.exceptions.ClientError: An error occurred (404) when calling the HeadObject operation: Not Found
+2026-11-14 19:41:46+00:00 19:41:46 Worker 724b6d8870504553838e2dc83cbcf53c: job cb16612e-0ca0-4822-930e-e15a932c3b0a: exception raised while executing (cutsell_worker.worker_job.run_flow_b_job)
+2026-11-14 19:41:46+00:00 Traceback (most recent call last):
+2026-11-14 19:41:46+00:00   File "/root/cutsell_worker/storage_routing.py", line 143, in download
+2026-11-14 19:41:46+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/context.py", line 123, in wrapper
+2026-11-14 19:41:46+00:00   File "/usr/local/lib/python3.11/site-packages/boto3/s3/inject.py", line 223, in download_file
+2026-11-14 19:41:46+00:00   File "/usr/local/lib/python3.11/site-packages/boto3/s3/transfer.py", line 484, in download_file
+2026-11-14 19:41:46+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/futures.py", line 111, in result
+2026-11-14 19:41:46+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/futures.py", line 287, in result
+2026-11-14 19:41:46+00:00     raise self._exception
+2026-11-14 19:41:46+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/tasks.py", line 272, in _main
+2026-11-14 19:41:46+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/download.py", line 379, in _submit
+2026-11-14 19:41:46+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/client.py", line 606, in _api_call
+2026-11-14 19:41:46+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/context.py", line 123, in wrapper
+2026-11-14 19:41:46+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/client.py", line 1094, in _make_api_call
+2026-11-14 19:41:46+00:00     raise error_class(parsed_response, operation_name)
+2026-11-14 19:41:46+00:00 botocore.exceptions.ClientError: An error occurred (404) when calling the HeadObject operation: Not Found
+2026-11-14 19:41:46+00:00 During handling of the above exception, another exception occurred:
+2026-11-14 19:41:46+00:00 Traceback (most recent call last):
+2026-11-14 19:41:46+00:00   File "/usr/local/lib/python3.11/site-packages/rq/worker/base.py", line 1671, in perform_job
+2026-11-14 19:41:46+00:00   File "/usr/local/lib/python3.11/site-packages/rq/job.py", line 1478, in perform
+2026-11-14 19:41:46+00:00   File "/usr/local/lib/python3.11/site-packages/rq/job.py", line 1539, in _execute
+2026-11-14 19:41:46+00:00   File "/root/cutsell_worker/worker_job.py", line 590, in run_flow_b_job
+2026-11-14 19:41:46+00:00   File "/root/cutsell_worker/storage.py", line 27, in download_source
+2026-11-14 19:41:46+00:00   File "/root/cutsell_worker/storage_routing.py", line 147, in download
+2026-11-14 19:41:46+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/context.py", line 123, in wrapper
+2026-11-14 19:41:46+00:00   File "/usr/local/lib/python3.11/site-packages/boto3/s3/inject.py", line 223, in download_file
+2026-11-14 19:41:46+00:00   File "/usr/local/lib/python3.11/site-packages/boto3/s3/transfer.py", line 484, in download_file
+2026-11-14 19:41:46+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/futures.py", line 111, in result
+2026-11-14 19:41:46+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/futures.py", line 287, in result
+2026-11-14 19:41:46+00:00     raise self._exception
+2026-11-14 19:41:46+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/tasks.py", line 272, in _main
+2026-11-14 19:41:46+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/download.py", line 379, in _submit
+2026-11-14 19:41:46+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/client.py", line 606, in _api_call
+2026-11-14 19:41:46+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/context.py", line 123, in wrapper
+2026-11-14 19:41:46+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/client.py", line 1094, in _make_api_call
+2026-11-14 19:41:46+00:00     raise error_class(parsed_response, operation_name)
+2026-11-14 19:41:46+00:00 botocore.exceptions.ClientError: An error occurred (404) when calling the HeadObject operation: Not Found
+2026-11-14 19:42:10+00:00 19:42:10 Worker e9bd899477cc47538c2b9a21330b0764: job 67a01af5-a33c-479e-a5d2-b8b43050de19: exception raised while executing (cutsell_worker.worker_job.run_flow_b_job)
+2026-11-14 19:42:10+00:00 Traceback (most recent call last):
+2026-11-14 19:42:10+00:00   File "/root/cutsell_worker/storage_routing.py", line 143, in download
+2026-11-14 19:42:10+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/context.py", line 123, in wrapper
+2026-11-14 19:42:10+00:00   File "/usr/local/lib/python3.11/site-packages/boto3/s3/inject.py", line 223, in download_file
+2026-11-14 19:42:10+00:00   File "/usr/local/lib/python3.11/site-packages/boto3/s3/transfer.py", line 484, in download_file
+2026-11-14 19:42:10+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/futures.py", line 111, in result
+2026-11-14 19:42:10+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/futures.py", line 287, in result
+2026-11-14 19:42:10+00:00     raise self._exception
+2026-11-14 19:42:10+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/tasks.py", line 272, in _main
+2026-11-14 19:42:10+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/download.py", line 379, in _submit
+2026-11-14 19:42:10+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/client.py", line 606, in _api_call
+2026-11-14 19:42:10+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/context.py", line 123, in wrapper
+2026-11-14 19:42:10+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/client.py", line 1094, in _make_api_call
+2026-11-14 19:42:10+00:00     raise error_class(parsed_response, operation_name)
+2026-11-14 19:42:10+00:00 botocore.exceptions.ClientError: An error occurred (404) when calling the HeadObject operation: Not Found
+2026-11-14 19:42:10+00:00 During handling of the above exception, another exception occurred:
+2026-11-14 19:42:10+00:00 Traceback (most recent call last):
+2026-11-14 19:42:10+00:00   File "/usr/local/lib/python3.11/site-packages/rq/worker/base.py", line 1671, in perform_job
+2026-11-14 19:42:10+00:00   File "/usr/local/lib/python3.11/site-packages/rq/job.py", line 1478, in perform
+2026-11-14 19:42:10+00:00   File "/usr/local/lib/python3.11/site-packages/rq/job.py", line 1539, in _execute
+2026-11-14 19:42:10+00:00   File "/root/cutsell_worker/worker_job.py", line 590, in run_flow_b_job
+2026-11-14 19:42:10+00:00   File "/root/cutsell_worker/storage.py", line 27, in download_source
+2026-11-14 19:42:10+00:00   File "/root/cutsell_worker/storage_routing.py", line 147, in download
+2026-11-14 19:42:10+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/context.py", line 123, in wrapper
+2026-11-14 19:42:10+00:00   File "/usr/local/lib/python3.11/site-packages/boto3/s3/inject.py", line 223, in download_file
+2026-11-14 19:42:10+00:00   File "/usr/local/lib/python3.11/site-packages/boto3/s3/transfer.py", line 484, in download_file
+2026-11-14 19:42:10+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/futures.py", line 111, in result
+2026-11-14 19:42:10+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/futures.py", line 287, in result
+2026-11-14 19:42:10+00:00     raise self._exception
+2026-11-14 19:42:10+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/tasks.py", line 272, in _main
+2026-11-14 19:42:10+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/download.py", line 379, in _submit
+2026-11-14 19:42:10+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/client.py", line 606, in _api_call
+2026-11-14 19:42:10+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/context.py", line 123, in wrapper
+2026-11-14 19:42:10+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/client.py", line 1094, in _make_api_call
+2026-11-14 19:42:10+00:00     raise error_class(parsed_response, operation_name)
+2026-11-14 19:42:10+00:00 botocore.exceptions.ClientError: An error occurred (404) when calling the HeadObject operation: Not Found
+2026-11-14 19:42:25+00:00 19:42:25 Worker 32a794b9fee44ce09c463f08ae3f324d: job 20a262ba-810e-469b-8e02-5ddc21083bc9: exception raised while executing (cutsell_worker.worker_job.run_flow_b_job)
+2026-11-14 19:42:25+00:00 Traceback (most recent call last):
+2026-11-14 19:42:25+00:00   File "/root/cutsell_worker/storage_routing.py", line 143, in download
+2026-11-14 19:42:25+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/context.py", line 123, in wrapper
+2026-11-14 19:42:25+00:00   File "/usr/local/lib/python3.11/site-packages/boto3/s3/inject.py", line 223, in download_file
+2026-11-14 19:42:25+00:00   File "/usr/local/lib/python3.11/site-packages/boto3/s3/transfer.py", line 484, in download_file
+2026-11-14 19:42:25+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/futures.py", line 111, in result
+2026-11-14 19:42:25+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/futures.py", line 287, in result
+2026-11-14 19:42:25+00:00     raise self._exception
+2026-11-14 19:42:25+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/tasks.py", line 272, in _main
+2026-11-14 19:42:25+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/download.py", line 379, in _submit
+2026-11-14 19:42:25+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/client.py", line 606, in _api_call
+2026-11-14 19:42:25+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/context.py", line 123, in wrapper
+2026-11-14 19:42:25+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/client.py", line 1094, in _make_api_call
+2026-11-14 19:42:25+00:00     raise error_class(parsed_response, operation_name)
+2026-11-14 19:42:25+00:00 botocore.exceptions.ClientError: An error occurred (404) when calling the HeadObject operation: Not Found
+2026-11-14 19:42:25+00:00 During handling of the above exception, another exception occurred:
+2026-11-14 19:42:25+00:00 Traceback (most recent call last):
+2026-11-14 19:42:25+00:00   File "/usr/local/lib/python3.11/site-packages/rq/worker/base.py", line 1671, in perform_job
+2026-11-14 19:42:25+00:00   File "/usr/local/lib/python3.11/site-packages/rq/job.py", line 1478, in perform
+2026-11-14 19:42:25+00:00   File "/usr/local/lib/python3.11/site-packages/rq/job.py", line 1539, in _execute
+2026-11-14 19:42:25+00:00   File "/root/cutsell_worker/worker_job.py", line 590, in run_flow_b_job
+2026-11-14 19:42:25+00:00   File "/root/cutsell_worker/storage.py", line 27, in download_source
+2026-11-14 19:42:25+00:00   File "/root/cutsell_worker/storage_routing.py", line 147, in download
+2026-11-14 19:42:25+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/context.py", line 123, in wrapper
+2026-11-14 19:42:25+00:00   File "/usr/local/lib/python3.11/site-packages/boto3/s3/inject.py", line 223, in download_file
+2026-11-14 19:42:25+00:00   File "/usr/local/lib/python3.11/site-packages/boto3/s3/transfer.py", line 484, in download_file
+2026-11-14 19:42:25+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/futures.py", line 111, in result
+2026-11-14 19:42:25+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/futures.py", line 287, in result
+2026-11-14 19:42:25+00:00     raise self._exception
+2026-11-14 19:42:25+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/tasks.py", line 272, in _main
+2026-11-14 19:42:25+00:00   File "/usr/local/lib/python3.11/site-packages/s3transfer/download.py", line 379, in _submit
+2026-11-14 19:42:25+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/client.py", line 606, in _api_call
+2026-11-14 19:42:25+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/context.py", line 123, in wrapper
+2026-11-14 19:42:25+00:00   File "/usr/local/lib/python3.11/site-packages/botocore/client.py", line 1094, in _make_api_call
+2026-11-14 19:42:25+00:00     raise error_class(parsed_response, operation_name)
+2026-11-14 19:42:25+00:00 botocore.exceptions.ClientError: An error occurred (404) when calling the HeadObject operation: Not Found
+2026-11-14 19:44:54+00:00 19:44:54 Worker 531b84322fae41b1a41166486380cd27: job 6cc1f33c-7820-40b2-b84a-3161c895f04f: exception raised while executing (cutsell_worker.worker_job.run_flow_b_job)
+2026-11-14 19:44:54+00:00 Traceback (most recent call last):
+2026-11-14 19:44:54+00:00   File "/usr/local/lib/python3.11/site-packages/rq/worker/base.py", line 1671, in perform_job
+2026-11-14 19:44:54+00:00   File "/usr/local/lib/python3.11/site-packages/rq/job.py", line 1478, in perform
+2026-11-14 19:44:54+00:00   File "/usr/local/lib/python3.11/site-packages/rq/job.py", line 1539, in _execute
+2026-11-14 19:44:54+00:00   File "/root/cutsell_worker/worker_job.py", line 627, in run_flow_b_job
+2026-11-14 19:44:54+00:00   File "/<long>.py", line 252, in process_with_simple_engine
+2026-11-14 19:44:54+00:00     raise NoSpeechError(f"no speech found in source {source.source_asset_id}")
+2026-11-14 19:44:54+00:00 cutsell_worker.simple_engine_adapter.NoSpeechError: no speech found in source src_2ce7d31ea9a2c7d08bf5
