@@ -212,7 +212,7 @@ enum ShopPhotoLoader {
             group.addTask {
                 await withCheckedContinuation { continuation in
                     provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
-                        continuation.resume(returning: data.flatMap(Self.image(from:)))
+                        continuation.resume(returning: data.flatMap { ShopPhotoLoader.image(from: $0) })
                     }
                 }
             }
