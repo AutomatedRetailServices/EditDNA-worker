@@ -932,6 +932,8 @@ struct ShopTitleSheet: View {
                     field($model.bigTitle, id: "shopBigTitle").padding(.top, 6)
                     label("Script line").padding(.top, 10)
                     field($model.scriptLine, id: "shopScriptLine").padding(.top, 6)
+                    label("Bottom line  (your brand or shop)").padding(.top, 10)
+                    field($model.bottomLine, id: "shopBottomLine").padding(.top, 6)
                     label("Letter style · all free").padding(.top, 12)
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10),
                                         GridItem(.flexible(), spacing: 10)], spacing: 12) {

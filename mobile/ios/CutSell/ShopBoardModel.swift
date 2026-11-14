@@ -23,6 +23,8 @@ final class ShopBoardModel: ObservableObject {
     @Published var template: ShopTemplate = .everydayChic
     @Published var bigTitle = ShopTemplate.everydayChic.bigTitle
     @Published var scriptLine = ShopTemplate.everydayChic.scriptLine
+    /// The line at the bottom of the board ("YOUR BRAND" by default; PO 14 Nov, Figma S4d2 3062:193). Empty = none.
+    @Published var bottomLine = ShopTemplate.footer
     @Published var fontPair: ShopFontPair = .classic
     @Published var style = ShopBoardStyle()
     @Published var variant = 0
@@ -279,7 +281,7 @@ final class ShopBoardModel: ObservableObject {
             drawOrder: ShopDrawOrder.order(itemIDs: placedIDs, raised: handEdited ? raised : []),
             titleAdjust: handEdited ? (adjusts[Self.titleID] ?? ShopAdjust()) : ShopAdjust(),
             top: colors.top, bottom: colors.bottom, texture: texture, textureMatched: look.matchBackground && texture != nil,
-            photo: photo, bigTitle: title, scriptLine: script, pair: fontPair,
+            photo: photo, bigTitle: title, scriptLine: script, bottomLine: bottomLine, pair: fontPair,
             titleColor: look.resolvedTitleColor(palette: palette, template: tmpl))
     }
 }
@@ -303,6 +305,7 @@ struct ShopBoardSnapshot {
     var photo: UIImage?
     var bigTitle: String
     var scriptLine: String
+    var bottomLine: String = ShopTemplate.footer
     var pair: ShopFontPair
     var titleColor: ShopRGB
 
@@ -420,7 +423,7 @@ struct ShopBoardCanvas: View {
                 .rotationEffect(.degrees(t.rotation), anchor: UnitPoint(x: ShopLayout.titleRect.midX / ShopLayout.designSize.width,
                                                                         y: ShopLayout.titleRect.midY / 140))
                 .offset(x: t.offset.width * sx, y: t.offset.height * sy)
-            Text(verbatim: ShopTemplate.footer)
+            Text(verbatim: snapshot.bottomLine.trimmingCharacters(in: .whitespaces).uppercased())
                 .font(ShopFonts.font(ShopFontPair.footerFace, size: 14 * sx))
                 .tracking(4.2 * sx)
                 .foregroundStyle(footerInk)

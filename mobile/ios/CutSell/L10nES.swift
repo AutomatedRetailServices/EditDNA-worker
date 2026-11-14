@@ -61,6 +61,7 @@ enum L10nES {
         "Switch camera": "Cambiar cámara",
         "B-roll is silent. Tap the speaker to keep its sound.": "El B-roll va en silencio. Toca la bocina para conservar su sonido.",
         "Keep sound": "Conservar sonido",
+        "Bottom line  (your brand or shop)": "Línea de abajo  (tu marca o tienda)",
         "Put your phone on a stand — keep it still for every clone": "Pon tu teléfono en un soporte — no lo muevas en ningún clon",
         "Don't walk around your clones": "No camines alrededor de tus clones",
         "Stand in a different spot each time": "Párate en un lugar distinto cada vez",

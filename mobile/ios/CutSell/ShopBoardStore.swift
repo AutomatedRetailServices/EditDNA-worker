@@ -35,6 +35,8 @@ struct ShopBoardRecord: Codable, Identifiable, Equatable {
     var template: String
     var bigTitle: String
     var scriptLine: String
+    /// Saved before 14 Nov: missing (= "YOUR BRAND").
+    var bottomLine: String?
     var fontPair: String
     var variant: Int
     var matchBackground: Bool
@@ -130,7 +132,7 @@ final class ShopBoardStore: ObservableObject {
         let created = boards.first(where: { $0.id == model.boardID })?.createdAt ?? now
         let record = ShopBoardRecord(
             id: model.boardID, createdAt: created, updatedAt: now, template: model.template.rawValue,
-            bigTitle: model.bigTitle, scriptLine: model.scriptLine, fontPair: model.fontPair.rawValue, variant: model.variant,
+            bigTitle: model.bigTitle, scriptLine: model.scriptLine, bottomLine: model.bottomLine, fontPair: model.fontPair.rawValue, variant: model.variant,
             matchBackground: model.style.matchBackground, background: .init(model.style.background),
             matchTitle: model.style.matchTitle, titleColor: model.style.titleColor,
             affiliateLink: model.affiliateLink, caption: model.caption, items: items,
@@ -170,6 +172,7 @@ final class ShopBoardStore: ObservableObject {
         model.template = ShopTemplate(rawValue: record.template) ?? .everydayChic
         model.bigTitle = record.bigTitle
         model.scriptLine = record.scriptLine
+        model.bottomLine = record.bottomLine ?? ShopTemplate.footer
         model.fontPair = ShopFontPair(rawValue: record.fontPair) ?? .classic
         model.variant = record.variant
         model.style = ShopBoardStyle(matchBackground: record.matchBackground, background: record.background.choice,

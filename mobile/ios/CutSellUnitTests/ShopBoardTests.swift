@@ -752,3 +752,26 @@ final class ShopBoardRemoveTests: XCTestCase {
         XCTAssertEqual(turned.x, rect.midX + 64, accuracy: 0.01); XCTAssertEqual(turned.y, rect.midY + 44, accuracy: 0.01)
     }
 }
+
+/// PO 14 Nov 2026 (Figma S4d2 3062:193): "YOUR BRAND" at the bottom is editable and is saved with the board.
+@MainActor
+final class ShopBoardBottomLineTests: XCTestCase {
+    func testBottomLineIsEditableAndSaved() throws {
+        let model = ShopBoardModel()
+        XCTAssertEqual(model.snapshot().bottomLine, "YOUR BRAND")
+        model.bottomLine = "Bloom by Susana"
+        XCTAssertEqual(model.snapshot().bottomLine, "Bloom by Susana")
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ShopBottom-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        ShopBoardStore(root: root).save(model, synchronously: true)
+        let opened = try XCTUnwrap(ShopBoardStore(root: root).open(model.boardID))
+        XCTAssertEqual(opened.bottomLine, "Bloom by Susana")
+    }
+
+    func testABoardSavedBeforeKeepsYourBrand() throws {
+        let json = #"{"bottomLine":null}"#.data(using: .utf8)!
+        struct Probe: Decodable { var bottomLine: String? }
+        XCTAssertNil(try JSONDecoder().decode(Probe.self, from: json).bottomLine)
+        XCTAssertEqual(ShopTemplate.footer, "YOUR BRAND")
+    }
+}
