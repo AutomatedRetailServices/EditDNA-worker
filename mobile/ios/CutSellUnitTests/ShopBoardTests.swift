@@ -408,12 +408,13 @@ final class ShopLayoutTests: XCTestCase {
         XCTAssertEqual(ShopLayout.placements(kinds: kinds, variant: 2), ShopLayout.placements(kinds: kinds, variant: 2), "repeatable")
     }
 
-    func testThreeToTwelveItems() {
+    func testOneToTwelveItems() {
         XCTAssertEqual(ShopLayout.placements(kinds: Array(repeating: .unknown, count: 3)).count, 3)
         XCTAssertEqual(Set(ShopLayout.placements(kinds: Array(repeating: .unknown, count: 8)).map(\.itemIndex)), Set(0..<8))
         let items = (0..<3).map { _ in ShopItem(source: .photos, cutout: ShopSynthetic.cutout(.red)) }
         XCTAssertTrue(ShopBoardRules.canChooseStyle(items))
-        XCTAssertFalse(ShopBoardRules.canChooseStyle(Array(items.prefix(2))))
+        XCTAssertTrue(ShopBoardRules.canChooseStyle(Array(items.prefix(1))), "one product is enough (PO 14 Nov)")
+        XCTAssertFalse(ShopBoardRules.canChooseStyle([]))
         XCTAssertEqual(ShopBoardRules.remaining(items), 9, "up to 12 (PO 14 Nov)")
     }
 
@@ -431,6 +432,14 @@ final class ShopLayoutTests: XCTestCase {
             XCTAssertEqual(Set(shuffled.map(\.itemIndex)), Set(0..<count))
         }
         XCTAssertEqual(ShopBoardRules.maxItems, 12)
+    }
+
+    func testOneProductSitsBigInTheMiddle() {
+        let one = ShopLayout.placements(kinds: [.shoes])
+        XCTAssertEqual(one.count, 1)
+        XCTAssertEqual(one[0].slot.center.x, ShopLayout.designSize.width / 2)
+        XCTAssertGreaterThan(one[0].slot.size.width, 250)
+        XCTAssertEqual(Set(ShopLayout.placements(kinds: [.top, .bottom]).map(\.itemIndex)), [0, 1])
     }
 
     func testItemsFitTheirPlaceOnA916Board() {

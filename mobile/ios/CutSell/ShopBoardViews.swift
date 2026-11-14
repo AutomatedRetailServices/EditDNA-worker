@@ -275,7 +275,7 @@ struct ShopAddProductsView: View {
         ZStack(alignment: .bottom) {
             HomeBackdrop()
             VStack(spacing: 0) {
-                ShopHeader(title: "Add products", subtitle: "Pick 3–12 items for your board.", onBack: onBack)
+                ShopHeader(title: "Add products", subtitle: "Pick 1–12 items for your board.", onBack: onBack)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         sourceRow(.myProducts, "From my products", "CeraVe, Dior… (your product list)") { showingProducts = true }

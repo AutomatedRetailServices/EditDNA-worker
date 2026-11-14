@@ -61,11 +61,11 @@ struct ShopItem: Identifiable, Equatable {
 }
 
 enum ShopBoardRules {
-    /// "Pick 3–12 items for your board." (PO 14 Nov: up to 12; was 8.)
-    static let minItems = 3
+    /// "Pick 1–12 items for your board." (PO 14 Nov: from 1 to 12; was 3 to 8.)
+    static let minItems = 1
     static let maxItems = 12
 
-    /// "Choose a style" works with 3–12 items that all have their photo.
+    /// "Choose a style" works with 1–12 items that all have their photo.
     static func canChooseStyle(_ items: [ShopItem]) -> Bool {
         (minItems...maxItems).contains(items.count) && items.allSatisfy { !$0.needsPhoto }
     }
@@ -769,6 +769,16 @@ enum ShopLayout {
     static func placements(kinds: [ShopItemKind], variant: Int = 0) -> [ShopPlacement] {
         guard !kinds.isEmpty else { return [] }
         if kinds.count > figmaSlots.count + extraSlots.count { return gridPlacements(count: kinds.count, variant: variant) }
+        // One or two products (PO 14 Nov: from 1): big in the middle of the board, not in a corner place.
+        if kinds.count <= 2 {
+            let centres: [CGPoint] = kinds.count == 1 ? [CGPoint(x: 195, y: 470)] : [CGPoint(x: 112, y: 440), CGPoint(x: 278, y: 520)]
+            let size = kinds.count == 1 ? CGSize(width: 300, height: 520) : CGSize(width: 170, height: 300)
+            let tilt: [Double] = kinds.count == 1 ? [0] : [-3, 4]
+            return kinds.indices.map { i in
+                let item = variant % 2 == 1 ? kinds.count - 1 - i : i
+                return ShopPlacement(itemIndex: item, slot: ShopSlot(center: centres[i], size: size, rotation: tilt[i], prefers: []))
+            }
+        }
         // The six Figma places always (each kind finds its own), the two extra ones only for items 7 and 8.
         let slots = figmaSlots + extraSlots.prefix(max(0, kinds.count - figmaSlots.count))
         var order = slots.indices.map { $0 }
