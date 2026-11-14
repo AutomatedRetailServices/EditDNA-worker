@@ -695,8 +695,10 @@ struct ProjectDetailView: View {
             if project.state == Project.uploadNotFinishedState {
                 // No video reached the server yet, so there is no cut and no draft to edit.
                 UploadNotFinishedView(project: project)
-            } else if Project.processingStates.contains(project.state) {
-                // Figma Processing → Ready, following the cut's real state on the server.
+            } else if Project.processingStates.contains(project.state) || project.state == "failed" {
+                // Figma Processing → Ready, following the cut's real state on the server. A cut that failed has
+                // no draft yet (the editor would only say "Couldn't open this cut"): it opens on the same
+                // screen's "Processing issue" state with Try again (PO 14 Nov 2026).
                 CutProgressView(
                     projectID: project.projectID, fileName: project.title, thumbnail: nil,
                     onClose: { dismiss() }, onOpenEdits: { if let open = onOpenEdits { open() } else { dismiss() } }
