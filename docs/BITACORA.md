@@ -20,6 +20,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 90 | 2026-11-14 | ✅ subido (pedido) | feature/shop-board | `56d2fd68` | Shop board: fotos que ya no se quedan cargando + de 1 a 12 productos |
 | 89 | 2026-11-14 07:39 | ✅ subido | feature/shop-board | `861c91b7` | Your board: board grande, tarjetas en una línea, el título se mueve |
 | 88 | 2026-11-13 13:41 | ✅ subido | feature/shop-board | `506020f1` | Shop board: mover/agrandar/girar con los dedos más fácil + fondo automático que sigue el color de los productos |
 | 87 | 2026-11-13 08:29 | ✅ subido | feature/shop-board | `3c9ed3b9` | Arreglo: la pestaña Shop boards muestra la barra de abajo |
@@ -111,6 +112,16 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 | 1 | 2026-10-12 13:01 | ❌ falló | feature/ios-captions-v2 | `d90bfc50` | Primer intento, no llegó a TestFlight |
 
 ---
+
+## Build 90 — 2026-11-14
+- **Resultado:** pedido a TestFlight (si la subida falla, se corrige esta línea)
+- **Rama (según el historial de git):** feature/shop-board  ·  **Commit de la app:** `56d2fd68`
+- **Qué cambió (pedidos de la PO, 14 nov):**
+  - **Fotos PNG que se quedaban "uploading" (`49dbe478`):** el selector esperaba a que cargaran todas las fotos, sin límite de tiempo. Ahora se cierra al elegir, cada foto carga en su propio cuadro con un límite de 45 s (si no carga, se quita y sale "No se pudo abrir una foto. Prueba con otra."), las fotos grandes se leen a máximo 2400 px, y los PNG que ya vienen sin fondo se usan tal cual (sin pasar por el quitafondos).
+  - **De 1 a 12 productos (`f95eb3db`, `26ff5c90`):** antes de 3 a 8. "Pick 1–12 items for your board." Con 1 o 2 productos van grandes en el centro; de 9 a 12, en filas de tres entre el título y "YOUR BRAND" (Shuffle los cambia de lugar). De 3 a 8 sigue el acomodo de Figma.
+  - 82 pruebas automáticas, 0 fallas (nuevas: PNG transparente, archivo dañado, PNG enorme, de 9 a 12 y 1 producto).
+- **Pantallas nuevas o cambiadas:** Add products (texto 1–12) y el acomodo del board con 1–2 y 9–12 productos. **Estos acomodos no están en Figma.**
+- **Pendiente o con problemas:** Figma de Your board (build 89) y los acomodos nuevos; los mismos del build 85.
 
 ## Build 89 — 2026-11-14
 - **Resultado:** subido a TestFlight (listo, 07:39 ET)
