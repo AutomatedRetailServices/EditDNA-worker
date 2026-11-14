@@ -1081,3 +1081,52 @@ def test_worker_waits_for_a_broll_upload_and_uses_it_when_it_arrives(media2, mon
     assert minutes[0] == pytest.approx((DURATION + 6.0) / 60.0, abs=0.01)
     assets = {s["source_asset_id"]: s["timeline_assets"]["status"] for s in drafts[0]["sources"]}
     assert assets["b1"] == "ok"
+
+
+# PO 14 Nov 2026 (E4s): a B-roll video is silent unless its speaker is on; then its sound plays under the voice.
+def _sound_clip(meta, kind="video"):
+    from types import SimpleNamespace
+    source = SimpleNamespace(source_order=2, uri="s3://b/clip.mov", metadata=meta)
+    return B.BrollClip(source=source, duration=6.0, kind=kind)
+
+
+def test_broll_video_is_silent_unless_its_speaker_is_on():
+    placement = B.Placement(clip_index=0, start=4.0, end=7.0, source_start=1.0, reason="matched")
+    silent = B.to_overlays([placement], [_sound_clip({"clip_type": "broll"})])[0]
+    assert silent.mute_audio is True and silent.volume == 1.0
+    kept = B.to_overlays([placement], [_sound_clip({"clip_type": "broll", "broll_sound": "1"})])[0]
+    assert kept.mute_audio is False
+    assert kept.volume == B.BROLL_SOUND_VOLUME and 0 < kept.volume < 1      # under the voice
+
+
+def test_a_photo_never_gets_sound():
+    placement = B.Placement(clip_index=0, start=4.0, end=7.0, source_start=0.0, reason="matched")
+    photo = B.to_overlays([placement], [_sound_clip({"clip_type": "broll", "broll_sound": "1"}, kind="photo")])[0]
+    assert photo.kind == "photo" and photo.mute_audio is True
+
+
+def test_an_unmuted_overlay_does_not_lower_the_voice(tmp_path):
+    """amix without normalize=0 divides every input by the input count: the voice dropped to half as soon as one
+    overlay kept its sound. The voice must stay at its level."""
+    if not shutil.which("ffmpeg"):
+        pytest.skip("no ffmpeg")
+    from cutsell_worker.contracts import MediaOverlay
+    from cutsell_worker import media_overlay_render as R
+    base = tmp_path / "base.mp4"
+    clip = tmp_path / "clip.mp4"
+    for path, freq in ((base, 440), (clip, 880)):
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=gray:s=320x568:d=4",
+                        "-f", "lavfi", "-i", f"sine=frequency={freq}:duration=4", "-shortest", "-c:v", "libx264",
+                        "-pix_fmt", "yuv420p", "-c:a", "aac", str(path)], check=True)
+    overlay = MediaOverlay(overlay_id="o", kind="video", uri="local", start=1.0, end=3.0, mute_audio=False,
+                           volume=0.0001, width=1.0)
+    out = tmp_path / "out.mp4"
+    command = R.build_final_overlay_command(str(base), str(out), width=320, height=568,
+                                            media_overlays=[R.LocalMediaOverlay(overlay=overlay, path=str(clip))])
+    subprocess.run(command, check=True)
+
+    def level(path):
+        res = subprocess.run(["ffmpeg", "-i", str(path), "-af", "volumedetect", "-f", "null", "-"],
+                             capture_output=True, text=True)
+        return float(res.stderr.split("mean_volume:")[1].split(" dB")[0])
+    assert abs(level(out) - level(base)) < 1.0

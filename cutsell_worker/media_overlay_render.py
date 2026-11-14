@@ -153,7 +153,7 @@ def build_final_overlay_command(
         final_video = f"[{current_video}]"
 
     if len(audio_labels) > 1:
-        filters.append("".join(audio_labels) + f"amix=inputs={len(audio_labels)}:duration=first:dropout_transition=0[aout]")
+        filters.append("".join(audio_labels) + f"amix=inputs={len(audio_labels)}:duration=first:dropout_transition=0:normalize=0[aout]")
         final_audio = "[aout]"
     else:
         filters.append("[0:a]anull[aout]")

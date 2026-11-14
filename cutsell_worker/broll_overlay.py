@@ -54,6 +54,9 @@ CLIP_TYPE_KEY = "clip_type"
 BROLL = "broll"
 BROLL_KIND_KEY, BROLL_ORDER_KEY, KEEP_ORDER_KEY = "broll_kind", "broll_order", "broll_keep_order"
 PHOTO = "photo"
+# PO 14 Nov 2026: a B-roll video is silent unless the creator taps its speaker (E4s) -> `broll_sound: "1"`; then
+# its own sound plays UNDER the voice at this gain (PO: "option 1", quieter than the voice). Photos have no sound.
+SOUND_KEY, BROLL_SOUND_VOLUME = "broll_sound", 0.3
 PHOTO_EXTENSIONS = (".jpg", ".jpeg")      # = uploads.ALLOWED_PHOTO_SOURCE_EXTENSIONS
 
 HOOK_SEC = 3.0            # the face shows for the hook
@@ -115,6 +118,11 @@ def _meta(source) -> Mapping:
 
 def is_broll(source) -> bool:
     return str(_meta(source).get(CLIP_TYPE_KEY) or "").strip().lower() == BROLL
+
+
+def keeps_sound(source) -> bool:
+    """The creator kept this B-roll clip's own sound (E4s speaker on)."""
+    return str(_meta(source).get(SOUND_KEY) or "").strip().lower() in {"1", "true", "on", "yes"}
 
 
 def is_photo_source(source) -> bool:
@@ -795,6 +803,8 @@ def to_overlays(placements: Sequence[Placement], clips: Sequence[BrollClip]) -> 
             out.append(MediaOverlay(kind="photo", source_start=0.0, source_end=None, motion=KEN_BURNS,
                                     motion_zoom_from=KEN_BURNS_ZOOM_FROM, motion_zoom_to=KEN_BURNS_ZOOM_TO, **common))
         else:
+            if keeps_sound(clip.source):
+                common.update(mute_audio=False, volume=BROLL_SOUND_VOLUME)
             out.append(MediaOverlay(kind="video", source_start=p.source_start,
                                     source_end=round(min(clip.duration, p.source_start + length), 3), **common))
     return tuple(out)
