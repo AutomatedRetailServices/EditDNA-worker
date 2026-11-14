@@ -8,8 +8,10 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 - **B-roll automático del motor (anotado el 11 nov 2026):** El B-roll automático del motor será un feature solo de los planes de pago más altos. Mientras estamos en pruebas queda activo para todos. Cuando existan los planes, se separa por cuenta (control en el servidor) y las cuentas sin el feature verán '+ B-roll' con candado PRO y podrán poner B-roll a mano en el editor.
 
-## Motor de B-roll (rama sin deploy, no es un build de la app)
+## Motor de B-roll (servidor, no es un build de la app)
 
+- **14 nov 2026 14:49 ET · DEPLOY con OK de la PO** — `feat/simple-engine-v1` avanzada a `09409a52` (rama `feature/broll-after-stop-engine`). Worker de Modal desplegado por el workflow (128 pruebas pasan) y API de Render en vivo (deploy `dep-dbsbm0e1egvs73dd8gf0`). Antes estaba el servidor del 8 nov (`602b977d`).
+  - Por qué: la PO grabó un video hablando + un clip de B-roll sin hablar y el corte fallaba. Registros del worker: (1) el corte empezaba antes de que terminara de subirse el B-roll → "archivo no encontrado" (404) en cada reintento, hasta el límite de reintentos; (2) ya subido, el servidor viejo trataba el B-roll como clip hablado → "no speech found" y paraba todo. El motor nuevo nunca corta el B-roll, lo pone encima de la voz y espera hasta 60 s a que termine de subirse.
 - **11 nov 2026 · rama `feature/broll-after-stop-engine`, commit `09409a52`** — decisiones de la PO sobre el build 80, aplicadas con pruebas simuladas (55 pruebas de B-roll pasan; sin deploy):
   - Dos pedazos del mismo clip largo quedan separados al menos ~4 s (con cara u otra toma en medio). Si un segundo pedazo no cabe con esa separación, se deja fuera.
   - Con "Keep this order", los pedazos de un clip largo quedan en su lugar del orden, con la cara en medio: pedazo A → cara → pedazo B → la toma siguiente.
