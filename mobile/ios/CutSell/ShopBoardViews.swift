@@ -674,8 +674,9 @@ struct ShopBoardScreen: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
                 GeometryReader { geo in
-                    // Figma: 218.4 wide on a 390 screen; smaller when the screen is short.
-                    let width = min(218.4, (geo.size.height - 8) * 9 / 16)
+                    // As big as the space allows (PO 13 Nov: the 218-wide board was too small to edit by hand):
+                    // all the height between the header and the cards, at most the screen width minus 20 a side.
+                    let width = min(geo.size.width - 40, (geo.size.height - 8) * 9 / 16)
                     ShopBoardHandEditor(model: model, selected: $selected, width: width)
                         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                         .shadow(color: Color(fixed: 0xD3DDF5), radius: 0, x: 0, y: 3)
