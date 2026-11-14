@@ -230,6 +230,10 @@ struct DesignScreenshotRoot: View {
             YouView(selectTab: { _ in })
         case "plan":
             PlanView(selectTab: { _ in })
+        case "shop_boards":
+            ShopBoardsTabView(selectTab: { _ in })
+        case "shop_your_board":
+            ShopBoardScreen(model: Self.sampleShopBoard, onBack: {}, onTitle: {}, onBackground: {}, onNext: {})
         case "plan_built":
             PlanView(selectTab: { _ in })
                 .task { try? await PlanWeekStore.shared.build(session: nil) }
@@ -258,6 +262,28 @@ struct DesignScreenshotRoot: View {
             Text("Unknown screen \(screen)").foregroundStyle(.white)
         }
     }
+
+    /// A board with five coloured sample products (no photos needed) for "Your board" screenshots.
+    @MainActor static let sampleShopBoard: ShopBoardModel = {
+        let model = ShopBoardModel()
+        let colors: [(UIColor, CGSize, ShopItemKind)] = [
+            (UIColor(red: 0.55, green: 0.70, blue: 0.89, alpha: 1), CGSize(width: 300, height: 340), .top),
+            (UIColor(red: 0.55, green: 0.56, blue: 0.58, alpha: 1), CGSize(width: 340, height: 290), .clothing),
+            (UIColor(red: 0.12, green: 0.16, blue: 0.29, alpha: 1), CGSize(width: 160, height: 360), .bottom),
+            (UIColor(red: 0.15, green: 0.15, blue: 0.20, alpha: 1), CGSize(width: 300, height: 260), .bag),
+            (UIColor(red: 0.92, green: 0.92, blue: 0.90, alpha: 1), CGSize(width: 320, height: 150), .shoes),
+        ]
+        model.items = colors.map { color, size, kind in
+            let image = UIGraphicsImageRenderer(size: size).image { ctx in
+                color.setFill()
+                UIBezierPath(roundedRect: CGRect(origin: .zero, size: size).insetBy(dx: 10, dy: 10), cornerRadius: 40).fill()
+            }
+            return ShopItem(source: .photos, cutout: image.cgImage, kind: kind)
+        }
+        model.bigTitle = "HOLIDAY"
+        model.scriptLine = "look for less"
+        return model
+    }()
 
     /// The first product of the in-memory catalog (-CutSellCatalogMock).
     private static var mockProductID: String { CatalogStore.shared.allProducts.first?.product.productID ?? "prod_cerave_hydrating" }
