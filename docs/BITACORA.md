@@ -10,6 +10,9 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 ## Motor de B-roll (servidor, no es un build de la app)
 
+- **14 nov 2026 15:58 ET · DEPLOY con OK de la PO** — `feat/simple-engine-v1` → `7f1a97d8` (rama `feature/broll-sound`). Worker de Modal (128 pruebas pasan) y API de Render (`dep-dbscmas9v7es73cb96ig`) en vivo.
+  - Sonido del B-roll (diseño Figma E4s 3060:354): el B-roll sigue en silencio por defecto; solo una toma de video con la bocina encendida en la app (`broll_sound: "1"`) conserva su sonido, debajo de la voz al 30 % (PO: "opción 1"). Las fotos nunca tienen sonido.
+  - Arreglo encontrado al hacerlo: cuando un video encima conservaba su sonido, la mezcla bajaba la voz a la mitad (amix sin `normalize=0`). Ahora la voz queda a su nivel; prueba que lo mide.
 - **14 nov 2026 14:49 ET · DEPLOY con OK de la PO** — `feat/simple-engine-v1` avanzada a `09409a52` (rama `feature/broll-after-stop-engine`). Worker de Modal desplegado por el workflow (128 pruebas pasan) y API de Render en vivo (deploy `dep-dbsbm0e1egvs73dd8gf0`). Antes estaba el servidor del 8 nov (`602b977d`).
   - Por qué: la PO grabó un video hablando + un clip de B-roll sin hablar y el corte fallaba. Registros del worker: (1) el corte empezaba antes de que terminara de subirse el B-roll → "archivo no encontrado" (404) en cada reintento, hasta el límite de reintentos; (2) ya subido, el servidor viejo trataba el B-roll como clip hablado → "no speech found" y paraba todo. El motor nuevo nunca corta el B-roll, lo pone encima de la voz y espera hasta 60 s a que termine de subirse.
 - **11 nov 2026 · rama `feature/broll-after-stop-engine`, commit `09409a52`** — decisiones de la PO sobre el build 80, aplicadas con pruebas simuladas (55 pruebas de B-roll pasan; sin deploy):
