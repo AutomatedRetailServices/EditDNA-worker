@@ -300,6 +300,12 @@ struct LocalVideo: Identifiable, Hashable {
         }
     }
 
+    /// B-roll sound (Figma E4s): off by default (silent); on = its own sound plays under the voice.
+    var keepsSound: Bool {
+        get { clipTags[ClipMark.soundKey] == "1" }
+        set { if newValue { clipTags[ClipMark.soundKey] = "1" } else { clipTags.removeValue(forKey: ClipMark.soundKey) } }
+    }
+
     /// The talking part of a recording / upload that has B-roll shots (the voice the engine edits).
     var isPrimaryVoice: Bool {
         get { clipTags[ClipMark.sourceKey] == ClipMark.primary }

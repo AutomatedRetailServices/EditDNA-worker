@@ -47,6 +47,7 @@ enum BrollAfterStop {
             out.clipTags[ClipMark.kindKey] = video.isPhoto ? "photo" : "video"
             out.clipTags[ClipMark.orderKey] = String(index + 1)
             out.clipTags[ClipMark.keepOrderKey] = keepOrder ? "1" : "0"
+            if video.isPhoto { out.keepsSound = false }          // a photo has no sound
             return out
         }
         return voice + numbered
@@ -181,6 +182,19 @@ struct BrollShotPill: View {
 }
 
 /// The "×" on a shot's thumbnail (#0B1020 circle).
+/// Figma E4s: 22 pt circle, 2 pt white border; off = white with a gray crossed speaker, on = #1769FF with a white speaker.
+private struct SoundBadge: View {
+    var on: Bool
+    var body: some View {
+        Image(systemName: on ? "speaker.wave.2.fill" : "speaker.slash.fill")
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(on ? Color.white : Color(fixed: 0x6B7385))
+            .frame(width: 22, height: 22)
+            .background(on ? Color(fixed: 0x1769FF) : Color.white, in: Circle())
+            .overlay(Circle().stroke(Color.white, lineWidth: 2))
+    }
+}
+
 private struct RemoveBadge: View {
     var size: CGFloat
     var body: some View {
@@ -506,6 +520,12 @@ struct BrollSummaryView: View {
                 .foregroundStyle(Color(fixed: 0x6B7385))
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 8)
+            // Figma E4s (3060:354): B-roll is silent unless its speaker is on.
+            Text(L10n.tr("B-roll is silent. Tap the speaker to keep its sound."))
+                .font(CS.inter(13, .medium))
+                .foregroundStyle(Color(fixed: 0x6B7385))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 6)
             keepOrderRow
                 .padding(.top, 14)
         }
@@ -524,6 +544,16 @@ struct BrollSummaryView: View {
             .overlay(alignment: .bottomLeading) {
                 BrollNumberBadge(number: number, size: 22).padding(4)
             }
+            .overlay(alignment: .bottomTrailing) {
+                if !shot.isPhoto {
+                    Button { toggleSound(shot.url) } label: { SoundBadge(on: shot.keepsSound) }
+                        .buttonStyle(.plain)
+                        .padding(4)
+                        .accessibilityLabel(L10n.tr("Keep sound"))
+                        .accessibilityValue(shot.keepsSound ? "On" : "Off")
+                        .accessibilityIdentifier("brollShotSound")
+                }
+            }
             .overlay(alignment: .topTrailing) {
                 Button { shots.removeAll { $0.url == shot.url } } label: { RemoveBadge(size: 20) }
                     .buttonStyle(.plain)
@@ -532,6 +562,11 @@ struct BrollSummaryView: View {
                     .accessibilityIdentifier("brollSummaryRemove")
             }
             .accessibilityLabel(String(format: L10n.tr("Shot %d"), number))
+    }
+
+    private func toggleSound(_ url: URL) {
+        guard let index = shots.firstIndex(where: { $0.url == url }) else { return }
+        shots[index].keepsSound.toggle()
     }
 
     /// "Keep this order" / "Off = AI picks the best moment for each" + blue switch (48×28).

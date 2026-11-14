@@ -114,7 +114,9 @@ enum ClipMark {
     static let kindKey = "broll_kind"
     static let orderKey = "broll_order"
     static let keepOrderKey = "broll_keep_order"
-    static let brollKeys = [sourceKey, kindKey, orderKey, keepOrderKey]
+    /// PO 14 Nov 2026 (Figma E4s 3060:354): "1" = this B-roll video keeps its own sound (under the voice).
+    static let soundKey = "broll_sound"
+    static let brollKeys = [sourceKey, kindKey, orderKey, keepOrderKey, soundKey]
 
     /// The source metadata of a clip: its base metadata plus its tags (the tags win).
     static func sourceMetadata(_ base: [String: String]?, tags: [String: String]) -> [String: String]? {

@@ -413,6 +413,29 @@ final class BrollV2Tests: XCTestCase {
         XCTAssertEqual(BrollAfterStop.talkingLine([video("t1", seconds: 24)]), "Talking · 0:24")
     }
 
+    /// PO 14 Nov (Figma E4s): B-roll is silent by default; a video whose speaker is on sends broll_sound "1";
+    /// a photo never does; turning the speaker off removes it; the tag survives a lighter copy.
+    func testBrollSoundIsOffByDefaultAndOnlyForVideos() {
+        var loud = video("v")
+        loud.keepsSound = true
+        var photoShot = photo("p")
+        photoShot.keepsSound = true
+        let out = BrollAfterStop.uploadVideos(talks: [video("t")], shots: [video("quiet"), loud, photoShot], keepOrder: true)
+        XCTAssertNil(out[1].clipTags["broll_sound"])
+        XCTAssertEqual(out[2].clipTags["broll_sound"], "1")
+        XCTAssertNil(out[3].clipTags["broll_sound"])
+        XCTAssertNil(out[0].clipTags["broll_sound"])
+        XCTAssertEqual(ClipMark.sourceMetadata(nil, tags: out[2].clipTags)?["broll_sound"], "1")
+        XCTAssertEqual(out[2].movedTo(URL(fileURLWithPath: "/tmp/light.mov"), contentType: "video/quicktime")
+            .clipTags["broll_sound"], "1")
+        loud.keepsSound = false
+        XCTAssertNil(loud.clipTags["broll_sound"])
+        // Unmarking B-roll clears the sound tag too.
+        var unmarked = out[2]
+        unmarked.isBroll = false
+        XCTAssertNil(unmarked.clipTags["broll_sound"])
+    }
+
     /// c) Photos and videos are B-roll with their kind and order, and "Keep this order".
     func testShotsCarryKindOrderAndKeepOrder() throws {
         let on = BrollAfterStop.uploadVideos(talks: [video("t")], shots: [photo("p"), video("v"), photo("q")],
