@@ -20,7 +20,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
-| 89 | 2026-11-14 | ✅ subido (pedido) | feature/shop-board | `861c91b7` | Your board: board grande, tarjetas en una línea, el título se mueve |
+| 89 | 2026-11-14 07:39 | ✅ subido | feature/shop-board | `861c91b7` | Your board: board grande, tarjetas en una línea, el título se mueve |
 | 88 | 2026-11-13 13:41 | ✅ subido | feature/shop-board | `506020f1` | Shop board: mover/agrandar/girar con los dedos más fácil + fondo automático que sigue el color de los productos |
 | 87 | 2026-11-13 08:29 | ✅ subido | feature/shop-board | `3c9ed3b9` | Arreglo: la pestaña Shop boards muestra la barra de abajo |
 | 86 | 2026-11-12 23:50 | ✅ subido | feature/shop-board | `c1f74b58` | Pestaña "Shop boards" en la barra de abajo; Edits como antes |
@@ -113,8 +113,8 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 ---
 
 ## Build 89 — 2026-11-14
-- **Resultado:** pedido a TestFlight (si la subida falla, se corrige esta línea)
-- **Rama (según el historial de git):** feature/shop-board  ·  **Commit de la app:** `861c91b7`
+- **Resultado:** subido a TestFlight (listo, 07:39 ET)
+- **Rama (según el historial de git):** feature/shop-board  ·  **Commit de la app:** `861c91b7`  ·  **Commit del pedido a TestFlight:** `ecc13ff9`
 - **Qué cambió (reporte de la PO con captura del build 88):**
   - **Board más grande** en "Your board": ocupa todo el espacio libre (antes 218 pt de ancho).
   - **Tarjetas Title / Shuffle / Background** en una línea, con "…" si no cabe; Background dice "✨ Match" cuando el fondo es automático.
