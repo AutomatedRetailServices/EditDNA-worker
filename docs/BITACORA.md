@@ -20,6 +20,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 89 | 2026-11-14 | ✅ subido (pedido) | feature/shop-board | `861c91b7` | Your board: board grande, tarjetas en una línea, el título se mueve |
 | 88 | 2026-11-13 13:41 | ✅ subido | feature/shop-board | `506020f1` | Shop board: mover/agrandar/girar con los dedos más fácil + fondo automático que sigue el color de los productos |
 | 87 | 2026-11-13 08:29 | ✅ subido | feature/shop-board | `3c9ed3b9` | Arreglo: la pestaña Shop boards muestra la barra de abajo |
 | 86 | 2026-11-12 23:50 | ✅ subido | feature/shop-board | `c1f74b58` | Pestaña "Shop boards" en la barra de abajo; Edits como antes |
@@ -110,6 +111,20 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 | 1 | 2026-10-12 13:01 | ❌ falló | feature/ios-captions-v2 | `d90bfc50` | Primer intento, no llegó a TestFlight |
 
 ---
+
+## Build 89 — 2026-11-14
+- **Resultado:** pedido a TestFlight (si la subida falla, se corrige esta línea)
+- **Rama (según el historial de git):** feature/shop-board  ·  **Commit de la app:** `861c91b7`
+- **Qué cambió (reporte de la PO con captura del build 88):**
+  - **Board más grande** en "Your board": ocupa todo el espacio libre (antes 218 pt de ancho).
+  - **Tarjetas Title / Shuffle / Background** en una línea, con "…" si no cabe; Background dice "✨ Match" cuando el fondo es automático.
+  - **El título se mueve** como un producto (arrastrar, pellizcar, girar). Shuffle lo regresa. Se guarda con el board.
+  - Capturas de prueba en el simulador (workflow nuevo `cutsell-ios-quick-shots.yml`, solo bajo pedido): la pestaña Shop boards sí muestra la barra de abajo con el código actual.
+  - Pruebas automáticas: todas pasan (nueva: mover el título).
+- **Pantallas nuevas o cambiadas:** Your board. Ver docs/design-audit/build-89/. **Figma todavía no se actualizó** (no se pudo conectar).
+- **Pendiente o con problemas:**
+  - La PO vio la pestaña Shop boards sin barra en su teléfono; en el simulador sí sale. Hay que confirmar qué build tenía instalado.
+  - Los mismos del build 85.
 
 ## Build 88 — 2026-11-13
 - **Resultado:** subido a TestFlight (listo, 13:41 ET)
