@@ -25,7 +25,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
-| 93 | 2026-11-14 | ✅ subido (pedido) | feature/shop-board | `d3e8aaa3` | Wear it + quitar productos + YOUR BRAND editable + bocina del B-roll |
+| 93 | 2026-11-14 16:56 | ✅ subido | feature/shop-board | `d3e8aaa3` (pedido `b9f18d7e`) | Wear it + quitar productos + YOUR BRAND editable + bocina del B-roll |
 | 92 | 2026-11-14 16:00 | ✅ subido | feature/shop-board | `90532ee8` (pedido `38803bc9`) | Clon con cámara delantera + cortes fallidos se abren con Try again |
 | 91 | 2026-11-14 14:45 | ✅ subido | feature/shop-board | `4a028623` (pedido `6e7c65c3`) | Arreglo: varias fotos a la vez se quedaban cargando para siempre |
 | 90 | 2026-11-14 11:14 | ✅ subido | feature/shop-board | `56d2fd68` | Shop board: fotos que ya no se quedan cargando + de 1 a 12 productos |
@@ -122,7 +122,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 ---
 
 ## Build 93 — 2026-11-14
-- **Resultado:** pedido a TestFlight (si la subida falla, se corrige esta línea)
+- **Resultado:** ✅ subido a TestFlight el 14 nov a las 16:56 ET (VALID) · commit del pedido `b9f18d7e`
 - **Rama (según el historial de git):** feature/shop-board  ·  **Commit de la app:** `d3e8aaa3`
 - **Qué cambió (todo pedido por la PO el 14 nov, diseñado primero en Figma):**
   - **Shop board · plantilla Wear it:** su foto usando la ropa ocupa todo el board, los productos van a la izquierda y el título va en blanco abajo; la galería se abre sola después de Create board. Reemplaza "+ More soon".
