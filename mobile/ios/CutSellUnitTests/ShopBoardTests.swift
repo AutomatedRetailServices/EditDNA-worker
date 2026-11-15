@@ -892,7 +892,8 @@ final class ShopWearItVideoTests: XCTestCase {
     func testTheSharedBoardIsA916VideoOfAtMostTwelveSeconds() async throws {
         let source = try await makeVideo(seconds: 14)
         defer { try? FileManager.default.removeItem(at: source) }
-        let loaded = try XCTUnwrap(await ShopVideoBackground.describe(source))
+        let described = await ShopVideoBackground.describe(source)
+        let loaded = try XCTUnwrap(described)
         XCTAssertEqual(loaded.duration, 14, accuracy: 0.2)
         let m = ShopBoardModel()
         m.items = [ShopItem(source: .photos, cutout: ShopSynthetic.cutout(.red))]
@@ -903,8 +904,10 @@ final class ShopWearItVideoTests: XCTestCase {
         let out = try await ShopVideoBackground.export(video: source, overlay: overlay)
         defer { try? FileManager.default.removeItem(at: out) }
         let asset = AVURLAsset(url: out)
-        XCTAssertEqual(try await asset.load(.duration).seconds, 12, accuracy: 0.3)
-        let track = try XCTUnwrap(try await asset.loadTracks(withMediaType: .video).first)
+        let seconds = try await asset.load(.duration).seconds
+        XCTAssertEqual(seconds, 12, accuracy: 0.3)
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        let track = try XCTUnwrap(tracks.first)
         let size = try await track.load(.naturalSize)
         XCTAssertEqual(size.width, 1080, accuracy: 1)
         XCTAssertEqual(size.height, 1920, accuracy: 1)
