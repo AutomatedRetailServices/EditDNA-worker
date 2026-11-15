@@ -25,6 +25,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 94 | 2026-11-15 | ✅ subido (pedido) | feature/shop-board | `94577d79` | Wear it con video de fondo (hasta 12 s, con sonido) |
 | 93 | 2026-11-14 16:56 | ✅ subido | feature/shop-board | `d3e8aaa3` (pedido `b9f18d7e`) | Wear it + quitar productos + YOUR BRAND editable + bocina del B-roll |
 | 92 | 2026-11-14 16:00 | ✅ subido | feature/shop-board | `90532ee8` (pedido `38803bc9`) | Clon con cámara delantera + cortes fallidos se abren con Try again |
 | 91 | 2026-11-14 14:45 | ✅ subido | feature/shop-board | `4a028623` (pedido `6e7c65c3`) | Arreglo: varias fotos a la vez se quedaban cargando para siempre |
@@ -120,6 +121,15 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 | 1 | 2026-10-12 13:01 | ❌ falló | feature/ios-captions-v2 | `d90bfc50` | Primer intento, no llegó a TestFlight |
 
 ---
+
+## Build 94 — 2026-11-15
+- **Resultado:** pedido a TestFlight (si la subida falla, se corrige esta línea)
+- **Rama (según el historial de git):** feature/shop-board  ·  **Commit de la app:** `94577d79`
+- **Qué cambió (PO 14 nov, diseñado primero en Figma W1/W2/W4):**
+  - **Wear it con video de fondo:** foto o video al crear el board; el video (máximo 12 s, con sonido) corre detrás de los productos, el título y la marca, todo junto desde el primer cuadro. Se comparte como MP4 9:16 (TikTok video, Instagram story, Fotos). Se guarda con el board.
+  - 99 pruebas automáticas, 0 fallas (4 nuevas del video, una crea un video de 14 s y revisa que el resultado sea 12 s, 1080 × 1920).
+  - Pendiente medir en el iPhone cuánto tarda en crear el video (en la computadora de pruebas tardó ~80 s sin chip de video).
+- **Pantallas nuevas o cambiadas:** ver [design-audit/build-94](design-audit/build-94/cambios.md).
 
 ## Build 93 — 2026-11-14
 - **Resultado:** ✅ subido a TestFlight el 14 nov a las 16:56 ET (VALID) · commit del pedido `b9f18d7e`
