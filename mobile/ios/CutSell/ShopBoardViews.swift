@@ -96,13 +96,15 @@ struct ShopNotice: View {
 /// while every photo loaded); each photo then loads on its own with a time limit (`ShopPhotoLoader`).
 struct ShopPhotoPicker: UIViewControllerRepresentable {
     var limit: Int
+    /// Wear it (PO 14 Nov): a photo OR a short video.
+    var videos = false
     let onPicked: ([NSItemProvider]) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeUIViewController(context: Context) -> PHPickerViewController {
         var configuration = PHPickerConfiguration()
-        configuration.filter = .images
+        configuration.filter = videos ? .any(of: [.images, .videos]) : .images
         configuration.selectionLimit = max(1, limit)
         let picker = PHPickerViewController(configuration: configuration)
         picker.delegate = context.coordinator
@@ -120,6 +122,20 @@ struct ShopPhotoPicker: UIViewControllerRepresentable {
             // AND the screen under it (build 81: Shop board closed right after picking a photo).
             CutSellDiagnostics.log("shop_photo_picked", ["count": String(results.count)])
             parent.onPicked(results.map(\.itemProvider))
+        }
+    }
+}
+
+/// Wear it: the picked photo or video becomes the background.
+enum ShopWearItMedia {
+    @MainActor
+    static func use(_ provider: NSItemProvider, in model: ShopBoardModel) async {
+        if ShopVideoBackground.isVideo(provider) {
+            guard let loaded = await ShopVideoBackground.load(provider) else { model.photoFailures += 1; return }
+            model.useVideo(loaded)
+        } else {
+            guard let image = await ShopPhotoLoader.load(provider) else { model.photoFailures += 1; return }
+            model.usePhoto(image)
         }
     }
 }
@@ -215,15 +231,11 @@ struct ShopBoardFlowView: View {
             }
         }
         .sheet(isPresented: $pickingWearPhoto) {
-            ShopPhotoPicker(limit: 1) { providers in
+            ShopPhotoPicker(limit: 1, videos: true) { providers in
                 pickingWearPhoto = false
                 step = .board
                 guard let provider = providers.first else { return }
-                Task {
-                    guard let image = await ShopPhotoLoader.load(provider) else { model.photoFailures += 1; return }
-                    model.photoBackground = image
-                    model.style.pick(.photo)
-                }
+                Task { await ShopWearItMedia.use(provider, in: model) }
             }
             .ignoresSafeArea()
         }
@@ -697,7 +709,8 @@ struct ShopBoardScreen: View {
                         selected = nil
                         withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) { model.shuffle() }
                     }
-                    actionCard("Background", detail: model.style.matchBackground ? L10n.tr("✨ Match") : model.backgroundName,
+                    actionCard("Background", detail: model.isVideoBoard ? L10n.tr("Your video")
+                               : model.style.matchBackground ? L10n.tr("✨ Match") : model.backgroundName,
                                id: "shopBackground", action: onBackground)
                 }
                 .padding(.horizontal, 24)
@@ -752,7 +765,19 @@ struct ShopBoardHandEditor: View {
         let snapshot = model.snapshot()
         let size = CGSize(width: width, height: width * 16 / 9)
         ZStack(alignment: .topLeading) {
-            ShopBoardCanvas(snapshot: snapshot, width: width)
+            if model.isVideoBoard, let video = model.videoBackground {
+                // Figma W2 (3065:301): her video plays behind the board, everything on top from the first frame.
+                ShopVideoBackgroundView(url: video, duration: model.videoDuration)
+                    .frame(width: size.width, height: size.height)
+                    .clipped()
+                    .allowsHitTesting(false)
+                ShopBoardCanvas(snapshot: snapshot, width: width, transparent: true)
+                ShopVideoChip(seconds: model.videoDuration)
+                    .padding(8)
+                    .allowsHitTesting(false)
+            } else {
+                ShopBoardCanvas(snapshot: snapshot, width: width)
+            }
             if selected == ShopBoardModel.titleID {
                 let placed = snapshot.titleFrame(board: size)
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -1052,6 +1077,8 @@ struct ShopBackgroundSheet: View {
     @State private var tab: Tab = .colors
     @State private var customColor = Color(fixed: 0xF1ECE4)
     @State private var pickingPhoto = false
+    /// "Use a photo instead" (Figma W1): the picker shows photos only.
+    @State private var photoOnly = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1080,14 +1107,10 @@ struct ShopBackgroundSheet: View {
             if case .photo = model.style.background, !model.style.matchBackground { tab = .photo }
         }
         .sheet(isPresented: $pickingPhoto) {
-            ShopPhotoPicker(limit: 1) { providers in
+            ShopPhotoPicker(limit: 1, videos: model.template == .wearIt && !photoOnly) { providers in
                 pickingPhoto = false
                 guard let provider = providers.first else { return }
-                Task {
-                    guard let image = await ShopPhotoLoader.load(provider) else { model.photoFailures += 1; return }
-                    model.photoBackground = image
-                    model.style.pick(.photo)
-                }
+                Task { await ShopWearItMedia.use(provider, in: model) }
             }
             .ignoresSafeArea()
         }
@@ -1100,7 +1123,8 @@ struct ShopBackgroundSheet: View {
             ForEach(Tab.allCases, id: \.self) { item in
                 let selected = item == tab
                 Button { withAnimation(.easeOut(duration: 0.15)) { tab = item } } label: {
-                    Text(L10n.tr(item.rawValue)).font(CS.inter(14, .bold))
+                    Text(L10n.tr(item == .photo && model.template == .wearIt ? "Photo / video" : item.rawValue))
+                        .font(CS.inter(14, .bold))
                         .foregroundStyle(selected ? .white : Color(fixed: 0x6B7385))
                         .frame(maxWidth: .infinity).frame(height: 32)
                         .background {
@@ -1252,8 +1276,72 @@ struct ShopBackgroundSheet: View {
         }
     }
 
-    // My photo (not in Figma: the minimal picker).
+    // My photo (not in Figma: the minimal picker). Wear it: Figma W1 (3065:201), photo or video.
+    @ViewBuilder
     private var photo: some View {
+        if model.template == .wearIt { wearItMedia } else { plainPhoto }
+    }
+
+    private var wearItMedia: some View {
+        VStack(spacing: 0) {
+            ZStack(alignment: .bottomLeading) {
+                Group {
+                    if let image = model.photoBackground {
+                        Image(uiImage: image).resizable().scaledToFill()
+                    } else {
+                        LinearGradient(colors: [ShopTemplate.wearItPlaceholder.top.color, ShopTemplate.wearItPlaceholder.bottom.color],
+                                       startPoint: .top, endPoint: .bottom)
+                    }
+                }
+                .frame(width: 150, height: 266)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay {
+                    if model.videoBackground != nil {
+                        Image(systemName: "play.fill").font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
+                            .frame(width: 44, height: 44).background(Color.black.opacity(0.35), in: Circle())
+                    }
+                }
+                if model.videoBackground != nil {
+                    Text(verbatim: "🔊 \(ShopVideoBackground.clock(model.videoDuration))")
+                        .font(CS.inter(11, .bold)).foregroundStyle(.white)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Color.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .padding(8)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            Text(L10n.tr("Your video plays behind your products, with its sound. Up to 12 s (longer videos use the first 12 s)."))
+                .font(CS.inter(13, .medium)).foregroundStyle(Color(fixed: 0x6B7385))
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 14)
+            VStack(spacing: 8) {
+                if model.videoBackground != nil {
+                    mediaButton("Choose another video", id: "shopPickVideoBackground") { photoOnly = false; pickingPhoto = true }
+                    mediaButton("Use a photo instead", id: "shopUsePhotoInstead") { photoOnly = true; pickingPhoto = true }
+                } else {
+                    mediaButton(model.photoBackground == nil ? "Choose a photo or video" : "Choose another photo or video",
+                                id: "shopPickPhotoBackground") { photoOnly = false; pickingPhoto = true }
+                }
+            }
+            .padding(.top, 16)
+        }
+        .padding(.top, 10)
+    }
+
+    /// Figma W1: 342 × 48 white pill, #E6E9EF border, Bold 15.
+    private func mediaButton(_ title: String, id: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(L10n.tr(title)).font(CS.inter(15, .bold)).foregroundStyle(Color(fixed: 0x0B1020))
+                .frame(maxWidth: .infinity).frame(height: 48)
+                .background(Color.white, in: Capsule())
+                .overlay(Capsule().stroke(Color(fixed: 0xE6E9EF), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(id)
+    }
+
+    private var plainPhoto: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let image = model.photoBackground {
                 Image(uiImage: image).resizable().scaledToFill()
@@ -1322,6 +1410,16 @@ struct ShopShareView: View {
                         HStack(alignment: .top, spacing: 14) {
                             ShopBoardCanvas(snapshot: model.snapshot(), width: 85.8)
                                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .overlay(alignment: .bottomLeading) {
+                                    // Figma W4: "▶ 0:12" on the thumbnail when the board is a video.
+                                    if model.isVideoBoard {
+                                        Text(verbatim: "▶ \(ShopVideoBackground.clock(model.videoDuration))")
+                                            .font(CS.inter(9, .bold)).foregroundStyle(.white)
+                                            .padding(.horizontal, 6).padding(.vertical, 3)
+                                            .background(Color.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                            .padding(5)
+                                    }
+                                }
                             VStack(alignment: .leading, spacing: 0) {
                                 Text(L10n.tr("Amazon / affiliate link")).font(CS.inter(13, .bold)).foregroundStyle(Color(fixed: 0x6B7385))
                                 TextField(L10n.tr("amazon.com/…  (optional)"), text: $model.affiliateLink)
@@ -1344,10 +1442,12 @@ struct ShopShareView: View {
                             }
                         }
                         VStack(spacing: 12) {
-                            row("Post as TikTok photo", "Tag your TikTok Shop product in TikTok", highlighted: true,
+                            row(model.isVideoBoard ? "Post as TikTok video" : "Post as TikTok photo",
+                                "Tag your TikTok Shop product in TikTok", highlighted: true,
                                 id: "shopPostTikTok") { showingTikTokTip = true }
                             row("Instagram story", "Your link goes on the link sticker", id: "shopInstagramStory") { await instagram() }
-                            row("Save to Photos", "9:16 image · link & caption copied", id: "shopSaveToPhotos") { await save() }
+                            row("Save to Photos", model.isVideoBoard ? "9:16 video with sound · link & caption copied"
+                                : "9:16 image · link & caption copied", id: "shopSaveToPhotos") { await save() }
                         }
                         .padding(.top, 22)
                         Text(L10n.tr("TikTok Shop products are tagged inside TikTok. Your Amazon / affiliate link goes in your bio, your story sticker or wherever you paste it. We add \"#ad\" so your post follows the rules for affiliate links."))
@@ -1396,12 +1496,45 @@ struct ShopShareView: View {
         return ShopBoardExport.image(model.snapshot())
     }
 
+    /// Wear it with a video: the 9:16 MP4 (her video + the board on top), made when she shares.
+    private func exportedVideo() async -> URL? {
+        guard let video = model.videoBackground else { return nil }
+        model.caption = model.finalCaption
+        guard let overlay = ShopBoardExport.overlay(model.snapshot()) else { return nil }
+        show(L10n.tr("Making your video…"))
+        do { return try await ShopVideoBackground.export(video: video, overlay: overlay) } catch {
+            CutSellDiagnostics.log("shop_video_failed", ["step": "export"])
+            show(L10n.tr("The video couldn't be made. Try again."))
+            return nil
+        }
+    }
+
     private func postTikTok() async {
+        if model.isVideoBoard {
+            guard let file = await exportedVideo() else { return }
+            await TikTokPoster.shared.post(video: file, caption: model.caption, projectID: "shopboard-\(model.boardID.uuidString)",
+                                           onNotice: { show(L10n.tr($0)) }, askWhenBack: false)
+            return
+        }
         guard let image = exported() else { return }
         await TikTokPoster.shared.postPhoto(image, caption: model.caption, onNotice: { show(L10n.tr($0)) })
     }
 
     private func instagram() async {
+        if model.isVideoBoard {
+            // A video story: saved to Photos, link copied, Instagram opens (she picks it there).
+            guard let file = await exportedVideo() else { return }
+            do {
+                _ = try await TikTokPoster.saveToPhotos(file)
+                if !model.affiliateLink.isEmpty { UIPasteboard.general.string = model.affiliateLink }
+                show(L10n.tr("Video saved to Photos. Link copied for your Shop now sticker."))
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                ShopShare.openInstagram()
+            } catch {
+                show(L10n.tr("Allow CutSell to add videos to Photos, then try again."))
+            }
+            return
+        }
         guard let image = exported() else { return }
         if ShopShare.instagramStory(image, link: model.affiliateLink) { return }
         // No Facebook App ID yet: the picture goes to Photos, the link is copied, Instagram opens.
@@ -1417,6 +1550,18 @@ struct ShopShareView: View {
     }
 
     private func save() async {
+        if model.isVideoBoard {
+            guard let file = await exportedVideo() else { return }
+            do {
+                _ = try await TikTokPoster.saveToPhotos(file)
+                UIPasteboard.general.string = ShopCaption.clipboard(caption: model.caption, title: model.bigTitle,
+                                                                    link: model.affiliateLink)
+                show(L10n.tr("Video saved to Photos. Link and caption copied."))
+            } catch {
+                show(L10n.tr("Allow CutSell to add videos to Photos, then try again."))
+            }
+            return
+        }
         guard let image = exported() else { return }
         do {
             try await ShopShare.saveToPhotos(image)

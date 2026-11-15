@@ -49,6 +49,9 @@ struct ShopBoardRecord: Codable, Identifiable, Equatable {
     var adjusts: [UUID: Adjust]
     var raised: [UUID]
     var hasPhotoBackground: Bool
+    /// Wear it with a video (14 Nov): "background.mov" in the board's folder and its length. Missing before.
+    var hasVideoBackground: Bool?
+    var videoDuration: Double?
 
     /// "CUTSELL · Everyday chic" under the tile.
     var displayTitle: String {
@@ -137,20 +140,30 @@ final class ShopBoardStore: ObservableObject {
             matchTitle: model.style.matchTitle, titleColor: model.style.titleColor,
             affiliateLink: model.affiliateLink, caption: model.caption, items: items,
             adjusts: model.adjusts.mapValues { .init(dx: $0.offset.width, dy: $0.offset.height, scale: $0.scale, rotation: $0.rotation) },
-            raised: model.raised, hasPhotoBackground: model.photoBackground != nil)
+            raised: model.raised, hasPhotoBackground: model.photoBackground != nil,
+            hasVideoBackground: model.videoBackground != nil, videoDuration: model.videoBackground == nil ? nil : model.videoDuration)
         boards.removeAll { $0.id == record.id }
         boards.insert(record, at: 0)
         if thumbnail != nil { thumbnailVersion[record.id, default: 0] += 1 }
         let json = try? JSONEncoder().encode(record)
-        let keep = Set(items.flatMap { [$0.cutoutFile, $0.flatFile].compactMap { $0 } } + ["board.json", "thumb.jpg", "background.jpg"])
+        let keep = Set(items.flatMap { [$0.cutoutFile, $0.flatFile].compactMap { $0 } }
+                       + ["board.json", "thumb.jpg", "background.jpg", "background.mov"])
         let hasPhoto = record.hasPhotoBackground
+        let video = model.videoBackground
+        let videoFile = dir.appendingPathComponent("background.mov")
         let write = {
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             for (name, data) in files { try? data.write(to: dir.appendingPathComponent(name), options: .atomic) }
+            // Her video: copied once into the board's folder (the file is up to 12 s worth reading; never re-read).
+            func bytes(_ url: URL) -> Int? { (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? nil }
+            if let video, video.standardizedFileURL != videoFile.standardizedFileURL, bytes(video) != bytes(videoFile) {
+                try? FileManager.default.removeItem(at: videoFile)
+                try? FileManager.default.copyItem(at: video, to: videoFile)
+            }
             if let json { try? json.write(to: dir.appendingPathComponent("board.json"), options: .atomic) }
             // Old versions of products (removed, shaped again) and a removed background photo go away.
             for name in (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
-            where !keep.contains(name) || (name == "background.jpg" && !hasPhoto) {
+            where !keep.contains(name) || (name == "background.jpg" && !hasPhoto) || (name == "background.mov" && video == nil) {
                 try? FileManager.default.removeItem(at: dir.appendingPathComponent(name))
             }
         }
@@ -181,6 +194,11 @@ final class ShopBoardStore: ObservableObject {
         model.caption = record.caption
         if record.hasPhotoBackground {
             model.photoBackground = UIImage(contentsOfFile: dir.appendingPathComponent("background.jpg").path)
+        }
+        let videoFile = dir.appendingPathComponent("background.mov")
+        if record.hasVideoBackground == true, FileManager.default.fileExists(atPath: videoFile.path) {
+            model.videoBackground = videoFile
+            model.videoDuration = record.videoDuration ?? ShopVideoBackground.maxSeconds
         }
         model.items = record.items.map { saved in
             var item = ShopItem(id: saved.id, source: saved.source, name: saved.name, affiliateLink: saved.affiliateLink,

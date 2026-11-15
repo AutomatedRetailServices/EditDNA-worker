@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreImage
 import SwiftUI
 import UIKit
@@ -826,5 +827,103 @@ final class ShopWearItTests: XCTestCase {
         let a = ShopLayout.wearItPlacements(count: 3, variant: 0).map(\.itemIndex)
         let b = ShopLayout.wearItPlacements(count: 3, variant: 1).map(\.itemIndex)
         XCTAssertNotEqual(a, b)
+    }
+}
+
+/// PO 14 Nov 2026 (Figma W1 3065:201 · W2 3065:301 · W4 3065:383): Wear it with a short video behind the board.
+@MainActor
+final class ShopWearItVideoTests: XCTestCase {
+    /// A small synthetic video (solid colour frames, no sound) made here; nothing is stored in the repo.
+    private func makeVideo(seconds: Double, size: CGSize = CGSize(width: 320, height: 568)) async throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("wear-\(UUID().uuidString).mov")
+        let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: Int(size.width), AVVideoHeightKey: Int(size.height)])
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferWidthKey as String: Int(size.width), kCVPixelBufferHeightKey as String: Int(size.height)])
+        writer.add(input)
+        XCTAssertTrue(writer.startWriting())
+        writer.startSession(atSourceTime: .zero)
+        let frames = Int(seconds * 10)
+        for i in 0..<frames {
+            while !input.isReadyForMoreMediaData { try await Task.sleep(nanoseconds: 2_000_000) }
+            var buffer: CVPixelBuffer?
+            CVPixelBufferPoolCreatePixelBuffer(nil, adaptor.pixelBufferPool!, &buffer)
+            let b = try XCTUnwrap(buffer)
+            CVPixelBufferLockBaseAddress(b, [])
+            memset(CVPixelBufferGetBaseAddress(b), Int32(40 + i % 100), CVPixelBufferGetDataSize(b))
+            CVPixelBufferUnlockBaseAddress(b, [])
+            adaptor.append(b, withPresentationTime: CMTime(value: CMTimeValue(i), timescale: 10))
+        }
+        input.markAsFinished()
+        await writer.finishWriting()
+        XCTAssertEqual(writer.status, .completed)
+        return url
+    }
+
+    func testTheVideoFillsTheBoardAndIsCutAtTwelveSeconds() {
+        let wide = ShopVideoBackground.fill(CGSize(width: 1920, height: 1080), into: ShopLayout.exportSize)
+        XCTAssertEqual(1920 * wide.scale, 1920 * 1920 / 1080, accuracy: 0.5)       // height fills
+        XCTAssertEqual(1080 * wide.scale, 1920, accuracy: 0.5)
+        XCTAssertLessThan(wide.offset.x, 0)                                        // sides cropped, centred
+        XCTAssertEqual(ShopVideoBackground.clipLength(30), 12)
+        XCTAssertEqual(ShopVideoBackground.clipLength(7.4), 7.4)
+        XCTAssertEqual(ShopVideoBackground.clock(30), "0:12")
+        XCTAssertEqual(ShopVideoBackground.clock(7.4), "0:07")
+    }
+
+    func testAVideoIsOnlyForWearIt() throws {
+        let m = ShopBoardModel()
+        m.items = [ShopItem(source: .photos, cutout: ShopSynthetic.cutout(.red))]
+        m.choose(.wearIt)
+        m.useVideo(.init(url: URL(fileURLWithPath: "/tmp/v.mov"), poster: UIImage(cgImage: ShopSynthetic.cutout(.blue)), duration: 20))
+        XCTAssertTrue(m.isVideoBoard)
+        XCTAssertNotNil(m.snapshot().photo)                                       // the first picture for thumbnails
+        m.usePhoto(UIImage(cgImage: ShopSynthetic.cutout(.green)))
+        XCTAssertFalse(m.isVideoBoard)
+        XCTAssertNil(m.videoBackground)
+        m.useVideo(.init(url: URL(fileURLWithPath: "/tmp/v.mov"), poster: UIImage(cgImage: ShopSynthetic.cutout(.blue)), duration: 5))
+        m.choose(.everydayChic)
+        XCTAssertNil(m.videoBackground)
+        XCTAssertFalse(m.isVideoBoard)
+    }
+
+    func testTheSharedBoardIsA916VideoOfAtMostTwelveSeconds() async throws {
+        let source = try await makeVideo(seconds: 14)
+        defer { try? FileManager.default.removeItem(at: source) }
+        let loaded = try XCTUnwrap(await ShopVideoBackground.describe(source))
+        XCTAssertEqual(loaded.duration, 14, accuracy: 0.2)
+        let m = ShopBoardModel()
+        m.items = [ShopItem(source: .photos, cutout: ShopSynthetic.cutout(.red))]
+        m.choose(.wearIt)
+        m.useVideo(loaded)
+        let overlay = try XCTUnwrap(ShopBoardExport.overlay(m.snapshot()))
+        XCTAssertEqual(overlay.size.width * overlay.scale, 1080, accuracy: 1)
+        let out = try await ShopVideoBackground.export(video: source, overlay: overlay)
+        defer { try? FileManager.default.removeItem(at: out) }
+        let asset = AVURLAsset(url: out)
+        XCTAssertEqual(try await asset.load(.duration).seconds, 12, accuracy: 0.3)
+        let track = try XCTUnwrap(try await asset.loadTracks(withMediaType: .video).first)
+        let size = try await track.load(.naturalSize)
+        XCTAssertEqual(size.width, 1080, accuracy: 1)
+        XCTAssertEqual(size.height, 1920, accuracy: 1)
+    }
+
+    func testAVideoBoardIsSavedAndOpensAgain() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ShopVideoStore-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("fake-\(UUID().uuidString).mov")
+        try Data(repeating: 7, count: 2048).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let m = ShopBoardModel()
+        m.items = [ShopItem(source: .photos, cutout: ShopSynthetic.cutout(.red))]
+        m.choose(.wearIt)
+        m.useVideo(.init(url: file, poster: UIImage(cgImage: ShopSynthetic.cutout(.blue)), duration: 9))
+        ShopBoardStore(root: root).save(m, synchronously: true)
+        let opened = try XCTUnwrap(ShopBoardStore(root: root).open(m.boardID))
+        XCTAssertEqual(opened.videoBackground?.lastPathComponent, "background.mov")
+        XCTAssertEqual(opened.videoDuration, 9)
+        XCTAssertTrue(opened.isVideoBoard)
     }
 }

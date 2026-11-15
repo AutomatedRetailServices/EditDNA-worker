@@ -33,6 +33,30 @@ final class ShopBoardModel: ObservableObject {
     /// Products brought to the front by a tap, last on top.
     @Published var raised: [UUID] = []
     @Published var photoBackground: UIImage?
+    /// Wear it with a video (Figma W1/W2): her video file and its length; `photoBackground` is then its first picture
+    /// (thumbnails, the style tile). Only Wear it uses a video.
+    @Published var videoBackground: URL?
+    @Published var videoDuration: Double = 0
+
+    /// The board is a video (Wear it, her video chosen as the background).
+    var isVideoBoard: Bool {
+        guard template == .wearIt, videoBackground != nil, !style.matchBackground, case .photo = style.background else { return false }
+        return true
+    }
+
+    func useVideo(_ loaded: ShopVideoBackground.Loaded) {
+        videoBackground = loaded.url
+        videoDuration = loaded.duration
+        photoBackground = loaded.poster
+        style.pick(.photo)
+    }
+
+    func usePhoto(_ image: UIImage) {
+        videoBackground = nil
+        videoDuration = 0
+        photoBackground = image
+        style.pick(.photo)
+    }
     @Published private(set) var palette: [ShopRGB] = []
     @Published var affiliateLink = ""
     @Published var caption = ""
@@ -221,6 +245,11 @@ final class ShopBoardModel: ObservableObject {
             style.titleColor = ShopTemplate.wearIt.ink
         } else if leavingWearIt {
             style = ShopBoardStyle(background: .classic(template.background))
+            if videoBackground != nil {                 // a video is only for Wear it
+                videoBackground = nil
+                videoDuration = 0
+                photoBackground = nil
+            }
         }
         variant = 0
         clearHandEdits()
@@ -390,6 +419,8 @@ struct ShopBoardSnapshot {
 struct ShopBoardCanvas: View {
     let snapshot: ShopBoardSnapshot
     let width: CGFloat
+    /// Wear it with a video: everything but the background (her video plays under it / is laid under it on export).
+    var transparent = false
 
     var body: some View {
         let height = width * 16 / 9
@@ -419,7 +450,10 @@ struct ShopBoardCanvas: View {
 
     @ViewBuilder
     private func background(size: CGSize) -> some View {
-        if let photo = snapshot.photo {
+        if transparent {
+            Color.clear.frame(width: size.width, height: size.height)
+                .overlay(alignment: .bottom) { if snapshot.wearIt { wearItShade(size: size) } }
+        } else if let photo = snapshot.photo {
             Image(uiImage: photo).resizable().scaledToFill().frame(width: size.width, height: size.height).clipped()
                 .overlay(alignment: .bottom) { if snapshot.wearIt { wearItShade(size: size) } }
         } else if snapshot.wearIt {
@@ -513,6 +547,17 @@ struct ShopBoardCanvas: View {
 }
 
 enum ShopBoardExport {
+    /// Wear it with a video: the board without its background, transparent, 1080 × 1920 (laid over her video).
+    @MainActor
+    static func overlay(_ snapshot: ShopBoardSnapshot) -> UIImage? {
+        let renderer = ImageRenderer(content: ShopBoardCanvas(snapshot: snapshot, width: ShopLayout.exportSize.width, transparent: true)
+            .environment(\.colorScheme, .light))
+        renderer.scale = 1
+        renderer.proposedSize = ProposedViewSize(ShopLayout.exportSize)
+        renderer.isOpaque = false
+        return renderer.uiImage
+    }
+
     /// The board as a 1080 × 1920 picture (9:16) for Save / Share.
     @MainActor
     static func image(_ snapshot: ShopBoardSnapshot) -> UIImage? {
