@@ -15,7 +15,9 @@ import modal
 
 ITEMS = (("shirt", "clothing"), ("pants", "clothing"), ("shoes", "shoes"), ("sweater", "clothing"))
 RUN_ID = "20261112"
-MAX_CALLS = 4
+MAX_CALLS = 14
+# PO 16 Nov: which kie.ai model keeps the product exactly? (photos per model; the expensive one on 2 photos only)
+MODELS = (("nano-banana-2", 4), ("nano-banana-pro", 2), ("bytedance/seedream-v4-edit", 4), ("qwen/image-edit", 4))
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
@@ -27,7 +29,7 @@ app = modal.App("cutsell-shape-kie-probe")
 
 
 @app.function(image=image, secrets=[modal.Secret.from_name("cutsell-worker")], timeout=900, cpu=1.0, memory=1024)
-def probe(items: list) -> list[dict]:
+def probe(items: list, models: list) -> list[dict]:
     """items: [(label, kind, png bytes)] -> rows (with "png" = the transparent result for the ok ones)."""
     import base64
     import os
@@ -39,12 +41,14 @@ def probe(items: list) -> list[dict]:
     if not os.environ.get("KIE_API_KEY", "").strip():
         return [{"error": "KIE_API_KEY is not in the Modal secret cutsell-worker"}]
     rows = []
-    for label, kind, png in items[:MAX_CALLS]:
-        row = {"item": label, "kind": kind}
+    jobs = [(m, label, kind, png) for m, n in models for label, kind, png in items[:n]][:MAX_CALLS]
+    for model, label, kind, png in jobs:
+        row = {"model": model, "item": label, "kind": kind}
         try:
             garment = shop_shape.decode_image(base64.b64encode(png).decode("ascii"))
             started = time.monotonic()
-            raw, info = kie_image.shape_png(garment.flattened_png(), shop_shape.build_prompt(kind, background=garment.key_name))
+            raw, info = kie_image.shape_png(garment.flattened_png(), shop_shape.build_prompt(kind, background=garment.key_name),
+                                            model=model)
             row.update(ok=True, seconds=round(time.monotonic() - started, 1), cost_usd=info["cost_usd"],
                        model=info["model"], size=f"{garment.width}x{garment.height}",
                        png=shop_shape.finish_output(raw, garment))
@@ -75,12 +79,13 @@ def main():
     bucket, prefix = env["S3_BUCKET"], f"private-qa/shape-compare/{RUN_ID}"
     items = [(label, kind, s3.get_object(Bucket=bucket, Key=f"{prefix}/in/{label}.png")["Body"].read())
              for label, kind in ITEMS[:MAX_CALLS]]
-    rows = probe.remote(items)
+    rows = probe.remote(items, [list(m) for m in MODELS])
     for r in rows:
         png = r.pop("png", None)
         if png:
-            s3.put_object(Bucket=bucket, Key=f"{prefix}/out-kie/{r['item']}-kie.png", Body=png, ContentType="image/png")
-            r["saved"] = f"{prefix}/out-kie/{r['item']}-kie.png"
+            tag = r["model"].replace("/", "_")
+            s3.put_object(Bucket=bucket, Key=f"{prefix}/out-kie-models/{tag}/{r['item']}.png", Body=png, ContentType="image/png")
+            r["saved"] = True
         print("RESULT", r)
     ok = sum(1 for r in rows if r.get("ok"))
     print(f"RESULT {ok}/{len(rows)} ok; cost ~US${sum(float(r.get('cost_usd') or 0) for r in rows):.2f}")

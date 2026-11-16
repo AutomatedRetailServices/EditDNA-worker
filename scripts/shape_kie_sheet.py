@@ -29,14 +29,33 @@ def cell(key: str) -> Image.Image:
     return tile
 
 
-cols = ("in/{}.png", "out/{}__nano-banana.png", "out-kie/{}-kie.png")
-sheet = Image.new("RGB", (CELL * 3, 40 + CELL * len(ITEMS)), (255, 255, 255))
+cols = [("Original", "in/{}.png"), ("Google directo · Nano Banana 2 Lite", "out/{}__nano-banana.png"),
+        ("kie · Nano Banana (anterior)", "out-kie/{}-kie.png")]
+for tag, title in (("nano-banana-2", "kie · Nano Banana 2"), ("nano-banana-pro", "kie · Nano Banana Pro"),
+                   ("bytedance_seedream-v4-edit", "kie · Seedream 4"), ("qwen_image-edit", "kie · Qwen Edit")):
+    cols.append((title, "out-kie-models/" + tag + "/{}.png"))
+
+
+def exists(key: str) -> bool:
+    try:
+        s3.head_object(Bucket=bucket, Key=key)
+        return True
+    except Exception:
+        return False
+
+
+cols = [c for c in cols if any(exists(f"{prefix}/{c[1].format(i)}") for i in ITEMS)]
+sheet = Image.new("RGB", (CELL * len(cols), 40 + CELL * len(ITEMS)), (255, 255, 255))
 draw = ImageDraw.Draw(sheet)
-for c, title in enumerate(("Original", "Google direct (12 nov)", "kie.ai (16 nov)")):
+for c, (title, _) in enumerate(cols):
     draw.text((c * CELL + 12, 12), title, fill=(11, 16, 32))
 for r, item in enumerate(ITEMS):
-    for c, pattern in enumerate(cols):
-        sheet.paste(cell(f"{prefix}/{pattern.format(item)}"), (c * CELL, 40 + r * CELL))
+    for c, (_, pattern) in enumerate(cols):
+        key = f"{prefix}/{pattern.format(item)}"
+        if exists(key):
+            sheet.paste(cell(key), (c * CELL, 40 + r * CELL))
+        else:
+            draw.text((c * CELL + 140, 40 + r * CELL + CELL // 2), "(no probado)", fill=(107, 115, 133))
 buf = io.BytesIO()
 sheet.save(buf, "JPEG", quality=85)
 s3.put_object(Bucket=bucket, Key=f"{prefix}/sheet.jpg", Body=buf.getvalue(), ContentType="image/jpeg")

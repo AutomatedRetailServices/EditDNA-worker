@@ -29,11 +29,14 @@ UPLOAD_URL = "https://kieai.redpandaai.co/api/file-base64-upload"
 CREATE_URL = "https://api.kie.ai/api/v1/jobs/createTask"
 RECORD_URL = "https://api.kie.ai/api/v1/jobs/recordInfo"
 DEFAULT_MODEL = "google/nano-banana-edit"
-PRICE_PER_IMAGE = {"google/nano-banana-edit": 0.02}
+PRICE_PER_IMAGE = {   # approximate (kie.ai credits; checked per run in the probe)
+    "google/nano-banana-edit": 0.02, "nano-banana-2": 0.04, "nano-banana-pro": 0.09,
+    "bytedance/seedream-v4-edit": 0.0175, "qwen/image-edit": 0.02,
+}
 DEFAULT_PRICE = 0.02
 CONNECT_TIMEOUT, READ_TIMEOUT = 10, 60
 POLL_FIRST_SEC, POLL_MAX_SEC = 2.0, 5.0
-TOTAL_WAIT_SEC = 120.0
+TOTAL_WAIT_SEC = 240.0
 
 
 class KieError(Exception):
@@ -68,15 +71,27 @@ def _check(response, step: str) -> dict:
     return data.get("data") or {}
 
 
+def task_input(model: str, prompt: str, image_url: str) -> dict:
+    """Each kie.ai image model names its fields differently (docs, 16 Nov 2026)."""
+    if model in ("nano-banana-2", "nano-banana-pro"):
+        return {"prompt": prompt, "image_input": [image_url], "aspect_ratio": "auto", "resolution": "1K",
+                "output_format": "png"}
+    if model == "qwen/image-edit":
+        return {"prompt": prompt[:2000], "image_url": image_url, "output_format": "png", "num_images": "1"}
+    if model.startswith("bytedance/seedream"):
+        return {"prompt": prompt, "image_urls": [image_url], "image_resolution": "1K", "max_images": 1}
+    return {"prompt": prompt, "image_urls": [image_url], "output_format": "png", "image_size": "auto"}
+
+
 def shape_png(png: bytes, prompt: str, *, key: str | None = None, session=None, sleep=time.sleep,
-              clock=time.monotonic) -> tuple[bytes, dict]:
+              clock=time.monotonic, model: str | None = None) -> tuple[bytes, dict]:
     """The garment PNG (on its solid key colour) -> the model's image bytes, plus {"model", "cost_usd", "ms"}."""
     key = (key if key is not None else os.environ.get("KIE_API_KEY", "")).strip()
     if not key:
         raise KieError("shape_provider_not_configured", "KIE_API_KEY missing")
     client = session or requests
     auth = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-    model = model_id()
+    model = model or model_id()
     started = clock()
     try:
         uploaded = _check(client.post(UPLOAD_URL, headers=auth, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT), json={
@@ -86,9 +101,7 @@ def shape_png(png: bytes, prompt: str, *, key: str | None = None, session=None, 
         if not image_url.startswith("https://"):
             raise KieError("shape_provider_error", "kie upload: no URL")
         task = _check(client.post(CREATE_URL, headers=auth, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT), json={
-            "model": model,
-            "input": {"prompt": prompt, "image_urls": [image_url], "output_format": "png", "image_size": "auto"}}),
-            "createTask")
+            "model": model, "input": task_input(model, prompt, image_url)}), "createTask")
         task_id = str(task.get("taskId") or "")
         if not task_id:
             raise KieError("shape_provider_error", "kie createTask: no taskId")
