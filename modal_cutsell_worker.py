@@ -137,6 +137,46 @@ def wake(payload: dict) -> dict:
     return {"status": "started"}
 
 
+# PO 16 Nov 2026: Shop board "Shape it" runs Nano Banana through kie.ai, whose key is only in this Modal secret.
+# The API on Render posts the garment here with the wake token; nothing is stored here (kie.ai deletes its copy
+# after 24 h). cutsell_worker/kie_image.py does the kie.ai calls; cutsell_app/shop_shape.KieProvider is the caller.
+shape_image = light_image.pip_install("requests>=2.31").add_local_file(
+    "cutsell_worker/kie_image.py", remote_path="/root/kie_image.py")
+
+
+@app.function(image=shape_image, secrets=[secret], cpu=0.25, memory=512, timeout=170, max_containers=20)
+@modal.fastapi_endpoint(method="POST")
+def shape_kie(payload: dict):
+    """Body {"token", "prompt", "image_png_base64"} -> {"image_png_base64", "cost_usd", "model", "ms"}."""
+    import base64
+    import binascii
+    import hmac
+
+    from fastapi.responses import JSONResponse
+
+    import kie_image
+
+    expected = os.environ.get("CUTSELL_WORKER_WAKE_TOKEN", "")
+    supplied = str((payload or {}).get("token") or "")
+    if not expected or not hmac.compare_digest(supplied, expected):
+        return JSONResponse(status_code=401, content={"error": "invalid token"})
+    prompt = str((payload or {}).get("prompt") or "")[:5000]
+    try:
+        png = base64.b64decode(str((payload or {}).get("image_png_base64") or ""), validate=True)
+    except (binascii.Error, ValueError):
+        png = b""
+    if not prompt or not png.startswith(b"\x89PNG"):
+        return JSONResponse(status_code=400, content={"error": "bad_request"})
+    try:
+        image, info = kie_image.shape_png(png, prompt)
+    except kie_image.KieError as exc:
+        print(f"cutsell_event name=shop.shape.kie status={exc.code} detail={exc.detail[:160]}")
+        status = 503 if exc.code == "shape_provider_not_configured" else 502
+        return JSONResponse(status_code=status, content={"error": exc.code})
+    print(f"cutsell_event name=shop.shape.kie status=ok model={info['model']} ms={info['ms']} cost_usd={info['cost_usd']}")
+    return {"image_png_base64": base64.b64encode(image).decode("ascii"), **info}
+
+
 @app.function(
     image=light_image, secrets=[secret], cpu=0.25, memory=256, timeout=120,
     schedule=modal.Period(minutes=SWEEP_EVERY_MINUTES),

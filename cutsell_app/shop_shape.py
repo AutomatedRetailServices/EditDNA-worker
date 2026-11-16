@@ -47,8 +47,10 @@ PROVIDER_ALIASES = {
     "nano-banana": "nano-banana",
     "nano-banana-2-lite": "nano-banana",
     "gemini": "nano-banana",
+    "kie": "kie",
+    "kie-nano-banana": "kie",
 }
-DEFAULT_PROVIDER = "nano-banana"   # its key name (GEMINI_API_KEY) already exists in CutSell
+DEFAULT_PROVIDER = "kie"   # PO 16 Nov 2026: Nano Banana through kie.ai (cheaper than Google direct); key in the Modal secret
 
 # Public list prices (USD), checked 11 Nov 2026 -- sources in docs/CUTSELL_SHAPE_IT.md.
 SEEDREAM_PRICE_PER_IMAGE = 0.018            # Seedream 5.0 Flash, per generated image (reference images free)
@@ -477,7 +479,61 @@ class GeminiImageProvider:
                       + (text_out + thoughts) * GEMINI_TEXT_OUT_PER_M) / 1e6, 6)
 
 
+class KieProvider:
+    """Nano Banana through kie.ai (PO 16 Nov 2026). The kie.ai key is only in the Modal secret, so the call runs on
+    Modal (`modal_cutsell_worker.shape_kie`, cutsell_worker/kie_image.py); this side posts the garment to that
+    endpoint with the worker wake token the API already has (CUTSELL_WORKER_WAKE_TOKEN). The endpoint's URL is
+    CUTSELL_SHAPE_KIE_URL, or the wake URL's sibling ("...-wake.modal.run" -> "...-shape-kie.modal.run").
+    No retry here: kie.ai charges per task, so a second try could charge twice."""
+    name = "kie"
+    key_env = "CUTSELL_WORKER_WAKE_TOKEN"
+    writes_alpha = False
+
+    def __init__(self, session=None):
+        self.session = session
+
+    @staticmethod
+    def relay_url() -> str:
+        url = _env("CUTSELL_SHAPE_KIE_URL")
+        if url:
+            return url
+        wake = _env("CUTSELL_WORKER_WAKE_URL")
+        if wake.endswith("-wake.modal.run") or wake.endswith("-wake.modal.run/"):
+            return wake.rstrip("/")[: -len("-wake.modal.run")] + "-shape-kie.modal.run"
+        return ""
+
+    def call(self, garment: GarmentImage, kind: str, token: str) -> ProviderResult:
+        url = self.relay_url()
+        if not url:
+            raise ShapeConfigError("shape_provider_not_configured", "kie: no Modal shape URL")
+        client = self.session or requests
+        try:
+            response = client.post(url, json={"token": token, "kind": kind,
+                                              "prompt": build_prompt(kind, background=garment.key_name),
+                                              "image_png_base64": base64.b64encode(garment.flattened_png()).decode("ascii")},
+                                   timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
+        except requests.RequestException as exc:
+            raise ShapeProviderError("shape_provider_error", f"kie: {exc.__class__.__name__}") from None
+        status = int(getattr(response, "status_code", 0) or 0)
+        try:
+            data = response.json()
+        except ValueError:
+            data = {}
+        if status != 200:
+            code = str((data or {}).get("error") or "")
+            if status == 503 or code == "shape_provider_not_configured":
+                raise ShapeConfigError("shape_provider_not_configured", f"kie: HTTP {status}")
+            raise ShapeProviderError(code if code in ("shape_no_image", "shape_provider_error") else "shape_provider_error",
+                                     f"kie: HTTP {status}")
+        image = data.get("image_png_base64")
+        if not image:
+            raise ShapeProviderError("shape_no_image", "kie: no image returned")
+        return ProviderResult(_b64(image, self.name), float(data.get("cost_usd") or 0.02),
+                              {"model": data.get("model"), "ms": data.get("ms")})
+
+
 PROVIDERS: dict[str, type] = {
+    KieProvider.name: KieProvider,
     SeedreamProvider.name: SeedreamProvider,
     OpenAIImageProvider.name: OpenAIImageProvider,
     GeminiImageProvider.name: GeminiImageProvider,
@@ -496,6 +552,8 @@ def call_provider(provider, garment: GarmentImage, kind: str) -> ProviderResult:
     key = _env(provider.key_env)
     if not key:
         raise ShapeConfigError("shape_provider_not_configured", f"{provider.name}: {provider.key_env} missing")
+    if hasattr(provider, "call"):
+        return provider.call(garment, kind, key)
     url, headers, body = provider.build_request(garment, kind, key)
     data = _post(url, headers=headers, json_body=body, provider=provider.name, session=provider.session)
     if not isinstance(data, dict):

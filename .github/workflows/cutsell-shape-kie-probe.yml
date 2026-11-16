@@ -1,0 +1,33 @@
+name: CutSell Shape it kie.ai probe (paid, on request only)
+
+# PO 16 Nov 2026: the real Shape it test through kie.ai. Runs ONLY when a commit is pushed to shape-kie/request.
+# One attempt, no reruns, at most 4 paid kie.ai tasks (~US$0.08). It runs on Modal (the kie.ai key and the S3 keys
+# stay in the Modal secret); photos and results stay in the private bucket; nothing image-like is logged.
+on:
+  push:
+    branches: [shape-kie/request]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cutsell-shape-kie-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    if: github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065   # v5.6.0
+        with:
+          python-version: '3.11'
+      - name: Install Modal
+        run: pip install --disable-pip-version-check --quiet modal==1.6.3
+      - name: Probe (paid, 4 photos)
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: modal run modal_shape_kie_probe.py
