@@ -137,6 +137,34 @@ def where() -> dict:
     return {"bucket": os.environ.get("S3_BUCKET", ""), "region": os.environ.get("AWS_REGION", "")}
 
 
+def _template_env_graphql() -> dict | None:
+    """Same worker-template keys through RunPod's other host (api.runpod.io); values are masked in the log."""
+    import os
+
+    import requests
+    from shape_it_compare_ci import mask
+
+    try:
+        response = requests.post("https://api.runpod.io/graphql",
+                                 headers={"Authorization": f"Bearer {os.environ['RUNPOD_API_KEY']}"},
+                                 json={"query": "query { myself { podTemplates { name env { key value } } } }"},
+                                 timeout=(15, 60))
+        templates = response.json()["data"]["myself"]["podTemplates"]
+    except Exception as exc:                  # noqa: BLE001
+        print(f"graphql lookup failed ({exc.__class__.__name__})")
+        return None
+    matches = [t for t in templates if t.get("name") == "EditDNA-Worker-2"]
+    if len(matches) != 1:
+        print("graphql: expected one canonical worker template")
+        return None
+    env = {str(e["key"]): str(e["value"]) for e in matches[0].get("env") or []}
+    for name, value in env.items():
+        if any(p in name.upper() for p in ("KEY", "TOKEN", "SECRET", "PASSWORD", "BUCKET")) or len(value) >= 12:
+            mask(value)
+    print("graphql lookup ok")
+    return env
+
+
 @app.local_entrypoint()
 def main(mode: str = "run"):
     """On the GitHub runner: photos from the private AWS bucket (the worker template's keys, as on 12 Nov), kie.ai on
@@ -153,13 +181,15 @@ def main(mode: str = "run"):
     from shape_it_compare_ci import template_env
 
     env = None
-    for attempt in range(6):                 # 16 Nov: the runner's DNS failed for rest.runpod.io twice
+    for attempt in range(3):                 # 16 Nov: the runner's DNS failed for rest.runpod.io several times
         try:
             env = template_env()
             break
         except Exception as exc:              # noqa: BLE001
             print(f"template lookup failed ({exc.__class__.__name__}), retrying")
-            time.sleep(20)
+            time.sleep(10)
+    if env is None:
+        env = _template_env_graphql()
     if env is None:
         raise SystemExit("could not reach RunPod for the bucket keys (no paid call made)")
     s3 = boto3.client("s3", region_name=env.get("AWS_REGION", "us-east-1"),
