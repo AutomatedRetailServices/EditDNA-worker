@@ -139,11 +139,43 @@ def where() -> dict:
 
 @app.local_entrypoint()
 def main(mode: str = "run"):
+    """On the GitHub runner: photos from the private AWS bucket (the worker template's keys, as on 12 Nov), kie.ai on
+    Modal, results back to that bucket; then scripts/shape_kie_sheet.py builds the review sheet."""
     if mode == "where":
         print("WHERE", where.remote())
         return
-    rows = run_all.remote([list(m) for m in MODELS])
+    import sys
+    import time
+
+    import boto3
+
+    sys.path.insert(0, "scripts")
+    from shape_it_compare_ci import template_env
+
+    env = None
+    for attempt in range(6):                 # 16 Nov: the runner's DNS failed for rest.runpod.io twice
+        try:
+            env = template_env()
+            break
+        except Exception as exc:              # noqa: BLE001
+            print(f"template lookup failed ({exc.__class__.__name__}), retrying")
+            time.sleep(20)
+    if env is None:
+        raise SystemExit("could not reach RunPod for the bucket keys (no paid call made)")
+    s3 = boto3.client("s3", region_name=env.get("AWS_REGION", "us-east-1"),
+                      aws_access_key_id=env["AWS_ACCESS_KEY_ID"], aws_secret_access_key=env["AWS_SECRET_ACCESS_KEY"],
+                      aws_session_token=env.get("AWS_SESSION_TOKEN") or None)
+    bucket, prefix = env["S3_BUCKET"], f"private-qa/shape-compare/{RUN_ID}"
+    items = [(label, kind, s3.get_object(Bucket=bucket, Key=f"{prefix}/in/{label}.png")["Body"].read())
+             for label, kind in ITEMS]
+    rows = probe.remote(items, [list(m) for m in MODELS])
     for r in rows:
+        png = r.pop("png", None)
+        if png:
+            tag = r["model"].replace("/", "_")
+            s3.put_object(Bucket=bucket, Key=f"{prefix}/out-kie-models/{tag}/{r['item']}.png", Body=png,
+                          ContentType="image/png")
+            r["saved"] = True
         print("RESULT", r)
     ok = sum(1 for r in rows if r.get("ok"))
     print(f"RESULT {ok}/{len(rows)} ok; cost ~US${sum(float(r.get('cost_usd') or 0) for r in rows):.2f}")
