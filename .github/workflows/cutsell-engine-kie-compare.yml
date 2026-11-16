@@ -23,4 +23,4 @@ jobs:
       - env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
-        run: modal run modal_engine_kie_compare.py --videos all --plan sonnet-vs-opus
+        run: modal run modal_engine_kie_compare.py --videos all --plan opus-kie

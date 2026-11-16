@@ -54,6 +54,9 @@ def compare(ids: list, model: str = "", plan: str = "") -> dict:
     if plan == "sonnet-vs-opus":            # PO 16 Nov: both on Anthropic direct, all Gold videos
         routes = {"sonnet": base.call_anthropic, "opus": base.call_anthropic}
         models = {"sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5"}
+    elif plan == "opus-kie":                # PO 16 Nov: Opus through kie.ai only, all Gold videos (compared offline)
+        routes = {"opus_kie": call_kie}
+        models = {"opus_kie": "claude-opus-5-5"}
     rows, kept = [], {}
     for vid in ids[:MAX_VIDEOS]:
         video = gold[vid]
@@ -81,7 +84,10 @@ def compare(ids: list, model: str = "", plan: str = "") -> dict:
                 row.update(ok=False, error=f"{exc.__class__.__name__}: {str(exc)[:160]}",
                            seconds=round(time.monotonic() - started, 1))
             rows.append(row)
-        first, second = list(routes)
+        names = list(routes)
+        if len(names) < 2:
+            continue
+        first, second = names[:2]
         a, k = kept.get((vid, first)), kept.get((vid, second))
         if a is not None and k is not None:
             same = sum(1 for d in video["decisions"]
