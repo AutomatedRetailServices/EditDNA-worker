@@ -50,7 +50,16 @@ def probe() -> list[dict]:
             r = requests.post(URL, json=body, headers=headers, timeout=(10, 120))
             row["http"] = r.status_code
             row["seconds"] = round(time.monotonic() - started, 1)
-            data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+            row["content_type"] = r.headers.get("content-type", "")[:60]
+            raw = r.text or ""
+            try:
+                data = json.loads(raw)
+            except ValueError:
+                data = {}
+                row["raw_head"] = raw[:300]
+            if isinstance(data, dict) and not isinstance(data.get("content"), list):
+                row["keys"] = sorted(data.keys())[:12]
+                row["raw_head"] = raw[:300]
             if r.status_code != 200 or not isinstance(data.get("content"), list):
                 row["error"] = str(data.get("error") or data.get("msg") or data)[:200]
             else:
