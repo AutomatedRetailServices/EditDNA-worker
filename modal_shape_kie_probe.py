@@ -130,8 +130,18 @@ def run_all(models: list) -> list[dict]:
     return rows
 
 
+@app.function(image=image, secrets=[modal.Secret.from_name("cutsell-worker")], timeout=120)
+def where() -> dict:
+    """No paid call: which bucket the worker's keys use (to place the test photos there)."""
+    import os
+    return {"bucket": os.environ.get("S3_BUCKET", ""), "region": os.environ.get("AWS_REGION", "")}
+
+
 @app.local_entrypoint()
-def main():
+def main(mode: str = "run"):
+    if mode == "where":
+        print("WHERE", where.remote())
+        return
     rows = run_all.remote([list(m) for m in MODELS])
     for r in rows:
         print("RESULT", r)
