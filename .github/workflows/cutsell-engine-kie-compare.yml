@@ -1,0 +1,26 @@
+name: CutSell engine Anthropic vs kie.ai (paid, on request only)
+
+# PO 16 Nov 2026: the separate kie.ai copy of the engine's model call vs the original, on Gold videos (words only).
+# Runs ONLY on a push to engine-kie/request; one attempt; at most 6 videos. Production is not touched.
+on:
+  push:
+    branches: [engine-kie/request]
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    if: github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065   # v5.6.0
+        with:
+          python-version: '3.11'
+      - run: pip install --disable-pip-version-check --quiet modal==1.6.3
+      - env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: modal run modal_engine_kie_compare.py --videos "Y03,Y04,B04,B06,G02"
