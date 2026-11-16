@@ -60,32 +60,78 @@ def probe(items: list, models: list) -> list[dict]:
     return rows
 
 
-@app.local_entrypoint()
-def main():
-    """On the GitHub runner: photos from the private bucket (the worker template's keys, as the 12 Nov comparison),
-    kie.ai on Modal, results back to the private bucket."""
+def _find_bucket(s3, prefix: str) -> str:
+    """The private bucket that holds the test photos (found with the worker's own keys; no name in this public file)."""
+    for b in s3.list_buckets().get("Buckets", []):
+        try:
+            if s3.list_objects_v2(Bucket=b["Name"], Prefix=prefix + "/in/", MaxKeys=1).get("KeyCount"):
+                return b["Name"]
+        except Exception:
+            continue
+    raise RuntimeError("test photos not found")
+
+
+@app.function(image=image, secrets=[modal.Secret.from_name("cutsell-worker")],
+              timeout=1800, cpu=1.0, memory=1024)
+def run_all(models: list) -> list[dict]:
+    """Everything on Modal (16 Nov: the GitHub runner could not reach RunPod for the bucket keys): photos in,
+    kie.ai, results + the review sheet back to the private bucket."""
+    import io
     import os
-    import sys
 
     import boto3
+    from PIL import Image, ImageDraw
 
-    sys.path.insert(0, "scripts")
-    from shape_it_compare_ci import template_env
-
-    env = template_env()
-    s3 = boto3.client("s3", region_name=env.get("AWS_REGION", "us-east-1"),
-                      aws_access_key_id=env["AWS_ACCESS_KEY_ID"], aws_secret_access_key=env["AWS_SECRET_ACCESS_KEY"],
-                      aws_session_token=env.get("AWS_SESSION_TOKEN") or None)
-    bucket, prefix = env["S3_BUCKET"], f"private-qa/shape-compare/{RUN_ID}"
+    s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+    prefix = f"private-qa/shape-compare/{RUN_ID}"
+    bucket = _find_bucket(s3, prefix)
     items = [(label, kind, s3.get_object(Bucket=bucket, Key=f"{prefix}/in/{label}.png")["Body"].read())
-             for label, kind in ITEMS[:MAX_CALLS]]
-    rows = probe.remote(items, [list(m) for m in MODELS])
+             for label, kind in ITEMS]
+    rows = probe.local(items, models)
     for r in rows:
         png = r.pop("png", None)
         if png:
             tag = r["model"].replace("/", "_")
-            s3.put_object(Bucket=bucket, Key=f"{prefix}/out-kie-models/{tag}/{r['item']}.png", Body=png, ContentType="image/png")
+            s3.put_object(Bucket=bucket, Key=f"{prefix}/out-kie-models/{tag}/{r['item']}.png", Body=png,
+                          ContentType="image/png")
             r["saved"] = True
+    cols = [("Original", "in/{}.png"), ("Google directo - Nano Banana 2 Lite", "out/{}__nano-banana.png"),
+            ("kie - Nano Banana (anterior)", "out-kie/{}-kie.png")]
+    for m, _ in models:
+        cols.append(("kie - " + m, "out-kie-models/" + m.replace("/", "_") + "/{}.png"))
+    cell = 360
+
+    def load(key):
+        try:
+            img = Image.open(io.BytesIO(s3.get_object(Bucket=bucket, Key=key)["Body"].read())).convert("RGBA")
+        except Exception:
+            return None
+        img.thumbnail((cell - 20, cell - 20))
+        tile = Image.new("RGB", (cell, cell), (245, 246, 250))
+        tile.paste(img, ((cell - img.width) // 2, (cell - img.height) // 2), img)
+        return tile
+
+    sheet = Image.new("RGB", (cell * len(cols), 40 + cell * len(ITEMS)), (255, 255, 255))
+    draw = ImageDraw.Draw(sheet)
+    for c, (title, _) in enumerate(cols):
+        draw.text((c * cell + 10, 12), title, fill=(11, 16, 32))
+    for r, (label, _) in enumerate(ITEMS):
+        for c, (_, pattern) in enumerate(cols):
+            tile = load(f"{prefix}/{pattern.format(label)}")
+            if tile is not None:
+                sheet.paste(tile, (c * cell, 40 + r * cell))
+            else:
+                draw.text((c * cell + 130, 40 + r * cell + cell // 2), "(no probado)", fill=(107, 115, 133))
+    buf = io.BytesIO()
+    sheet.save(buf, "JPEG", quality=85)
+    s3.put_object(Bucket=bucket, Key=f"{prefix}/sheet-models.jpg", Body=buf.getvalue(), ContentType="image/jpeg")
+    return rows
+
+
+@app.local_entrypoint()
+def main():
+    rows = run_all.remote([list(m) for m in MODELS])
+    for r in rows:
         print("RESULT", r)
     ok = sum(1 for r in rows if r.get("ok"))
     print(f"RESULT {ok}/{len(rows)} ok; cost ~US${sum(float(r.get('cost_usd') or 0) for r in rows):.2f}")
