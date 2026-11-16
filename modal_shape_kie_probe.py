@@ -62,13 +62,15 @@ def probe(items: list, models: list) -> list[dict]:
 
 def _find_bucket(s3, prefix: str) -> str:
     """The private bucket that holds the test photos (found with the worker's own keys; no name in this public file)."""
-    for b in s3.list_buckets().get("Buckets", []):
+    import os
+    names = [os.environ.get("S3_BUCKET", ""), "script2clipshop-video-automatedretailservices"]   # 2nd: in .env.example
+    for name in [n for n in names if n]:
         try:
-            if s3.list_objects_v2(Bucket=b["Name"], Prefix=prefix + "/in/", MaxKeys=1).get("KeyCount"):
-                return b["Name"]
+            if s3.list_objects_v2(Bucket=name, Prefix=prefix + "/in/", MaxKeys=1).get("KeyCount"):
+                return name
         except Exception:
             continue
-    raise RuntimeError("test photos not found")
+    raise RuntimeError("test photos not found in the worker's buckets")
 
 
 @app.function(image=image, secrets=[modal.Secret.from_name("cutsell-worker")],
