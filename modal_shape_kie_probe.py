@@ -40,9 +40,21 @@ def probe(items: list, models: list) -> list[dict]:
 
     if not os.environ.get("KIE_API_KEY", "").strip():
         return [{"error": "KIE_API_KEY is not in the Modal secret cutsell-worker"}]
-    rows = []
     jobs = [(m, label, kind, png) for m, n in models for label, kind, png in items[:n]][:MAX_CALLS]
-    for model, label, kind, png in jobs:
+    return list(probe_one.map(jobs))      # 16 Nov: one after another hit the 900 s limit; now all at once
+
+
+@app.function(image=image, secrets=[modal.Secret.from_name("cutsell-worker")], timeout=600, cpu=1.0, memory=1024)
+def probe_one(job) -> dict:
+    """One kie.ai call: (model, label, kind, png bytes) -> row (with "png" when ok)."""
+    import base64
+    import time
+
+    import kie_image
+    import shop_shape
+
+    model, label, kind, png = job
+    if True:
         row = {"model": model, "item": label, "kind": kind}
         try:
             garment = shop_shape.decode_image(base64.b64encode(png).decode("ascii"))
@@ -56,8 +68,7 @@ def probe(items: list, models: list) -> list[dict]:
             row.update(ok=False, error=exc.code, detail=exc.detail[:160])
         except Exception as exc:                     # noqa: BLE001 -- report, never print image data
             row.update(ok=False, error=exc.__class__.__name__, detail=str(exc)[:160])
-        rows.append(row)
-    return rows
+        return row
 
 
 def _find_bucket(s3, prefix: str) -> str:

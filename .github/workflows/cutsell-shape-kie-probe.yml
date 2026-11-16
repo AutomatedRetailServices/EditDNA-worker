@@ -33,5 +33,3 @@ jobs:
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
         run: |
           modal run modal_shape_kie_probe.py
-          pip install --disable-pip-version-check --quiet pillow
-          python scripts/shape_kie_sheet.py
