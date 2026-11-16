@@ -20,7 +20,7 @@ image = (
     .add_local_file("scripts/simple_engine_eval.py", remote_path="/root/simple_engine_eval.py")
 )
 app = modal.App("cutsell-engine-kie-compare")
-MAX_VIDEOS = 6
+MAX_VIDEOS = 27
 PRICES = {"in": 3.00, "write": 3.75, "read": 0.30, "out": 15.00}        # Sonnet 5.5 standard, US$ per million
 OPUS_PRICES = {"in": 4.00, "write": 5.00, "read": 0.40, "out": 20.00}   # Opus 5.5 (22 Sep 2026 price)
 
@@ -33,8 +33,8 @@ def anthropic_cost(usages, prices=PRICES) -> float:
     return round(total, 5)
 
 
-@app.function(image=image, secrets=[modal.Secret.from_name("cutsell-worker")], timeout=3000, cpu=1.0, memory=1024)
-def compare(ids: list, model: str = "") -> dict:
+@app.function(image=image, secrets=[modal.Secret.from_name("cutsell-worker")], timeout=5400, cpu=1.0, memory=1024)
+def compare(ids: list, model: str = "", plan: str = "") -> dict:
     import json
     import os
     import time
@@ -50,11 +50,18 @@ def compare(ids: list, model: str = "") -> dict:
 
     gold = {v["id"]: v for v in json.load(open("/root/gold_v1.json"))["videos"]}
     routes = {"anthropic": base.call_anthropic, "kie": call_kie}
+    models = {}
+    if plan == "sonnet-vs-opus":            # PO 16 Nov: both on Anthropic direct, all Gold videos
+        routes = {"sonnet": base.call_anthropic, "opus": base.call_anthropic}
+        models = {"sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5"}
     rows, kept = [], {}
     for vid in ids[:MAX_VIDEOS]:
         video = gold[vid]
         words, duration = video["words"], float(video["duration"])
         for route, call in routes.items():
+            if route in models:
+                os.environ["CUTSELL_SIMPLE_ENGINE_MODEL"] = models[route]
+                prices = OPUS_PRICES if "opus" in models[route] else PRICES
             row = {"video": vid, "route": route}
             started = time.monotonic()
             try:
@@ -74,7 +81,8 @@ def compare(ids: list, model: str = "") -> dict:
                 row.update(ok=False, error=f"{exc.__class__.__name__}: {str(exc)[:160]}",
                            seconds=round(time.monotonic() - started, 1))
             rows.append(row)
-        a, k = kept.get((vid, "anthropic")), kept.get((vid, "kie"))
+        first, second = list(routes)
+        a, k = kept.get((vid, first)), kept.get((vid, second))
         if a is not None and k is not None:
             same = sum(1 for d in video["decisions"]
                        if (sum(max(0, min(d["e"], b) - max(d["s"], x)) for x, b in a) >= 0.5 * (d["e"] - d["s"]))
@@ -84,13 +92,17 @@ def compare(ids: list, model: str = "") -> dict:
 
 
 @app.local_entrypoint()
-def main(videos: str = "Y03,Y04,B04,B06,G02", model: str = ""):
+def main(videos: str = "Y03,Y04,B04,B06,G02", model: str = "", plan: str = ""):
     ids = [v.strip() for v in videos.split(",") if v.strip()][:MAX_VIDEOS]
     print(f"MODEL {model or 'default (claude-sonnet-5-5)'}")
-    out = compare.remote(ids, model)
+    if videos == "all":
+        import json
+        ids = [v["id"] for v in json.load(open("benchmarks/simple_engine_gold/gold_v1.json"))["videos"]]
+    print(f"PLAN {plan or 'anthropic-vs-kie'} · {len(ids)} videos")
+    out = compare.remote(ids, model, plan)
     for r in out["rows"]:
         print("RESULT", r)
-    for route in ("anthropic", "kie"):
+    for route in sorted({r.get("route") for r in out["rows"]} - {"both", None}):
         rs = [r for r in out["rows"] if r.get("route") == route and r.get("ok")]
         if rs:
             agree = sum(int(r["gold"].split("/")[0]) for r in rs); total = sum(int(r["gold"].split("/")[1]) for r in rs)
