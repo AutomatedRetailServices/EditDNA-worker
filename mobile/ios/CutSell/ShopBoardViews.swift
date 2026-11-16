@@ -319,7 +319,7 @@ struct ShopAddProductsView: View {
                             LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
                                 ForEach(model.items) { item in tile(item) }
                             }
-                            if model.items.contains(where: { $0.kind.canShape }) {
+                            if ShopShapeFeature.isOn && model.items.contains(where: { $0.kind.canShape }) {
                                 Text(L10n.tr("✦ Shape it = gives clothes & shoes a real 3D shape (AI)"))
                                     .font(CS.inter(11, .semibold))
                                     .foregroundStyle(Color(fixed: 0x1769FF))
@@ -437,7 +437,7 @@ struct ShopAddProductsView: View {
                     .background(Color(fixed: 0xEAF8F1), in: Capsule())
                     .offset(x: 7, y: 91)
             }
-            if item.kind.canShape && item.cutout != nil {
+            if ShopShapeFeature.isOn && item.kind.canShape && item.cutout != nil {
                 Button { onShape(item.id) } label: {
                     Text(L10n.tr("✦ Shape it"))
                         .font(CS.inter(9, .bold)).foregroundStyle(.white)
@@ -498,6 +498,13 @@ struct ShopProductListSheet: View {
 }
 
 // MARK: - 2b Shape it
+
+/// PO 16 Nov 2026: "trabajaremos sin shape it ahora mismo.. eso nos cuesta dinero". The button and its hint are
+/// hidden; the screen and the client stay in the code (and the server side stays undeployed) for later.
+enum ShopShapeFeature {
+    static let isOn = false
+}
+
 
 struct ShopShapeView: View {
     let item: ShopItem

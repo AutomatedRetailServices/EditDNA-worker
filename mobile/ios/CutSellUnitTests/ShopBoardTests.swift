@@ -930,3 +930,10 @@ final class ShopWearItVideoTests: XCTestCase {
         XCTAssertTrue(opened.isVideoBoard)
     }
 }
+
+/// PO 16 Nov 2026: Shop board works without Shape it for now (it costs money per photo).
+final class ShopShapeFeatureTests: XCTestCase {
+    func testShapeItIsHidden() {
+        XCTAssertFalse(ShopShapeFeature.isOn)
+    }
+}

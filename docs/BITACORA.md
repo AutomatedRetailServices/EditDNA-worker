@@ -8,6 +8,8 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 - **B-roll automático del motor (anotado el 11 nov 2026):** El B-roll automático del motor será un feature solo de los planes de pago más altos. Mientras estamos en pruebas queda activo para todos. Cuando existan los planes, se separa por cuenta (control en el servidor) y las cuentas sin el feature verán '+ B-roll' con candado PRO y podrán poner B-roll a mano en el editor.
 
+- **Shape it apagado (16 nov 2026):** la PO decidió "trabajaremos sin shape it ahora mismo.. eso nos cuesta dinero". En la app se esconden el botón "✦ Shape it" y su texto de ayuda (`ShopShapeFeature.isOn = false`); la pantalla y el código quedan guardados. El servidor de Shape it nunca se publicó (rama `feature/shape-kie`, sin deploy). Prueba de kie.ai del 16 nov (14 fotos, ~US$0.49 + un intento que se pasó de tiempo): el único que sirve es Nano Banana 2 ($0.04/foto), y aun así cambia algunos detalles (pantalón). Tabla solo en el bucket privado: `private-qa/shape-compare/20261112/sheet-models.jpg`.
+
 ## Motor de B-roll (servidor, no es un build de la app)
 
 - **14 nov 2026 15:58 ET · DEPLOY con OK de la PO** — `feat/simple-engine-v1` → `7f1a97d8` (rama `feature/broll-sound`). Worker de Modal (128 pruebas pasan) y API de Render (`dep-dbscmas9v7es73cb96ig`) en vivo.
