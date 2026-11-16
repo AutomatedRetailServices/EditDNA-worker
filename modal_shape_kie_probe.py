@@ -6,6 +6,7 @@ the PRIVATE bucket (never in this public repo):
     s3://$S3_BUCKET/private-qa/shape-compare/20261112/in/<label>.png
 Results go next to them:
     s3://$S3_BUCKET/private-qa/shape-compare/20261112/out-kie/<label>-kie.png
+The bucket and its keys come from the worker template (RUNPOD_API_KEY), exactly as the 12 Nov comparison read them.
 Nothing image-like is printed. Run (CI only): `modal run modal_shape_kie_probe.py`.
 """
 from __future__ import annotations
@@ -26,45 +27,60 @@ app = modal.App("cutsell-shape-kie-probe")
 
 
 @app.function(image=image, secrets=[modal.Secret.from_name("cutsell-worker")], timeout=900, cpu=1.0, memory=1024)
-def probe() -> list[dict]:
+def probe(items: list) -> list[dict]:
+    """items: [(label, kind, png bytes)] -> rows (with "png" = the transparent result for the ok ones)."""
     import base64
     import os
     import time
-
-    import boto3
 
     import kie_image
     import shop_shape
 
     if not os.environ.get("KIE_API_KEY", "").strip():
         return [{"error": "KIE_API_KEY is not in the Modal secret cutsell-worker"}]
-    s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-east-1"))
-    bucket, prefix = os.environ["S3_BUCKET"], f"private-qa/shape-compare/{RUN_ID}"
     rows = []
-    for label, kind in ITEMS[:MAX_CALLS]:
+    for label, kind, png in items[:MAX_CALLS]:
         row = {"item": label, "kind": kind}
         try:
-            png = s3.get_object(Bucket=bucket, Key=f"{prefix}/in/{label}.png")["Body"].read()
             garment = shop_shape.decode_image(base64.b64encode(png).decode("ascii"))
             started = time.monotonic()
             raw, info = kie_image.shape_png(garment.flattened_png(), shop_shape.build_prompt(kind, background=garment.key_name))
-            out = shop_shape.finish_output(raw, garment)
-            s3.put_object(Bucket=bucket, Key=f"{prefix}/out-kie/{label}-kie.png", Body=out, ContentType="image/png")
             row.update(ok=True, seconds=round(time.monotonic() - started, 1), cost_usd=info["cost_usd"],
-                       model=info["model"], size=f"{garment.width}x{garment.height}")
+                       model=info["model"], size=f"{garment.width}x{garment.height}",
+                       png=shop_shape.finish_output(raw, garment))
         except kie_image.KieError as exc:
             row.update(ok=False, error=exc.code, detail=exc.detail[:160])
         except Exception as exc:                     # noqa: BLE001 -- report, never print image data
             row.update(ok=False, error=exc.__class__.__name__, detail=str(exc)[:160])
-        print(row)
         rows.append(row)
     return rows
 
 
 @app.local_entrypoint()
 def main():
-    rows = probe.remote()
+    """On the GitHub runner: photos from the private bucket (the worker template's keys, as the 12 Nov comparison),
+    kie.ai on Modal, results back to the private bucket."""
+    import os
+    import sys
+
+    import boto3
+
+    sys.path.insert(0, "scripts")
+    from shape_it_compare_ci import template_env
+
+    env = template_env()
+    s3 = boto3.client("s3", region_name=env.get("AWS_REGION", "us-east-1"),
+                      aws_access_key_id=env["AWS_ACCESS_KEY_ID"], aws_secret_access_key=env["AWS_SECRET_ACCESS_KEY"],
+                      aws_session_token=env.get("AWS_SESSION_TOKEN") or None)
+    bucket, prefix = env["S3_BUCKET"], f"private-qa/shape-compare/{RUN_ID}"
+    items = [(label, kind, s3.get_object(Bucket=bucket, Key=f"{prefix}/in/{label}.png")["Body"].read())
+             for label, kind in ITEMS[:MAX_CALLS]]
+    rows = probe.remote(items)
+    for r in rows:
+        png = r.pop("png", None)
+        if png:
+            s3.put_object(Bucket=bucket, Key=f"{prefix}/out-kie/{r['item']}-kie.png", Body=png, ContentType="image/png")
+            r["saved"] = f"{prefix}/out-kie/{r['item']}-kie.png"
+        print("RESULT", r)
     ok = sum(1 for r in rows if r.get("ok"))
     print(f"RESULT {ok}/{len(rows)} ok; cost ~US${sum(float(r.get('cost_usd') or 0) for r in rows):.2f}")
-    for r in rows:
-        print("RESULT", r)

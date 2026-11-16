@@ -25,9 +25,10 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install Modal
-        run: pip install --disable-pip-version-check --quiet modal==1.6.3
+        run: pip install --disable-pip-version-check --quiet modal==1.6.3 boto3 requests
       - name: Probe (paid, 4 photos)
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
         run: modal run modal_shape_kie_probe.py
