@@ -22,23 +22,27 @@ image = (
 app = modal.App("cutsell-engine-kie-compare")
 MAX_VIDEOS = 6
 PRICES = {"in": 3.00, "write": 3.75, "read": 0.30, "out": 15.00}        # Sonnet 5.5 standard, US$ per million
+OPUS_PRICES = {"in": 4.00, "write": 5.00, "read": 0.40, "out": 20.00}   # Opus 5.5 (22 Sep 2026 price)
 
 
-def anthropic_cost(usages) -> float:
+def anthropic_cost(usages, prices=PRICES) -> float:
     total = 0.0
     for u in usages:
-        total += (int(u.get("input_tokens") or 0) * PRICES["in"] + int(u.get("cache_creation_input_tokens") or 0) * PRICES["write"]
-                  + int(u.get("cache_read_input_tokens") or 0) * PRICES["read"] + int(u.get("output_tokens") or 0) * PRICES["out"]) / 1e6
+        total += (int(u.get("input_tokens") or 0) * prices["in"] + int(u.get("cache_creation_input_tokens") or 0) * prices["write"]
+                  + int(u.get("cache_read_input_tokens") or 0) * prices["read"] + int(u.get("output_tokens") or 0) * prices["out"]) / 1e6
     return round(total, 5)
 
 
 @app.function(image=image, secrets=[modal.Secret.from_name("cutsell-worker")], timeout=3000, cpu=1.0, memory=1024)
-def compare(ids: list) -> dict:
+def compare(ids: list, model: str = "") -> dict:
     import json
     import os
     import time
 
     os.environ["CUTSELL_SIMPLE_ENGINE_REMEMBER"] = "0"
+    if model:
+        os.environ["CUTSELL_SIMPLE_ENGINE_MODEL"] = model       # this container only (a separate test run)
+    prices = OPUS_PRICES if "opus" in model else PRICES
     from cutsell_worker.simple_engine import engine
     from cutsell_worker.simple_engine import llm as base
     from cutsell_worker.simple_engine_kie.llm_kie import call_kie
@@ -60,7 +64,7 @@ def compare(ids: list) -> dict:
                 visible = [[s["start"], s["end"]] for s in splits if s["visible"]]
                 total, agree, removed, wrongly_kept = score_video(video["decisions"], visible)
                 cost = (round(sum(float(u.get("cost_usd") or 0) for u in usages), 5) if route == "kie"
-                        else anthropic_cost(usages))
+                        else anthropic_cost(usages, prices))
                 row.update(ok=True, seconds=round(time.monotonic() - started, 1), gold=f"{agree}/{total}",
                            removed_wrongly=removed, kept_wrongly=wrongly_kept, cost_usd=cost,
                            fixes=len(fixes), moments=len(moments), calls=len(usages),
@@ -80,9 +84,10 @@ def compare(ids: list) -> dict:
 
 
 @app.local_entrypoint()
-def main(videos: str = "Y03,Y04,B04,B06,G02"):
+def main(videos: str = "Y03,Y04,B04,B06,G02", model: str = ""):
     ids = [v.strip() for v in videos.split(",") if v.strip()][:MAX_VIDEOS]
-    out = compare.remote(ids)
+    print(f"MODEL {model or 'default (claude-sonnet-5-5)'}")
+    out = compare.remote(ids, model)
     for r in out["rows"]:
         print("RESULT", r)
     for route in ("anthropic", "kie"):
