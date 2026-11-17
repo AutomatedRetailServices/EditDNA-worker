@@ -639,3 +639,34 @@ final class CloneFrontTests: XCTestCase {
         XCTAssertEqual(p.x, 0, accuracy: 0.01); XCTAssertEqual(p.y, 100, accuracy: 0.01)
     }
 }
+
+/// Smart zoom (PO 16 Nov 2026): the engine's punch-in / slow push-in / reveal and its aim at her face or the
+/// product reach the editor the same way the export draws them (keyframes.zoom_to_keyframes on the server).
+final class SmartZoomTests: XCTestCase {
+    private func zoom(_ extra: [String: JSONValue]) -> [String: JSONValue] {
+        var base: [String: JSONValue] = ["source_time": .number(1), "duration": .number(1), "scale": .number(1.2),
+                                         "keyframe_id": .string("z1"), "source_asset_id": .string("s1")]
+        base.merge(extra) { $1 }
+        return base
+    }
+
+    func testOldZoomsStayTheSame() {
+        let keys = KeyframeMath.keyframes(fromZoom: zoom(["duration": .number(1.5)]))
+        XCTAssertEqual(keys.map(\.sourceTime), [1, 1.4, 2.1, 2.5])
+        XCTAssertTrue(keys.allSatisfy { $0.value.x == 0 && $0.value.y == 0 })
+    }
+
+    func testPunchInUsesItsRampsAndAim() {
+        let keys = KeyframeMath.keyframes(fromZoom: zoom(["ramp_in": .number(0.08), "ramp_out": .number(0.25),
+                                                          "x": .number(0.5), "y": .number(-0.05)]))
+        XCTAssertEqual(keys.map(\.sourceTime), [1, 1.08, 1.75, 2])
+        XCTAssertEqual(keys.map(\.value.y), [0, -0.05, -0.05, 0])
+        XCTAssertEqual(keys[1].value.x, 0.1, accuracy: 1e-9)          // never past what the zoom allows
+    }
+
+    func testRampsNeverPassEachOther() {
+        let (rIn, rOut) = KeyframeMath.zoomRamps(duration: 1, rampIn: 0.8, rampOut: 0.8)
+        XCTAssertEqual(rIn, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(rOut, 0.5, accuracy: 1e-9)
+    }
+}

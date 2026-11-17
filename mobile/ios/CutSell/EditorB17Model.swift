@@ -165,15 +165,23 @@ enum KeyframeMath {
 
     /// One Auto Zoom AI push-in (the cut engine's `zoom_keyframes` item) as its four keyframes: the
     /// same curve the export always drew (keyframes.zoom_to_keyframes on the server).
+    /// Smart zoom (16 Nov 2026): `ramp_in` / `ramp_out` (how fast it zooms in and back: a punch-in, a slow
+    /// push-in, a reveal) and the pan `x` / `y` towards her face or the product. Missing = the old 0.4 s, centred.
     static func keyframes(fromZoom zoom: [String: JSONValue]) -> [TransformKeyframe] {
         guard let t = zoom["source_time"]?.doubleValue else { return [] }
         let d = zoom["duration"]?.doubleValue ?? 1.5
         let s = zoom["scale"]?.doubleValue ?? 1.08
         let base = zoom["keyframe_id"]?.stringValue ?? "z\(Int(t * 1000))"
-        let r = min(0.4, d / 3)   // zoom in ~0.4 s, hold, zoom out ~0.4 s
-        let steps: [(Double, Double)] = [(t, 1), (t + r, s), (t + d - r, s), (t + d, 1)]
+        let (rIn, rOut) = zoomRamps(duration: d, rampIn: zoom["ramp_in"]?.doubleValue, rampOut: zoom["ramp_out"]?.doubleValue)
+        let room = max(0, (s - 1) / 2)          // never an empty edge
+        let x = min(room, max(-room, zoom["x"]?.doubleValue ?? 0))
+        let y = min(room, max(-room, zoom["y"]?.doubleValue ?? 0))
+        let steps: [(Double, TransformValue)] = [
+            (t, TransformValue(scale: 1)), (t + rIn, TransformValue(scale: s, x: x, y: y)),
+            (t + d - rOut, TransformValue(scale: s, x: x, y: y)), (t + d, TransformValue(scale: 1)),
+        ]
         return steps.enumerated().map { index, step in
-            var key = TransformKeyframe(id: "\(base)-\(index + 1)", target: .video, value: TransformValue(scale: step.1))
+            var key = TransformKeyframe(id: "\(base)-\(index + 1)", target: .video, value: step.1)
             key.sourceAssetID = zoom["source_asset_id"]?.stringValue ?? ""
             key.sourceTime = (step.0 * 1000).rounded() / 1000
             key.origin = zoom["origin"]?.stringValue == "user" ? "user" : "ai"
@@ -181,6 +189,20 @@ enum KeyframeMath {
             key.group = base
             return key
         }
+    }
+
+    /// Seconds to zoom in and to come back (keyframes.zoom_ramps on the server: same rule).
+    static func zoomRamps(duration: Double, rampIn: Double?, rampOut: Double?) -> (Double, Double) {
+        let d = max(0, duration)
+        let standard = min(0.4, d / 3)
+        var rIn = min(max(0, (rampIn ?? 0) > 0 ? rampIn! : standard), d)
+        var rOut = min(max(0, (rampOut ?? 0) > 0 ? rampOut! : standard), d)
+        if rIn + rOut > d, rIn + rOut > 0 {
+            let k = d / (rIn + rOut)
+            rIn *= k
+            rOut *= k
+        }
+        return (rIn, rOut)
     }
 }
 
