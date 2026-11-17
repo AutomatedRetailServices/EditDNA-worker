@@ -22,8 +22,8 @@ VIDEO_KEY, GOLD_ID = "Yaskira/04.MP4", "Y04"
 OUT_PREFIX = "private-qa/smart-zoom/20261116"
 PRICES = {"in": 3.00, "write": 3.75, "read": 0.30, "out": 15.00}        # Sonnet 5.5, US$ per million
 LABELS = {"hook": "gancho", "product": "producto", "price": "precio", "cta": "compra", "look": "mira esto",
-          "benefit": "beneficio", "closeup": "de cerca"}
-MOVES = {"fast": "rapido", "slow": "lento", "reveal": "abre"}
+          "benefit": "beneficio", "closeup": "de cerca", "point": "punto"}
+MOVES = {"fast": "rapido", "slow": "lento", "reveal": "abre", "hold": "entra y sale en el siguiente punto"}
 
 
 @app.function(image=image, secrets=[modal.Secret.from_name("cutsell-worker")], timeout=1200, cpu=2.0, memory=2048)
@@ -73,10 +73,10 @@ def demo(video: bytes) -> dict:
                       "scale": k.scale, "x": k.x, "y": k.y, "word": row.get("word", ""), "target": row.get("target", "")})
     plan = build_render_plan(draft, {"s1": str(src)})
     plain = work / "plain.mp4"
-    done = subprocess.run(render._concat_render_command(plan, plain, width=464, height=832, fps=30, workdir=work),
-                          capture_output=True, text=True)
-    if done.returncode != 0:
-        return {"error": "render: " + done.stderr[-300:], "cost_usd": round(cost, 4)}
+    try:
+        render.render_preview(plan, str(plain), width=464, height=832)       # the production renderer
+    except Exception as exc:                                                 # noqa: BLE001
+        return {"error": f"render: {exc.__class__.__name__}: {str(exc)[-300:]}", "cost_usd": round(cost, 4)}
     font = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
     tags = []
     for z in zooms:

@@ -36,6 +36,7 @@ def test_phrase_end_stops_at_the_sentence_mark_or_a_pause():
 def test_three_moves():
     keys = A._zoom_keyframes(SOURCE, [_moment(2.0, "price", "fast"), _moment(8.0, "benefit", "slow", e=10.8),
                                       _moment(16.0, "product", "reveal")], SPLITS)
+    keys = [k for k in keys if k.kind != "micro"]
     fast, slow, reveal = keys
     assert (fast.style, fast.ramp_in, fast.ramp_out, fast.duration) == ("fast", 0.3, 0.8, 2.0)
     assert fast.source_time + fast.ramp_in == pytest.approx(2.0)         # it lands ON the word (PO: precise)
@@ -50,6 +51,7 @@ def test_three_moves():
 
 def test_no_move_given_uses_the_kind_and_zooms_never_overlap():
     keys = A._zoom_keyframes(SOURCE, [_moment(2.0, "hook", e=5.6), _moment(5.2, "cta")], SPLITS)
+    keys = [k for k in keys if k.kind != "micro"]
     assert keys[0].style == "slow"
     assert len(keys) == 2 and keys[1].source_time >= keys[0].source_time + keys[0].duration + A.ZOOM_GAP_SEC
     assert keys[1].style == "fast"
@@ -180,3 +182,33 @@ def test_a_closeup_zoom_is_deep_and_never_fast():
     assert k.scale == 1.9 and k.ramp_in >= 0.6 and k.ramp_out >= 1.0 and log[0]["target"] == "closeup:face"
     back = serde._zoom_keyframe_from_dict(serde._json_safe(k))            # a 1.9x zoom is a valid draft zoom
     assert back.scale == 1.9
+
+
+# ------------------------------------------------------------------ outline (PO 16 Nov: "en momentos que hacen outline")
+
+def test_an_outline_zooms_in_on_one_point_and_back_out_on_the_next():
+    pts = [_moment(2.0, "point", w="primero"), _moment(5.0, "point", w="segundo"), _moment(9.0, "point", w="tercero"),
+           _moment(12.5, "point", w="cuarto")]
+    log = []
+    keys = [k for k in A._zoom_keyframes(SOURCE, pts, SPLITS, log) if k.kind != "micro"]
+    log = [r for r in log if r["kind"] != "micro"]
+    assert [k.style for k in keys] == ["hold", "hold"] and len(keys) == 2          # in on 1st and 3rd
+    first, third = keys
+    assert first.source_time + first.ramp_in == pytest.approx(2.0)                   # lands on "primero"
+    assert first.source_time + first.duration == pytest.approx(5.0 + 0.2)            # back out on "segundo"
+    assert third.source_time + third.duration == pytest.approx(12.5 + 0.2)           # back out on "cuarto"
+    assert [r["zoom"] for r in log] == ["added", "zoom_out", "added", "zoom_out"]
+    _, _, moments, _ = E.fix_words_and_moments(
+        [{"w": "primero", "s": 0.0, "e": 0.4}], [{"start": 0.0, "end": 1.0, "visible": True}],
+        lambda p: ('{"fix": [], "zoom": [[0, "point", "fast"]]}', {}))
+    assert moments == [{"i": 0, "kind": "point", "style": "fast"}]
+
+
+def test_a_long_still_stretch_gets_a_gentle_micro_zoom_that_touches_nothing():
+    keys = A._zoom_keyframes(SOURCE, [_moment(2.0, "price", "fast")], SPLITS)
+    micros = [k for k in keys if k.kind == "micro"]
+    assert micros and all(k.scale == A.MICRO_SCALE and k.ramp_in > k.ramp_out for k in micros)   # slow, subtle
+    spans = sorted((k.source_time, k.source_time + k.duration) for k in keys)
+    assert all(b[0] >= a[1] + A.ZOOM_GAP_SEC - 1e-6 for a, b in zip(spans, spans[1:]))     # never overlapping
+    short = A._zoom_keyframes(SOURCE, [], [{"start": 0.0, "end": 4.0, "visible": True}])
+    assert short == []                                                                       # a short part stays still

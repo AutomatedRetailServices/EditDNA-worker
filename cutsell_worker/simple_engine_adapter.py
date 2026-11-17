@@ -120,12 +120,17 @@ ZOOM_EDGE_SEC = 0.30          # never during a join
 ZOOM_MIN_SPACING_SEC = 3.0    # start to start ("Dinámico"; a rhythm choice can come later)
 ZOOM_GAP_SEC = 0.30           # the picture is back to normal at least this long before the next zoom
 ZOOM_STYLE_BY_KIND = {"hook": "slow", "product": "slow", "benefit": "slow", "price": "fast", "cta": "fast",
-                      "look": "fast", "closeup": "slow"}
+                      "look": "fast", "closeup": "slow", "point": "hold"}
 #: style -> (extra scale, seconds to zoom in, seconds to come back, length)  (slow: length = its sentence)
 #: PO 16 Nov: never "de golpe" -- every zoom goes in AND comes back smoothly; a fast one is quick going in (it lands
 #: on the word) but always eases back out.
 ZOOM_MOVES = {"fast": (0.05, 0.30, 0.80, 2.0), "slow": (0.0, None, 0.90, None), "reveal": (0.03, 0.50, None, 2.6)}
+ZOOM_MOVES["hold"] = (0.0, 0.30, 0.50, None)    # "point": in on this point, held, out right on the next one
 ZOOM_SLOW_RANGE = (1.8, 4.0)
+ZOOM_POINT_SCALE = 1.18
+# Micro zoom (PO 16 Nov: "micro zoom ... que trabaje con la dinámica del video"): a kept stretch this long with no
+# zoom gets a very gentle push-in on her face (5-6 %), so the picture never sits still; no AI, no cost.
+MICRO_GAP_SEC, MICRO_SCALE, MICRO_MAX_SEC = 4.5, 1.06, 4.0
 ZOOM_SLOW_HOLD = 0.3
 ZOOM_SLOW_LEAD = 0.15
 ZOOM_TOP_SCALE = 1.25         # every zoom but a close-up (zoom_framing.closeup: up to 2.0 = serde.ZOOM_SCALE_RANGE)
@@ -136,10 +141,15 @@ def _zoom_move(moment, kind: str, start: float, room: float):
     """(style, length, scale, ramp_in, ramp_out) of one zoom that may last at most `room` seconds."""
     style = str(moment.get("style") or "")
     style = {"fast": "fast", "slow": "slow", "reveal": "reveal"}.get(style) or ZOOM_STYLE_BY_KIND.get(kind, "slow")
+    if kind == "point":
+        style = "hold"
     extra, ramp_in, ramp_out, length = ZOOM_MOVES[style]
     if style == "slow":
         end = float(moment.get("e") or 0.0)
         length = max(ZOOM_SLOW_RANGE[0], min(ZOOM_SLOW_RANGE[1], end - start + 0.2 if end > start else 2.0))
+    if style == "hold":       # until the next point is said (it lands back to normal on that word)
+        nxt = float(moment.get("next") or 0.0)
+        length = max(ZOOM_SLOW_RANGE[0], min(ZOOM_SLOW_RANGE[1], nxt - start + 0.2 if nxt > start else 2.0))
     length = min(length, room)
     if style == "slow":
         ramp_in = max(0.6, length - ramp_out - ZOOM_SLOW_HOLD)   # keeps moving in while she talks
@@ -151,7 +161,7 @@ def _zoom_move(moment, kind: str, start: float, room: float):
     if ramp_in + ramp_out > length:                              # a short part: shorter, still smooth both ways
         k = length / (ramp_in + ramp_out)
         ramp_in, ramp_out = ramp_in * k, ramp_out * k
-    scale = min(ZOOM_TOP_SCALE, ZOOM_SCALE.get(kind, 1.08) + extra)
+    scale = min(ZOOM_TOP_SCALE, (ZOOM_POINT_SCALE if kind == "point" else ZOOM_SCALE.get(kind, 1.08)) + extra)
     return style, length, scale, ramp_in, ramp_out
 
 
@@ -159,6 +169,8 @@ def _zoom_lead(moment, kind: str) -> float:
     """How long before her word the zoom starts, so it LANDS on the word (precise, PO 16 Nov)."""
     style = {"fast": "fast", "slow": "slow", "reveal": "reveal"}.get(str(moment.get("style") or "")) \
         or ZOOM_STYLE_BY_KIND.get(kind, "slow")
+    if kind == "point":
+        style = "hold"
     return ZOOM_SLOW_LEAD if style == "slow" else float(ZOOM_MOVES[style][1])
 
 
@@ -178,8 +190,20 @@ def _zoom_keyframes(source, moments, splits, log: list | None = None, *, face_at
                         "zoom": result, **more})
 
     ordered = sorted(moments, key=lambda m: float(m["s"]))
+    # An outline (PO 16 Nov: "zoom in, zoom out ... en momentos que hacen outline"): the 1st, 3rd, 5th... point zoom in
+    # and stay in until the next point is said, where the picture goes back out; the 2nd, 4th... are that "out".
+    points = [m for m in ordered if str(m.get("kind")) == "point"]
+    out_points = set()
+    for n, m in enumerate(points):
+        if n % 2 == 1:
+            out_points.add(id(m))
+        if n % 2 == 0 and n + 1 < len(points):
+            points[n]["next"] = float(points[n + 1]["s"])
     for n, moment in enumerate(ordered):
         kind = str(moment["kind"])
+        if id(moment) in out_points:
+            note(moment, "zoom_out")          # the picture goes back out right here (the previous point's zoom ends)
+            continue
         t = float(moment["s"]) - _zoom_lead(moment, kind)
         part = next(((a, b) for a, b in visible if a <= float(moment["s"]) <= b), None)
         if part is None:
@@ -200,7 +224,7 @@ def _zoom_keyframes(source, moments, splits, log: list | None = None, *, face_at
             continue
         # A long (slow / reveal) zoom ends in time for the next moment, when that one is far enough to get its own.
         nxt = next((float(m["s"]) - _zoom_lead(m, str(m["kind"])) for m in ordered[n + 1:]
-                    if float(m["s"]) - _zoom_lead(m, str(m["kind"])) - t >= ZOOM_MIN_SPACING_SEC), None)
+                    if id(m) not in out_points and float(m["s"]) - _zoom_lead(m, str(m["kind"])) - t >= ZOOM_MIN_SPACING_SEC), None)
         if nxt is not None and nxt - ZOOM_GAP_SEC - t >= ZOOM_MIN_SEC:
             room = min(room, nxt - ZOOM_GAP_SEC - t)
         style, length, scale, ramp_in, ramp_out = _zoom_move(moment, kind, t, room)
@@ -225,7 +249,40 @@ def _zoom_keyframes(source, moments, splits, log: list | None = None, *, face_at
             scale=round(scale, 3), kind=kind, origin="ai", x=x, y=y,
             ramp_in=round(ramp_in, 3), ramp_out=round(ramp_out, 3), style=style,
         ))
-    return out
+    return _with_micro_zooms(source, out, visible, log, face_at)
+
+
+def _with_micro_zooms(source, zooms: list, visible, log, face_at) -> list:
+    """Fill every long still stretch of a kept part with one gentle micro push-in (never touching another zoom)."""
+    from . import zoom_framing
+
+    busy = sorted((z.source_time, z.source_time + z.duration) for z in zooms)
+    added = []
+    for a, b in visible:
+        edges = [a + ZOOM_EDGE_SEC] + [x for z in busy if a <= z[0] <= b for x in z] + [b - ZOOM_EDGE_SEC]
+        free = [(edges[i], edges[i + 1]) for i in range(0, len(edges) - 1, 2)]
+        for start, end in free:
+            gap = end - start - 2 * ZOOM_GAP_SEC
+            if gap < MICRO_GAP_SEC:
+                continue
+            t = start + ZOOM_GAP_SEC + max(0.0, (gap - MICRO_MAX_SEC) / 2)
+            length = min(MICRO_MAX_SEC, gap)
+            face = None
+            if face_at is not None:
+                try:
+                    face = face_at(t + length / 2)
+                except Exception:                    # noqa: BLE001
+                    face = None
+            x, y = zoom_framing.pan_for("hook", face, MICRO_SCALE)
+            added.append(ZoomKeyframe(
+                keyframe_id=f"z-{source.source_order:03d}-m{len(added) + 1:02d}",
+                source_asset_id=source.source_asset_id, source_time=round(t, 3), duration=round(length, 3),
+                scale=MICRO_SCALE, kind="micro", origin="ai", x=x, y=y,
+                ramp_in=round(length - 1.2, 3), ramp_out=0.9, style="micro"))
+            if log is not None:
+                log.append({"s": round(t, 3), "word": "", "kind": "micro", "zoom": "added", "style": "micro",
+                            "target": "face" if face else "centre"})
+    return sorted(list(zooms) + added, key=lambda z: z.source_time)
 
 
 def _rolls(split: Mapping, words, duration: float) -> tuple[float, float]:

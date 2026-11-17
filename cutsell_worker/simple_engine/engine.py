@@ -37,7 +37,7 @@ SALE_REVIEW_PROMPT = (_HERE / "prompts" / "sale_review_v1.txt").read_text(encodi
 # - sale review: JSON-only without "why" proposed fixes almost twice as often (14 vs 8 of 52) and changed cuts.
 SALE_REVIEW_KINDS = ("restart", "mixed")          # measured on the Gold: never made a sales video worse
 SALE_REVIEW_ALL_KINDS = ("restart", "mixed", "repeat", "missing")   # "repeat" / "missing": measured, not enabled
-ZOOM_KINDS = ("hook", "product", "price", "cta", "look", "benefit", "closeup")
+ZOOM_KINDS = ("hook", "product", "price", "cta", "look", "benefit", "closeup", "point")
 # PO 16 Nov 2026 ("no hace macro zoom cuando habla de la cara"): a CLOSE-UP when she talks about a part of her
 # body the product is for -- the zoom goes deep onto that part.
 ZOOM_PARTS = ("face", "eyes", "lips", "hair", "skin", "hands", "body")
