@@ -120,7 +120,7 @@ ZOOM_EDGE_SEC = 0.30          # never during a join
 ZOOM_MIN_SPACING_SEC = 3.0    # start to start ("Dinámico"; a rhythm choice can come later)
 ZOOM_GAP_SEC = 0.30           # the picture is back to normal at least this long before the next zoom
 ZOOM_STYLE_BY_KIND = {"hook": "slow", "product": "slow", "benefit": "slow", "price": "fast", "cta": "fast",
-                      "look": "fast"}
+                      "look": "fast", "closeup": "slow"}
 #: style -> (extra scale, seconds to zoom in, seconds to come back, length)  (slow: length = its sentence)
 #: PO 16 Nov: never "de golpe" -- every zoom goes in AND comes back smoothly; a fast one is quick going in (it lands
 #: on the word) but always eases back out.
@@ -128,7 +128,8 @@ ZOOM_MOVES = {"fast": (0.05, 0.30, 0.80, 2.0), "slow": (0.0, None, 0.90, None), 
 ZOOM_SLOW_RANGE = (1.8, 4.0)
 ZOOM_SLOW_HOLD = 0.3
 ZOOM_SLOW_LEAD = 0.15
-ZOOM_TOP_SCALE = 1.25         # serde.ZOOM_SCALE_RANGE
+ZOOM_TOP_SCALE = 1.25         # every zoom but a close-up (zoom_framing.closeup: up to 2.0 = serde.ZOOM_SCALE_RANGE)
+CLOSEUP_RAMPS = (0.6, 1.0)    # a deep zoom never moves fast: at least this long in / out
 
 
 def _zoom_move(moment, kind: str, start: float, room: float):
@@ -144,6 +145,9 @@ def _zoom_move(moment, kind: str, start: float, room: float):
         ramp_in = max(0.6, length - ramp_out - ZOOM_SLOW_HOLD)   # keeps moving in while she talks
     if style == "reveal":
         ramp_out = max(0.8, length - ramp_in - 0.3)             # opens up slowly
+    if kind == "closeup":
+        ramp_in, ramp_out = max(ramp_in, CLOSEUP_RAMPS[0]), max(ramp_out, CLOSEUP_RAMPS[1])
+        length = min(room, max(length, ramp_in + ramp_out + 0.4))
     if ramp_in + ramp_out > length:                              # a short part: shorter, still smooth both ways
         k = length / (ramp_in + ramp_out)
         ramp_in, ramp_out = ramp_in * k, ramp_out * k
@@ -206,9 +210,15 @@ def _zoom_keyframes(source, moments, splits, log: list | None = None, *, face_at
                 face = face_at(t + min(length, 1.0) / 2)
             except Exception:                    # noqa: BLE001 -- no face info: centred, as before
                 face = None
-        x, y = zoom_framing.pan_for(kind, face, scale)
-        note(moment, "added", style=style, target="face" if face and kind in zoom_framing.FACE_KINDS
-             else "product" if face and kind in zoom_framing.PRODUCT_KINDS else "centre")
+        if kind == "closeup":
+            part = str(moment.get("part") or "face")
+            scale, x, y = zoom_framing.closeup(part, face)
+            target = f"closeup:{part}" if face else "centre"
+        else:
+            x, y = zoom_framing.pan_for(kind, face, scale)
+            target = ("face" if face and kind in zoom_framing.FACE_KINDS
+                      else "product" if face and kind in zoom_framing.PRODUCT_KINDS else "centre")
+        note(moment, "added", style=style, target=target)
         out.append(ZoomKeyframe(
             keyframe_id=f"z-{source.source_order:03d}-{len(out) + 1:02d}",
             source_asset_id=source.source_asset_id, source_time=round(t, 3), duration=round(length, 3),

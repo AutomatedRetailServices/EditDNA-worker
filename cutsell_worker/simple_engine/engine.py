@@ -37,7 +37,10 @@ SALE_REVIEW_PROMPT = (_HERE / "prompts" / "sale_review_v1.txt").read_text(encodi
 # - sale review: JSON-only without "why" proposed fixes almost twice as often (14 vs 8 of 52) and changed cuts.
 SALE_REVIEW_KINDS = ("restart", "mixed")          # measured on the Gold: never made a sales video worse
 SALE_REVIEW_ALL_KINDS = ("restart", "mixed", "repeat", "missing")   # "repeat" / "missing": measured, not enabled
-ZOOM_KINDS = ("hook", "product", "price", "cta", "look", "benefit")
+ZOOM_KINDS = ("hook", "product", "price", "cta", "look", "benefit", "closeup")
+# PO 16 Nov 2026 ("no hace macro zoom cuando habla de la cara"): a CLOSE-UP when she talks about a part of her
+# body the product is for -- the zoom goes deep onto that part.
+ZOOM_PARTS = ("face", "eyes", "lips", "hair", "skin", "hands", "body")
 # Smart zoom (PO 16 Nov 2026): how each zoom moves -- "fast" punch-in on a strong word, "slow" push-in that
 # follows the sentence, "reveal" (starts close, opens up to show the whole thing). Missing = from its kind.
 ZOOM_STYLES = ("fast", "slow", "reveal")
@@ -637,10 +640,14 @@ def fix_words_and_moments(words, splits, call: LLMCall):
         try:
             i, kind = int(mark[0]), str(mark[1]).strip().lower()
             style = str(mark[2]).strip().lower() if len(mark) > 2 else ""
+            part = str(mark[3]).strip().lower() if len(mark) > 3 else ""
         except Exception:
             continue
         if i in allowed and kind in ZOOM_KINDS and not any(m["i"] == i for m in moments):
-            moments.append({"i": i, "kind": kind, "style": style if style in ZOOM_STYLES else ""})
+            moment = {"i": i, "kind": kind, "style": style if style in ZOOM_STYLES else ""}
+            if kind == "closeup":
+                moment["part"] = part if part in ZOOM_PARTS else "face"
+            moments.append(moment)
     if not pairs:
         return words, ([] if pairs == [] else [["error"]]), moments, usage
     shown = [dict(w) for w in words]; fixes = []
@@ -903,7 +910,8 @@ def process(words, duration, audio_path, video_path=None, run: int = 0, scene_cu
     return {"engine": VERSION, "duration": float(duration), "cut_duration": cut_duration, "passes": info["passes"],
             "splits": splits, "captions": caps, "caption_groups": caption_groups(caps), "log": log, "usage": info["usage"],
             "moments": [{"i": m["i"], "kind": m["kind"], "s": words[m["i"]]["s"], "w": words[m["i"]]["w"],
-                         "style": m.get("style", ""), "e": phrase_end(words, m["i"])} for m in moments]}
+                         "style": m.get("style", ""), "e": phrase_end(words, m["i"]),
+                         **({"part": m["part"]} if m.get("part") else {})} for m in moments]}
 
 
 PHRASE_GAP_SEC, PHRASE_MAX_SEC = 0.45, 4.0

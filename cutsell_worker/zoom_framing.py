@@ -3,7 +3,9 @@
 - hook / benefit / call to action -> her FACE (placed a little above the middle, so the head is never cut);
 - product / price / "look at this" -> the area just below her face, where the product in her hand usually is,
   keeping her face in the picture;
-- no face found (or no OpenCV in the worker) -> the centre, exactly as before.
+- close-up (PO 16 Nov: "no hace macro zoom cuando habla de la cara") -> deep onto the part of her body she talks
+  about: face / skin, eyes, lips, hair (up to 1.9x, sized from her face), hands (1.5x), body (gentle);
+- no face found (or no OpenCV in the worker) -> the centre, exactly as before (a close-up: a moderate centred 1.3x).
 
 Face finding is OpenCV's built-in face detector on one small grey frame per zoom (CPU, no paid AI). The answer is
 the pan of the zoomed picture (keyframes.py x / y: the picture centre's offset as a fraction of the frame).
@@ -131,3 +133,30 @@ def pan_for(kind: str, face: Optional[Face], scale: float) -> tuple[float, float
     elif right > 1 - FACE_MARGIN:
         x = clamp_offset(scale, x - (right - (1 - FACE_MARGIN)))
     return round(x, 4), round(y, 4)
+
+
+# ------------------------------------------------------------------ close-ups
+
+#: part -> (where on her face, in face heights from its centre (dx, dy), how tall her FACE ends up on screen,
+#:          the most it may zoom). hands / body are placed from the face too.
+CLOSEUP_PARTS = {
+    "face": (0.0, 0.0, 0.40, 1.9), "skin": (0.0, 0.0, 0.40, 1.9),
+    "eyes": (0.0, -0.12, 0.48, 2.0), "lips": (0.0, 0.28, 0.48, 2.0),
+    "hair": (0.0, -0.55, 0.30, 1.6), "hands": (0.0, 2.2, 0.0, 1.5), "body": (0.0, 1.8, 0.0, 1.12),
+}
+CLOSEUP_SPOT = (0.5, 0.45)
+CLOSEUP_NO_FACE = 1.3
+CLOSEUP_MIN = 1.3
+
+
+def closeup(part: str, face: Optional[Face]) -> tuple[float, float, float]:
+    """(scale, x, y) of a close-up on `part`: her face filling the screen, her eyes, her lips..."""
+    dx, dy, face_height, top = CLOSEUP_PARTS.get(part, CLOSEUP_PARTS["face"])
+    if face is None:
+        return (CLOSEUP_NO_FACE if face_height else min(top, 1.2)), 0.0, 0.0
+    fx, fy, fw, fh = face
+    scale = top if not face_height else max(CLOSEUP_MIN, min(top, face_height / max(fh, 1e-3)))
+    tx, ty = fx + dx * fh, min(0.9, fy + dy * fh)
+    x = clamp_offset(scale, CLOSEUP_SPOT[0] - 0.5 - (tx - 0.5) * scale)
+    y = clamp_offset(scale, CLOSEUP_SPOT[1] - 0.5 - (ty - 0.5) * scale)
+    return round(scale, 3), round(x, 4), round(y, 4)

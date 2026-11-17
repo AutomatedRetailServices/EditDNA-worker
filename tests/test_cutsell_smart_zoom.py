@@ -148,3 +148,35 @@ def test_one_odd_look_is_not_taken_for_her_face(monkeypatch):
     lonely = iter([None, None, (0.5, 0.3, 0.3, 0.17), None, None])
     monkeypatch.setattr(F, "find_face", lambda *a: next(lonely))
     assert F.face_at("v.mp4", 5.0) is None                               # one look alone: centred, as before
+
+
+# ------------------------------------------------------------------ close-ups (PO 16 Nov: "macro zoom ... la cara")
+
+def test_the_ai_marks_a_closeup_with_the_part_of_her_body():
+    words = [{"w": "mi", "s": 0.0, "e": 0.2}, {"w": "cara", "s": 0.3, "e": 0.6}, {"w": "brilla", "s": 0.7, "e": 1.0}]
+    splits = [{"start": 0.0, "end": 1.2, "visible": True}]
+    answer = '{"fix": [], "zoom": [[1, "closeup", "slow", "face"], [2, "closeup", "slow", "elbow"]]}'
+    _, _, moments, _ = E.fix_words_and_moments(words, splits, lambda p: (answer, {}))
+    assert moments == [{"i": 1, "kind": "closeup", "style": "slow", "part": "face"},
+                       {"i": 2, "kind": "closeup", "style": "slow", "part": "face"}]   # unknown part: her face
+
+
+def test_a_face_closeup_goes_deep_and_centres_her_face():
+    scale, x, y = F.closeup("face", FACE)
+    assert scale == 1.9                                                     # her face fills the screen
+    face_on_screen = 0.5 + (FACE[1] - 0.5) * scale + y
+    assert abs(face_on_screen - F.CLOSEUP_SPOT[1]) < 0.06 and abs(x) < 1e-9
+    lips = F.closeup("lips", FACE)
+    assert lips[0] == 2.0 and lips[2] < y                                   # lower on her face: picture moves up
+    assert F.closeup("face", None) == (1.3, 0.0, 0.0)                       # no face found: moderate, centred
+    assert F.closeup("hands", FACE)[0] == 1.5
+
+
+def test_a_closeup_zoom_is_deep_and_never_fast():
+    log = []
+    keys = A._zoom_keyframes(SOURCE, [{"s": 4.0, "kind": "closeup", "style": "fast", "part": "face", "e": 5.0, "w": "cara"}],
+                             SPLITS, log, face_at=lambda t: FACE)
+    k = keys[0]
+    assert k.scale == 1.9 and k.ramp_in >= 0.6 and k.ramp_out >= 1.0 and log[0]["target"] == "closeup:face"
+    back = serde._zoom_keyframe_from_dict(serde._json_safe(k))            # a 1.9x zoom is a valid draft zoom
+    assert back.scale == 1.9
