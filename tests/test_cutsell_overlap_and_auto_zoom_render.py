@@ -53,7 +53,7 @@ def test_rolls_and_zooms_parse_and_stay_out_of_plain_drafts():
     assert draft_from_dict(_draft(selected=[{"clip_id": "c", "source_asset_id": "s", "start": 0, "end": 1,
                                              "audio_post_roll": 0.5}])).selected[0].audio_post_roll == 0.06
     with pytest.raises(ValueError):
-        draft_from_dict(_draft(zoom_keyframes=[{"source_asset_id": "s1", "source_time": 1, "duration": 1, "scale": 2.0}]))
+        draft_from_dict(_draft(zoom_keyframes=[{"source_asset_id": "s1", "source_time": 1, "duration": 1, "scale": 2.1}]))
 
 
 def test_overlap_flag_decides_the_rolls_in_the_plan(tone_clip):
