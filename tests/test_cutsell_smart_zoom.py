@@ -212,3 +212,20 @@ def test_a_long_still_stretch_gets_a_gentle_micro_zoom_that_touches_nothing():
     assert all(b[0] >= a[1] + A.ZOOM_GAP_SEC - 1e-6 for a, b in zip(spans, spans[1:]))     # never overlapping
     short = A._zoom_keyframes(SOURCE, [], [{"start": 0.0, "end": 4.0, "visible": True}])
     assert short == []                                                                       # a short part stays still
+
+
+def test_a_very_long_filter_graph_goes_through_a_script_file(tmp_path, monkeypatch):
+    """16 Nov: a real cut with many smart zooms made one ffmpeg argument longer than Linux allows (128 KiB)."""
+    import shutil
+    import subprocess
+    from cutsell_worker import render
+    if not shutil.which("ffmpeg"):
+        pytest.skip("no ffmpeg")
+    monkeypatch.setattr(render, "_MAX_INLINE_FILTER", 1000)             # small here; 100 KB in production
+    graph = "[0:v]" + ",".join(["null"] * 400) + "[v]"
+    out = tmp_path / "o.mp4"
+    cmd = ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=64x64:d=0.2", "-filter_complex", graph,
+           "-map", "[v]", str(out)]
+    assert len(render._with_filter_scripts(cmd, str(tmp_path))[-4]) < 1000          # the graph moved to a file
+    render._run(cmd, output_path=out)
+    assert out.exists() and out.stat().st_size > 0

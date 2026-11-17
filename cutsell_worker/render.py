@@ -8,6 +8,7 @@ import math
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import tempfile
 import time
@@ -150,6 +151,26 @@ def _diagnostics_row(failure: RenderExecutionFailure, *, wall_time_sec: float) -
     }
 
 
+#: Linux refuses one command-line argument longer than 128 KiB ("Argument list too long"). A filter graph longer than
+#: this goes to ffmpeg through a script file instead (16 Nov 2026: many smart zooms = long keyframe expressions).
+_MAX_INLINE_FILTER = 100_000
+_FILTER_SCRIPT_FLAGS = {"-filter_complex": "-filter_complex_script", "-lavfi": "-filter_complex_script",
+                        "-vf": "-filter_script:v", "-filter:v": "-filter_script:v", "-af": "-filter_script:a",
+                        "-filter:a": "-filter_script:a"}
+
+
+def _with_filter_scripts(command: list[str], directory: str) -> list[str]:
+    """The same command with every too-long filter graph read from a file (same graph, same output)."""
+    out = list(command)
+    for i in range(len(out) - 1):
+        flag = out[i]
+        if flag in _FILTER_SCRIPT_FLAGS and len(str(out[i + 1])) > _MAX_INLINE_FILTER:
+            path = Path(directory) / f"filter-{i}.txt"
+            path.write_text(str(out[i + 1]), encoding="utf-8")
+            out[i], out[i + 1] = _FILTER_SCRIPT_FLAGS[flag], str(path)
+    return out
+
+
 def _run(
     command: list[str],
     *,
@@ -169,12 +190,18 @@ def _run(
     fingerprint = _command_fingerprint(command)
     executable = command[0] if command else ""
     started = time.monotonic()
+    script_dir = None
+    if any(len(str(arg)) > _MAX_INLINE_FILTER for arg in command):
+        script_dir = tempfile.mkdtemp(prefix="cutsell-filter-")
+        command = _with_filter_scripts(command, script_dir)
     try:
         completed = subprocess.run(
             command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             timeout=timeout_sec,
         )
     except subprocess.TimeoutExpired as exc:
+        if script_dir:
+            shutil.rmtree(script_dir, ignore_errors=True)
         # subprocess.run's own timeout handling already kills the child
         # process before re-raising -- no child is intentionally left
         # running (D-266 Stage 6).
@@ -194,6 +221,8 @@ def _run(
             diagnostics.append(_diagnostics_row(failure, wall_time_sec=time.monotonic() - started))
         raise RenderExecutionError(failure) from exc
     wall_time_sec = time.monotonic() - started
+    if script_dir:
+        shutil.rmtree(script_dir, ignore_errors=True)
     if completed.returncode != 0:
         failure = RenderExecutionFailure(
             error_category=RENDER_FAILURE_FFMPEG_NONZERO_EXIT,
