@@ -12,6 +12,13 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 ## Motor de B-roll (servidor, no es un build de la app)
 
+- **17 nov 2026 14:20 ET · DEPLOY con OK de la PO ("ok")** — `feat/simple-engine-v1` → `fb3226b2` (rama `feature/smart-zoom`). Worker de Modal (128 pruebas pasan; 9,420 pruebas del motor pasan) y API de Render (`dep-dbuaertbedkc73992leg`) en vivo.
+  - Zoom inteligente: la IA (Sonnet, en la misma revisión de palabras, sin costo extra) marca cada zoom y su tipo: rápido, lento, abrir, de cerca (cara, piel, ojos, labios, pelo, manos, cuerpo), puntos de una lista (entra en uno, sale en el siguiente). Zooms micro suaves en tramos quietos (sin IA).
+  - Claude Haiku 5.5 mira un cuadro por zoom (una sola llamada por video, ~US$0.001) y dice a dónde va: el producto, su cara, su brazo... Si falla: detector de cara de OpenCV; si no hay cara: al centro. `CUTSELL_ZOOM_VISION=0` lo apaga.
+  - Suave (PO: "de golpe", "muy cortos"): máximo 0.4 de zoom por segundo al entrar y salir; llega justo en la palabra; se queda mientras ella habla de eso (1.5-4 s).
+  - Arreglo encontrado: con muchos zooms el video no se armaba ("Argument list too long"); el filtro largo ahora va por archivo.
+  - Prueba real (Yaskira 04, 54 s): ~2-3 centavos el video completo. Pruebas de zoom en esta rama: ~US$0.20 en total.
+
 - **14 nov 2026 15:58 ET · DEPLOY con OK de la PO** — `feat/simple-engine-v1` → `7f1a97d8` (rama `feature/broll-sound`). Worker de Modal (128 pruebas pasan) y API de Render (`dep-dbscmas9v7es73cb96ig`) en vivo.
   - Sonido del B-roll (diseño Figma E4s 3060:354): el B-roll sigue en silencio por defecto; solo una toma de video con la bocina encendida en la app (`broll_sound: "1"`) conserva su sonido, debajo de la voz al 30 % (PO: "opción 1"). Las fotos nunca tienen sonido.
   - Arreglo encontrado al hacerlo: cuando un video encima conservaba su sonido, la mezcla bajaba la voz a la mitad (amix sin `normalize=0`). Ahora la voz queda a su nivel; prueba que lo mide.
@@ -27,7 +34,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
-| 95 | 2026-11-17 | ✅ subido (pedido) | feature/shop-board | `de036d94` | Sin Shape it + zoom inteligente (velocidad y punto del zoom del motor) |
+| 95 | 2026-11-17 | ✅ subido (pedido `0cd8399c`) | feature/shop-board | `de036d94` | Sin Shape it + zoom inteligente (velocidad y punto del zoom del motor) |
 | 94 | 2026-11-15 14:41 | ✅ subido | feature/shop-board | `94577d79` (pedido `48003e28`) | Wear it con video de fondo (hasta 12 s, con sonido) |
 | 93 | 2026-11-14 16:56 | ✅ subido | feature/shop-board | `d3e8aaa3` (pedido `b9f18d7e`) | Wear it + quitar productos + YOUR BRAND editable + bocina del B-roll |
 | 92 | 2026-11-14 16:00 | ✅ subido | feature/shop-board | `90532ee8` (pedido `38803bc9`) | Clon con cámara delantera + cortes fallidos se abren con Try again |
