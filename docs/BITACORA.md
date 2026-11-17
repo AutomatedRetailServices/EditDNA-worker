@@ -34,7 +34,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
-| 95 | 2026-11-17 | ❌ no subido: Apple "Error Downloading App Information" (3 intentos: runs 95 ×2 y 96) (pedido `0cd8399c`) | feature/shop-board | `de036d94` | Sin Shape it + zoom inteligente (velocidad y punto del zoom del motor) |
+| 97 | 2026-11-17 16:16 | ✅ subido 16:16 (pedido `6baa8a27`) | feature/shop-board | `de036d94` | Sin Shape it + zoom inteligente (velocidad y punto del zoom del motor) |
 | 94 | 2026-11-15 14:41 | ✅ subido | feature/shop-board | `94577d79` (pedido `48003e28`) | Wear it con video de fondo (hasta 12 s, con sonido) |
 | 93 | 2026-11-14 16:56 | ✅ subido | feature/shop-board | `d3e8aaa3` (pedido `b9f18d7e`) | Wear it + quitar productos + YOUR BRAND editable + bocina del B-roll |
 | 92 | 2026-11-14 16:00 | ✅ subido | feature/shop-board | `90532ee8` (pedido `38803bc9`) | Clon con cámara delantera + cortes fallidos se abren con Try again |
@@ -132,7 +132,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 ---
 
-## Build 95
+## Build 97 (código del build 95)
 
 - **Fecha:** 17 nov 2026 · **Rama:** `feature/shop-board` · **Commit:** `de036d94` · Pedido por la PO ("ok", 17 nov).
 - **Qué cambia:**
@@ -142,8 +142,8 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 - **Pruebas:** 103 pruebas de la app, 0 fallas (CI `43991666808`).
 - **Diseño:** docs/design-audit/build-95/cambios.md.
 - **Subida:** falló 3 veces en el paso de exportar a App Store Connect con "exportArchive Error Downloading App
-  Information" (el archivo sí se creó). Nada cambió en la configuración desde el build 94 (15 nov). Suele ser un
-  acuerdo nuevo pendiente en App Store Connect o una falla de Apple. Pendiente: que la PO revise App Store Connect.
+  Information" (el archivo sí se creó; runs 95 ×2 y 96). La PO revisó App Store Connect y pidió "try again": el
+  4.º intento subió como **build 97** (VALID, 16:16 ET). Los números 95 y 96 no existen en TestFlight.
 
 ## Build 94 — 2026-11-15
 - **Resultado:** ✅ subido a TestFlight el 15 nov a las 14:41 ET (VALID) · commit del pedido `48003e28`
