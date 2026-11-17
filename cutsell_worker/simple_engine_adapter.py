@@ -162,7 +162,12 @@ MICRO_GAP_SEC, MICRO_SCALE, MICRO_MAX_SEC = 4.5, 1.06, 4.0
 ZOOM_SLOW_HOLD = 0.3
 ZOOM_SLOW_LEAD = 0.15
 ZOOM_TOP_SCALE = 1.25         # every zoom but a close-up (zoom_framing.closeup: up to 2.0 = serde.ZOOM_SCALE_RANGE)
-CLOSEUP_RAMPS = (0.6, 1.0)    # a deep zoom never moves fast: at least this long in / out
+CLOSEUP_RAMPS = (0.6, 1.0)
+# PO 17 Nov ("zoom in, zoom out rápido... de golpe"): a speed limit. A deeper zoom takes longer to go in and to come
+# back: at most this much zoom per second (1.0 -> 1.2 takes 0.5 s in and 0.5 s out; 1.0 -> 1.8 takes 2 s each way).
+# When the moment has no room for that, the zoom is shallower instead of faster.
+ZOOM_SPEED_IN, ZOOM_SPEED_OUT, ZOOM_MIN_HOLD = 0.40, 0.40, 0.3
+ZOOM_MAX_LENGTH = 6.0         # serde.ZOOM_DURATION_RANGE    # a deep zoom never moves fast: at least this long in / out
 
 
 def _zoom_move(moment, kind: str, start: float, room: float):
@@ -200,6 +205,24 @@ def _zoom_lead(moment, kind: str) -> float:
     if kind == "point":
         style = "hold"
     return ZOOM_SLOW_LEAD if style == "slow" else float(ZOOM_MOVES[style][1])
+
+
+def _gentle(scale: float, length: float, ramp_in: float, ramp_out: float, room: float):
+    """The speed limit (PO 17 Nov): ramps long enough for the zoom's depth; longer zoom if there is room, else a
+    shallower zoom. -> (scale, length, ramp_in, ramp_out)."""
+    depth = max(0.0, scale - 1.0)
+    ramp_in = max(ramp_in, depth / ZOOM_SPEED_IN)
+    ramp_out = max(ramp_out, depth / ZOOM_SPEED_OUT)
+    length = min(room, max(length, ramp_in + ramp_out + ZOOM_MIN_HOLD))
+    if ramp_in + ramp_out + ZOOM_MIN_HOLD > length:          # no room: shallower, never faster
+        usable = max(0.2, length - ZOOM_MIN_HOLD)
+        depth = min(depth, usable / (1 / ZOOM_SPEED_IN + 1 / ZOOM_SPEED_OUT))
+        scale = 1.0 + depth
+        ramp_in, ramp_out = depth / ZOOM_SPEED_IN, depth / ZOOM_SPEED_OUT
+        if ramp_in + ramp_out > length:
+            k = length / (ramp_in + ramp_out)
+            ramp_in, ramp_out = ramp_in * k, ramp_out * k
+    return scale, length, ramp_in, ramp_out
 
 
 def _zoom_keyframes(source, moments, splits, log: list | None = None, *, face_at=None, eyes=None) -> list[ZoomKeyframe]:
@@ -256,8 +279,10 @@ def _zoom_keyframes(source, moments, splits, log: list | None = None, *, face_at
         if nxt is not None and nxt - ZOOM_GAP_SEC - t >= ZOOM_MIN_SEC:
             room = min(room, nxt - ZOOM_GAP_SEC - t)
         style, length, scale, ramp_in, ramp_out = _zoom_move(moment, kind, t, room)
+        earliest = max(a + ZOOM_EDGE_SEC, (out[-1]["t"] + out[-1]["length"] + ZOOM_GAP_SEC) if out else a)
         out.append({"moment": moment, "kind": kind, "t": t, "length": length, "scale": scale, "ramp_in": ramp_in,
-                    "ramp_out": ramp_out, "style": style})
+                    "ramp_out": ramp_out, "style": style, "room": room, "earliest": earliest,
+                    "end_limit": t + (length if style == "hold" else room)})
     seen = [None] * len(out)
     if eyes is not None and out:
         try:
@@ -286,12 +311,23 @@ def _zoom_keyframes(source, moments, splits, log: list | None = None, *, face_at
                 x, y = zoom_framing.pan_for(kind, face, scale)
                 target = ("face" if face and kind in zoom_framing.FACE_KINDS
                           else "product" if face and kind in zoom_framing.PRODUCT_KINDS else "centre")
+        # It still lands on her word: a longer way in starts earlier (never before the part or the previous zoom).
+        # (A slow push-in builds through her sentence from its first word: it is not moved.)
+        earliest = max(z["earliest"], (zooms[-1].source_time + zooms[-1].duration + ZOOM_GAP_SEC) if zooms else 0.0)
+        if z["style"] != "slow":
+            depth_in = max(z["ramp_in"], (scale - 1.0) / ZOOM_SPEED_IN)
+            t = max(earliest, min(t, float(moment["s"]) - depth_in))
+        t = max(t, earliest)
+        room = min(z["end_limit"] - t, ZOOM_MAX_LENGTH)
+        length = min(room, length + (z["t"] - t))
+        scale, length, ramp_in, ramp_out = _gentle(scale, length, z["ramp_in"], z["ramp_out"], room)
+        x, y = zoom_framing.clamp_offset(scale, x), zoom_framing.clamp_offset(scale, y)
         note(moment, "added", style=z["style"], target=target)
         zooms.append(ZoomKeyframe(
             keyframe_id=f"z-{source.source_order:03d}-{len(zooms) + 1:02d}",
             source_asset_id=source.source_asset_id, source_time=round(t, 3), duration=round(length, 3),
             scale=round(scale, 3), kind=kind, origin="ai", x=x, y=y,
-            ramp_in=round(z["ramp_in"], 3), ramp_out=round(z["ramp_out"], 3), style=z["style"],
+            ramp_in=round(ramp_in, 3), ramp_out=round(ramp_out, 3), style=z["style"],
         ))
     out = zooms
     return _with_micro_zooms(source, out, visible, log, face_at)

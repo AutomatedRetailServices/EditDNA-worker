@@ -192,7 +192,7 @@ def timeline_duration_sec(clips) -> float:
 #: Longest audio roll a clip may carry on one side of a join (a join overlaps pre + post <= 0.12 s).
 MAX_AUDIO_ROLL_SEC = 0.06
 ZOOM_SCALE_RANGE = (1.0, 2.0)          # 2.0: a close-up on her face / eyes / lips (PO 16 Nov)
-ZOOM_DURATION_RANGE = (0.4, 4.0)
+ZOOM_DURATION_RANGE = (0.4, 6.0)     # 6 s: a deep close-up going in and out gently (PO 17 Nov)
 
 
 def _roll(value) -> float:
