@@ -34,6 +34,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 98 | 2026-11-17 | ✅ subido (pedido) | feature/shop-board | `PENDING` | "Add another photo or item" + boards guardados desde Home + mismo límite de tamaño |
 | 97 | 2026-11-17 16:16 | ✅ subido 16:16 (pedido `6baa8a27`) | feature/shop-board | `de036d94` | Sin Shape it + zoom inteligente (velocidad y punto del zoom del motor) |
 | 94 | 2026-11-15 14:41 | ✅ subido | feature/shop-board | `94577d79` (pedido `48003e28`) | Wear it con video de fondo (hasta 12 s, con sonido) |
 | 93 | 2026-11-14 16:56 | ✅ subido | feature/shop-board | `d3e8aaa3` (pedido `b9f18d7e`) | Wear it + quitar productos + YOUR BRAND editable + bocina del B-roll |
@@ -131,6 +132,18 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 | 1 | 2026-10-12 13:01 | ❌ falló | feature/ios-captions-v2 | `d90bfc50` | Primer intento, no llegó a TestFlight |
 
 ---
+
+## Build 98
+
+- **Fecha:** 17 nov 2026 · **Rama:** `feature/shop-board` · **Commit:** `PENDING` · Pedido por la PO ("yes", 17 nov).
+- **Qué cambia:**
+  - Your board: "Add another photo or item" (link azul, Figma S4+ 3073:300, opción 3 elegida por la PO). Los
+    productos ya colocados no se mueven; Add products muestra "Back to my board".
+  - La tarjeta Shop board de Home abre primero los boards guardados + "+ New Shop board" (Figma S0 3074:270).
+  - Mismo límite de tamaño para todos los productos (PO: "algunos se pueden extender a mega grandes, otros se limitan").
+  - Prueba del video de Wear it con 3 minutos en CI (fallaba sin ninguna prueba fallida).
+- **Pruebas:** 106 pruebas de la app, 0 fallas (CI `44197581274`).
+- **Diseño:** docs/design-audit/build-98/cambios.md.
 
 ## Build 97 (código del build 95)
 
