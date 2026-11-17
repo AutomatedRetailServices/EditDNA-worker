@@ -27,7 +27,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
-| 95 | 2026-11-17 | ✅ subido (pedido) | feature/shop-board | `PENDING` | Sin Shape it + zoom inteligente (velocidad y punto del zoom del motor) |
+| 95 | 2026-11-17 | ✅ subido (pedido) | feature/shop-board | `de036d94` | Sin Shape it + zoom inteligente (velocidad y punto del zoom del motor) |
 | 94 | 2026-11-15 14:41 | ✅ subido | feature/shop-board | `94577d79` (pedido `48003e28`) | Wear it con video de fondo (hasta 12 s, con sonido) |
 | 93 | 2026-11-14 16:56 | ✅ subido | feature/shop-board | `d3e8aaa3` (pedido `b9f18d7e`) | Wear it + quitar productos + YOUR BRAND editable + bocina del B-roll |
 | 92 | 2026-11-14 16:00 | ✅ subido | feature/shop-board | `90532ee8` (pedido `38803bc9`) | Clon con cámara delantera + cortes fallidos se abren con Try again |
@@ -127,7 +127,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 ## Build 95
 
-- **Fecha:** 17 nov 2026 · **Rama:** `feature/shop-board` · **Commit:** `PENDING` · Pedido por la PO ("ok", 17 nov).
+- **Fecha:** 17 nov 2026 · **Rama:** `feature/shop-board` · **Commit:** `de036d94` · Pedido por la PO ("ok", 17 nov).
 - **Qué cambia:**
   - Shop board: sin el botón "✦ Shape it" (PO 16 nov: cuesta dinero por foto; el código queda apagado).
   - Zoom inteligente en el editor: los zooms del motor llegan con su velocidad (entra y sale suave) y su punto (cara,
