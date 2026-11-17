@@ -27,6 +27,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 95 | 2026-11-17 | ✅ subido (pedido) | feature/shop-board | `PENDING` | Sin Shape it + zoom inteligente (velocidad y punto del zoom del motor) |
 | 94 | 2026-11-15 14:41 | ✅ subido | feature/shop-board | `94577d79` (pedido `48003e28`) | Wear it con video de fondo (hasta 12 s, con sonido) |
 | 93 | 2026-11-14 16:56 | ✅ subido | feature/shop-board | `d3e8aaa3` (pedido `b9f18d7e`) | Wear it + quitar productos + YOUR BRAND editable + bocina del B-roll |
 | 92 | 2026-11-14 16:00 | ✅ subido | feature/shop-board | `90532ee8` (pedido `38803bc9`) | Clon con cámara delantera + cortes fallidos se abren con Try again |
@@ -123,6 +124,16 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 | 1 | 2026-10-12 13:01 | ❌ falló | feature/ios-captions-v2 | `d90bfc50` | Primer intento, no llegó a TestFlight |
 
 ---
+
+## Build 95
+
+- **Fecha:** 17 nov 2026 · **Rama:** `feature/shop-board` · **Commit:** `PENDING` · Pedido por la PO ("ok", 17 nov).
+- **Qué cambia:**
+  - Shop board: sin el botón "✦ Shape it" (PO 16 nov: cuesta dinero por foto; el código queda apagado).
+  - Zoom inteligente en el editor: los zooms del motor llegan con su velocidad (entra y sale suave) y su punto (cara,
+    producto, parte del cuerpo). Se pueden mover, borrar o cambiar como siempre, con los rombos.
+- **Pruebas:** 103 pruebas de la app, 0 fallas (CI `43991666808`).
+- **Diseño:** docs/design-audit/build-95/cambios.md.
 
 ## Build 94 — 2026-11-15
 - **Resultado:** ✅ subido a TestFlight el 15 nov a las 14:41 ET (VALID) · commit del pedido `48003e28`
