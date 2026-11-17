@@ -833,6 +833,13 @@ final class ShopWearItTests: XCTestCase {
 /// PO 14 Nov 2026 (Figma W1 3065:201 · W2 3065:301 · W4 3065:383): Wear it with a short video behind the board.
 @MainActor
 final class ShopWearItVideoTests: XCTestCase {
+    /// Exporting a real MP4 on the CI simulator sometimes takes more than the default minute (the run then fails with
+    /// 0 failed tests); 3 minutes is still under the CI's hard cap (240 s).
+    override func setUp() {
+        super.setUp()
+        executionTimeAllowance = 180
+    }
+
     /// A small synthetic video (solid colour frames, no sound) made here; nothing is stored in the repo.
     private func makeVideo(seconds: Double, size: CGSize = CGSize(width: 320, height: 568)) async throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("wear-\(UUID().uuidString).mov")
