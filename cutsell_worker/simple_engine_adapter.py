@@ -122,8 +122,12 @@ ZOOM_GAP_SEC = 0.30           # the picture is back to normal at least this long
 ZOOM_STYLE_BY_KIND = {"hook": "slow", "product": "slow", "benefit": "slow", "price": "fast", "cta": "fast",
                       "look": "fast"}
 #: style -> (extra scale, seconds to zoom in, seconds to come back, length)  (slow: length = its sentence)
-ZOOM_MOVES = {"fast": (0.05, 0.08, 0.25, 1.0), "slow": (0.0, None, 0.35, None), "reveal": (0.03, 0.06, None, 1.8)}
-ZOOM_SLOW_RANGE = (1.2, 3.5)
+#: PO 16 Nov: never "de golpe" -- every zoom goes in AND comes back smoothly; a fast one is quick going in (it lands
+#: on the word) but always eases back out.
+ZOOM_MOVES = {"fast": (0.05, 0.30, 0.80, 2.0), "slow": (0.0, None, 0.90, None), "reveal": (0.03, 0.50, None, 2.6)}
+ZOOM_SLOW_RANGE = (1.8, 4.0)
+ZOOM_SLOW_HOLD = 0.3
+ZOOM_SLOW_LEAD = 0.15
 ZOOM_TOP_SCALE = 1.25         # serde.ZOOM_SCALE_RANGE
 
 
@@ -137,11 +141,21 @@ def _zoom_move(moment, kind: str, start: float, room: float):
         length = max(ZOOM_SLOW_RANGE[0], min(ZOOM_SLOW_RANGE[1], end - start + 0.2 if end > start else 2.0))
     length = min(length, room)
     if style == "slow":
-        ramp_in = max(0.4, length - ramp_out - 0.15)       # keeps moving in while she talks
+        ramp_in = max(0.6, length - ramp_out - ZOOM_SLOW_HOLD)   # keeps moving in while she talks
     if style == "reveal":
-        ramp_out = max(0.4, length - ramp_in - 0.2)        # opens up slowly
+        ramp_out = max(0.8, length - ramp_in - 0.3)             # opens up slowly
+    if ramp_in + ramp_out > length:                              # a short part: shorter, still smooth both ways
+        k = length / (ramp_in + ramp_out)
+        ramp_in, ramp_out = ramp_in * k, ramp_out * k
     scale = min(ZOOM_TOP_SCALE, ZOOM_SCALE.get(kind, 1.08) + extra)
     return style, length, scale, ramp_in, ramp_out
+
+
+def _zoom_lead(moment, kind: str) -> float:
+    """How long before her word the zoom starts, so it LANDS on the word (precise, PO 16 Nov)."""
+    style = {"fast": "fast", "slow": "slow", "reveal": "reveal"}.get(str(moment.get("style") or "")) \
+        or ZOOM_STYLE_BY_KIND.get(kind, "slow")
+    return ZOOM_SLOW_LEAD if style == "slow" else float(ZOOM_MOVES[style][1])
 
 
 def _zoom_keyframes(source, moments, splits, log: list | None = None, *, face_at=None) -> list[ZoomKeyframe]:
@@ -162,7 +176,7 @@ def _zoom_keyframes(source, moments, splits, log: list | None = None, *, face_at
     ordered = sorted(moments, key=lambda m: float(m["s"]))
     for n, moment in enumerate(ordered):
         kind = str(moment["kind"])
-        t = float(moment["s"]) - ZOOM_LEAD_SEC
+        t = float(moment["s"]) - _zoom_lead(moment, kind)
         part = next(((a, b) for a, b in visible if a <= float(moment["s"]) <= b), None)
         if part is None:
             note(moment, "cut_out")
@@ -181,8 +195,8 @@ def _zoom_keyframes(source, moments, splits, log: list | None = None, *, face_at
             note(moment, "too_close")
             continue
         # A long (slow / reveal) zoom ends in time for the next moment, when that one is far enough to get its own.
-        nxt = next((float(m["s"]) - ZOOM_LEAD_SEC for m in ordered[n + 1:]
-                    if float(m["s"]) - ZOOM_LEAD_SEC - t >= ZOOM_MIN_SPACING_SEC), None)
+        nxt = next((float(m["s"]) - _zoom_lead(m, str(m["kind"])) for m in ordered[n + 1:]
+                    if float(m["s"]) - _zoom_lead(m, str(m["kind"])) - t >= ZOOM_MIN_SPACING_SEC), None)
         if nxt is not None and nxt - ZOOM_GAP_SEC - t >= ZOOM_MIN_SEC:
             room = min(room, nxt - ZOOM_GAP_SEC - t)
         style, length, scale, ramp_in, ramp_out = _zoom_move(moment, kind, t, room)

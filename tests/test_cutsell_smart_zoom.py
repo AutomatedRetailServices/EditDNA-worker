@@ -37,11 +37,14 @@ def test_three_moves():
     keys = A._zoom_keyframes(SOURCE, [_moment(2.0, "price", "fast"), _moment(8.0, "benefit", "slow", e=10.8),
                                       _moment(16.0, "product", "reveal")], SPLITS)
     fast, slow, reveal = keys
-    assert (fast.style, fast.ramp_in, fast.ramp_out, fast.duration) == ("fast", 0.08, 0.25, 1.0)
+    assert (fast.style, fast.ramp_in, fast.ramp_out, fast.duration) == ("fast", 0.3, 0.8, 2.0)
+    assert fast.source_time + fast.ramp_in == pytest.approx(2.0)         # it lands ON the word (PO: precise)
     assert fast.scale == 1.25                                           # price 1.20 + punch, capped at 125 %
-    assert slow.style == "slow" and slow.duration == pytest.approx(10.8 - 7.9 + 0.2, abs=1e-3)
-    assert slow.ramp_in > 2.0 and slow.ramp_out == 0.35                 # keeps moving in while she talks
-    assert reveal.style == "reveal" and reveal.ramp_in == 0.06 and reveal.ramp_out > 1.0
+    assert slow.style == "slow" and slow.duration == pytest.approx(10.8 - 7.85 + 0.2, abs=1e-3)
+    assert slow.ramp_in > 1.5 and slow.ramp_out == 0.9                  # keeps moving in while she talks
+    assert reveal.style == "reveal" and reveal.ramp_in == 0.5 and reveal.ramp_out >= 1.5
+    # PO 16 Nov: never "de golpe" -- every zoom eases in and eases back out
+    assert all(k.ramp_in >= 0.3 and k.ramp_out >= 0.8 for k in keys)
     assert all((k.x, k.y) == (0.0, 0.0) for k in keys)                  # no face info: centred, as before
 
 
@@ -50,6 +53,12 @@ def test_no_move_given_uses_the_kind_and_zooms_never_overlap():
     assert keys[0].style == "slow"
     assert len(keys) == 2 and keys[1].source_time >= keys[0].source_time + keys[0].duration + A.ZOOM_GAP_SEC
     assert keys[1].style == "fast"
+
+
+def test_a_short_part_still_zooms_smoothly_both_ways():
+    keys = A._zoom_keyframes(SOURCE, [_moment(1.0, "price", "fast")], [{"start": 0.0, "end": 2.0, "visible": True}])
+    k = keys[0]
+    assert k.ramp_in + k.ramp_out <= k.duration + 1e-6 and k.ramp_out > k.ramp_in   # shorter, never a jump out
 
 
 def test_a_slow_zoom_never_runs_into_a_join():
