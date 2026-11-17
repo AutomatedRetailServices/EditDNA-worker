@@ -41,7 +41,7 @@ def test_three_moves():
     assert fast.style == "fast" and fast.ramp_in == pytest.approx(0.625) and fast.ramp_out == 0.8
     assert fast.source_time + fast.ramp_in == pytest.approx(2.0, abs=1e-3)   # it lands ON the word (PO: precise)
     assert fast.scale == 1.25                                           # price 1.20 + punch, capped at 125 %
-    assert slow.style == "slow" and slow.duration == pytest.approx(10.8 - 7.85 + 0.2, abs=1e-3)
+    assert slow.style == "slow" and 10.8 - 7.85 + 0.2 <= slow.duration <= 10.8 - 7.85 + 0.6
     assert slow.ramp_in > 1.5 and slow.ramp_out == 0.9                  # keeps moving in while she talks
     assert reveal.style == "reveal" and reveal.ramp_in >= 0.5 and reveal.ramp_out >= 1.5
     # PO 16 Nov: never "de golpe" -- every zoom eases in and eases back out
@@ -310,3 +310,12 @@ def test_no_room_means_a_shallower_zoom_never_a_faster_one():
     k = keys[0]
     assert k.scale < 1.9 and (k.scale - 1) / k.ramp_in <= A.ZOOM_SPEED_IN + 1e-3
     assert (k.scale - 1) / k.ramp_out <= A.ZOOM_SPEED_OUT + 1e-3
+
+
+def test_a_zoom_stays_in_while_she_talks_about_it():
+    """PO 17 Nov: "hace zooms muy cortos" -- once in, it holds to the end of her sentence (at least 1.5 s)."""
+    k = [z for z in A._zoom_keyframes(SOURCE, [_moment(5.0, "product", "fast", e=8.0)], SPLITS) if z.kind != "micro"][0]
+    held_from, held_to = k.source_time + k.ramp_in, k.source_time + k.duration - k.ramp_out
+    assert held_from == pytest.approx(5.0, abs=1e-3) and held_to >= 8.0                  # in on the word, out after
+    short = [z for z in A._zoom_keyframes(SOURCE, [_moment(5.0, "price", "fast", e=5.3)], SPLITS) if z.kind != "micro"][0]
+    assert short.duration - short.ramp_in - short.ramp_out >= A.ZOOM_HOLD_SEC - 1e-3          # never in-and-straight-out

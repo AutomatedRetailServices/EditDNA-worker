@@ -127,8 +127,8 @@ def main():
     out = demo.remote(s3.get_object(Bucket=bucket, Key=VIDEO_KEY)["Body"].read())
     if out.get("error"):
         raise SystemExit(f"RESULT failed: {out['error'][:200]} (cost ~US${out.get('cost_usd')})")
-    s3.put_object(Bucket=bucket, Key=f"{OUT_PREFIX}/y04-smart-zoom-suave.mp4", Body=out.pop("mp4"), ContentType="video/mp4")
-    s3.put_object(Bucket=bucket, Key=f"{OUT_PREFIX}/y04-zooms-suave.json", Body=json.dumps(out, ensure_ascii=False, indent=1),
+    s3.put_object(Bucket=bucket, Key=f"{OUT_PREFIX}/y04-smart-zoom-hold.mp4", Body=out.pop("mp4"), ContentType="video/mp4")
+    s3.put_object(Bucket=bucket, Key=f"{OUT_PREFIX}/y04-zooms-hold.json", Body=json.dumps(out, ensure_ascii=False, indent=1),
                   ContentType="application/json")
     kinds = {}
     for z in out["zooms"]:

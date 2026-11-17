@@ -166,8 +166,11 @@ CLOSEUP_RAMPS = (0.6, 1.0)
 # PO 17 Nov ("zoom in, zoom out rápido... de golpe"): a speed limit. A deeper zoom takes longer to go in and to come
 # back: at most this much zoom per second (1.0 -> 1.2 takes 0.5 s in and 0.5 s out; 1.0 -> 1.8 takes 2 s each way).
 # When the moment has no room for that, the zoom is shallower instead of faster.
-ZOOM_SPEED_IN, ZOOM_SPEED_OUT, ZOOM_MIN_HOLD = 0.40, 0.40, 0.3
-ZOOM_MAX_LENGTH = 6.0         # serde.ZOOM_DURATION_RANGE    # a deep zoom never moves fast: at least this long in / out
+ZOOM_SPEED_IN, ZOOM_SPEED_OUT, ZOOM_MIN_HOLD = 0.40, 0.40, 0.6
+# PO 17 Nov ("hace zooms muy cortos"): once in, the zoom STAYS while she talks about that thing -- to the end of her
+# sentence, at least 1.5 s, at most 4 s -- and only then eases out (like a human editor), when there is room.
+ZOOM_HOLD_SEC, ZOOM_HOLD_MAX_SEC = 1.5, 4.0
+ZOOM_MAX_LENGTH = 10.0        # serde.ZOOM_DURATION_RANGE    # a deep zoom never moves fast: at least this long in / out
 
 
 def _zoom_move(moment, kind: str, start: float, room: float):
@@ -207,13 +210,13 @@ def _zoom_lead(moment, kind: str) -> float:
     return ZOOM_SLOW_LEAD if style == "slow" else float(ZOOM_MOVES[style][1])
 
 
-def _gentle(scale: float, length: float, ramp_in: float, ramp_out: float, room: float):
-    """The speed limit (PO 17 Nov): ramps long enough for the zoom's depth; longer zoom if there is room, else a
-    shallower zoom. -> (scale, length, ramp_in, ramp_out)."""
+def _gentle(scale: float, length: float, ramp_in: float, ramp_out: float, room: float, hold: float = ZOOM_MIN_HOLD):
+    """The speed limit (PO 17 Nov): ramps long enough for the zoom's depth, held `hold` s in between; longer zoom if
+    there is room, then a shorter hold, else a shallower zoom. -> (scale, length, ramp_in, ramp_out)."""
     depth = max(0.0, scale - 1.0)
     ramp_in = max(ramp_in, depth / ZOOM_SPEED_IN)
     ramp_out = max(ramp_out, depth / ZOOM_SPEED_OUT)
-    length = min(room, max(length, ramp_in + ramp_out + ZOOM_MIN_HOLD))
+    length = min(room, max(length, ramp_in + ramp_out + max(hold, ZOOM_MIN_HOLD)))
     if ramp_in + ramp_out + ZOOM_MIN_HOLD > length:          # no room: shallower, never faster
         usable = max(0.2, length - ZOOM_MIN_HOLD)
         depth = min(depth, usable / (1 / ZOOM_SPEED_IN + 1 / ZOOM_SPEED_OUT))
@@ -319,8 +322,16 @@ def _zoom_keyframes(source, moments, splits, log: list | None = None, *, face_at
             t = max(earliest, min(t, float(moment["s"]) - depth_in))
         t = max(t, earliest)
         room = min(z["end_limit"] - t, ZOOM_MAX_LENGTH)
+        if room < ZOOM_MIN_SEC:                  # the zoom before it took the time it needed
+            note(moment, "too_close")
+            continue
         length = min(room, length + (z["t"] - t))
-        scale, length, ramp_in, ramp_out = _gentle(scale, length, z["ramp_in"], z["ramp_out"], room)
+        hold = ZOOM_MIN_HOLD
+        if z["style"] in ("fast", "reveal", "hold") or kind == "closeup":
+            lands = t + max(z["ramp_in"], (scale - 1.0) / ZOOM_SPEED_IN)
+            said = float(moment.get("next") or moment.get("e") or 0.0) + 0.3
+            hold = max(ZOOM_HOLD_SEC, min(ZOOM_HOLD_MAX_SEC, said - lands))
+        scale, length, ramp_in, ramp_out = _gentle(scale, length, z["ramp_in"], z["ramp_out"], room, hold)
         x, y = zoom_framing.clamp_offset(scale, x), zoom_framing.clamp_offset(scale, y)
         note(moment, "added", style=z["style"], target=target)
         zooms.append(ZoomKeyframe(
