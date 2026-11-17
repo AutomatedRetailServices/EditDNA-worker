@@ -937,3 +937,25 @@ final class ShopShapeFeatureTests: XCTestCase {
         XCTAssertFalse(ShopShapeFeature.isOn)
     }
 }
+
+/// PO 17 Nov 2026: "algunos se pueden extender a mega grandes, otros se limitan" -- the same limits for every
+/// product, measured on the board (390 × 844 design units), not on its starting place.
+final class ShopSizeLimitTests: XCTestCase {
+    func testSmallAndBigProductsReachTheSameBiggestSize() {
+        let small = CGSize(width: 60, height: 60), big = CGSize(width: 180, height: 180)
+        let smallMax = ShopAdjust.pinched(ShopAdjust(), by: 100, base: small).scale * small.width
+        let bigMax = ShopAdjust.pinched(ShopAdjust(), by: 100, base: big).scale * big.width
+        XCTAssertEqual(smallMax, bigMax, accuracy: 0.5)
+        XCTAssertEqual(smallMax, 390 * ShopAdjust.biggestWidth, accuracy: 0.5)       // 110 % of the board's width
+        XCTAssertGreaterThan(smallMax / small.width, ShopAdjust.scaleRange.upperBound) // more than the old 3×
+    }
+
+    func testTallProductsStopAtTheBoardHeightAndNothingGetsTiny() {
+        let tall = CGSize(width: 80, height: 400)
+        let up = ShopAdjust.pinched(ShopAdjust(), by: 100, base: tall)
+        XCTAssertEqual(up.scale * tall.height, 844 * ShopAdjust.biggestHeight, accuracy: 0.5)
+        let down = ShopAdjust.pinched(ShopAdjust(), by: 0.001, base: tall)
+        XCTAssertEqual(down.scale * tall.width, ShopAdjust.smallestSide, accuracy: 0.5)
+        XCTAssertEqual(ShopAdjust.pinched(ShopAdjust(), by: 10).scale, ShopAdjust.scaleRange.upperBound) // no base: as before
+    }
+}

@@ -822,7 +822,8 @@ struct ShopBoardHandEditor: View {
                 },
                 onChange: { id, start, move, pinch, twist in
                     var a = ShopAdjust.dragged(start, by: move, board: size)
-                    a = ShopAdjust.pinched(a, by: pinch)
+                    let base = snapshot.itemIDs.firstIndex(of: id).flatMap { snapshot.baseSize(at: $0) }
+                    a = ShopAdjust.pinched(a, by: pinch, base: id == ShopBoardModel.titleID ? nil : base)
                     model.adjusts[id] = ShopAdjust.twisted(a, by: twist)
                 })
             .accessibilityIdentifier("shopBoardTouchLayer")

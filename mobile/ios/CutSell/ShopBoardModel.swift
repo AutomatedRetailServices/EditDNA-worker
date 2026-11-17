@@ -402,6 +402,16 @@ struct ShopBoardSnapshot {
         return nil
     }
 
+    /// Place `index` before any hand edit, in board design units (390 × 844): for the size limits (PO 17 Nov).
+    func baseSize(at index: Int) -> CGSize? {
+        guard placements.indices.contains(index) else { return nil }
+        let placement = placements[index]
+        guard images.indices.contains(placement.itemIndex) else { return nil }
+        let image = images[placement.itemIndex]
+        let aspect = CGFloat(image.width) / CGFloat(max(1, image.height))
+        return ShopLayout.frame(for: placement.slot, aspect: aspect, board: ShopLayout.designSize).size
+    }
+
     /// Where place `index` is drawn on a board of `size` (after the hand edit), and its tilt.
     func frame(at index: Int, board size: CGSize) -> (rect: CGRect, rotation: Double)? {
         let placement = placements[index]

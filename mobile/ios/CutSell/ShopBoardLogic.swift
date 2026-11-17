@@ -733,10 +733,24 @@ struct ShopAdjust: Equatable {
         return a
     }
 
-    static func pinched(_ start: ShopAdjust, by factor: CGFloat) -> ShopAdjust {
+    static func pinched(_ start: ShopAdjust, by factor: CGFloat, base: CGSize? = nil) -> ShopAdjust {
         var a = start
-        a.scale = min(max(start.scale * factor, scaleRange.lowerBound), scaleRange.upperBound)
+        let range = base.map(scaleLimits(base:)) ?? scaleRange
+        a.scale = min(max(start.scale * factor, range.lowerBound), range.upperBound)
         return a
+    }
+
+    /// PO 17 Nov 2026 ("algunos se pueden extender a mega grandes, otros se limitan"): the same limits for EVERY
+    /// product, measured on the board, not on its starting place: as big as 110 % of the board's width (or 90 % of its
+    /// height), as small as 36 points. `base` = the product's starting size in board design units (390 × 844).
+    static let biggestWidth: CGFloat = 1.1, biggestHeight: CGFloat = 0.9, smallestSide: CGFloat = 36
+
+    static func scaleLimits(base: CGSize) -> ClosedRange<CGFloat> {
+        guard base.width > 0, base.height > 0 else { return scaleRange }
+        let design = ShopLayout.designSize
+        let upper = max(1, min(design.width * biggestWidth / base.width, design.height * biggestHeight / base.height))
+        let lower = min(1, max(0.05, smallestSide / min(base.width, base.height)))
+        return lower...upper
     }
 
     /// The hand edit that draws a product exactly at `rect` / `rotation` (design-size board) from a new `base` place.
