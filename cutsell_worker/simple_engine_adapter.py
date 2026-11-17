@@ -97,6 +97,8 @@ class NoSpeechError(ValueError):
     this video") and offers the video for Mix, instead of "This cut needs another try"."""
 
 ENGINE_NAME = "simple"
+from . import zoom_framing as _zoom_framing  # noqa: E402
+
 ProgressCallback = Callable[[str, int], None]
 
 
@@ -108,12 +110,98 @@ def _words_inside(words, start: float, end: float):
 # stopping this far short of any other spoken word (so no other phrase is ever heard in a join).
 ROLL_MAX_SEC = 0.06
 ROLL_WORD_MARGIN_SEC = 0.02
-# Auto Zoom AI: soft push-ins on key moments.
+# Auto Zoom AI: push-ins on key moments.
 # 21 Oct: zoom in ~0.4 s, hold, zoom out ~0.4 s; 110-125 %, centred (keyframes.zoom_to_keyframes).
+# Smart zoom (PO 16 Nov 2026): three moves chosen by the AI from what is being said, and aimed at her face or the
+# product (zoom_framing): "fast" punch-in, "slow" push-in that follows the sentence, "reveal" (starts close, opens).
 ZOOM_SCALE = {"hook": 1.12, "product": 1.18, "price": 1.20, "cta": 1.12, "look": 1.22, "benefit": 1.15}
 ZOOM_LEAD_SEC, ZOOM_MAX_SEC, ZOOM_MIN_SEC = 0.10, 2.2, 0.9
 ZOOM_EDGE_SEC = 0.30          # never during a join
-ZOOM_MIN_SPACING_SEC = 3.0
+ZOOM_MIN_SPACING_SEC = 3.0    # start to start ("Dinámico"; a rhythm choice can come later)
+ZOOM_GAP_SEC = 0.30           # the picture is back to normal at least this long before the next zoom
+ZOOM_STYLE_BY_KIND = {"hook": "slow", "product": "slow", "benefit": "slow", "price": "fast", "cta": "fast",
+                      "look": "fast"}
+#: style -> (extra scale, seconds to zoom in, seconds to come back, length)  (slow: length = its sentence)
+ZOOM_MOVES = {"fast": (0.05, 0.08, 0.25, 1.0), "slow": (0.0, None, 0.35, None), "reveal": (0.03, 0.06, None, 1.8)}
+ZOOM_SLOW_RANGE = (1.2, 3.5)
+ZOOM_TOP_SCALE = 1.25         # serde.ZOOM_SCALE_RANGE
+
+
+def _zoom_move(moment, kind: str, start: float, room: float):
+    """(style, length, scale, ramp_in, ramp_out) of one zoom that may last at most `room` seconds."""
+    style = str(moment.get("style") or "")
+    style = {"fast": "fast", "slow": "slow", "reveal": "reveal"}.get(style) or ZOOM_STYLE_BY_KIND.get(kind, "slow")
+    extra, ramp_in, ramp_out, length = ZOOM_MOVES[style]
+    if style == "slow":
+        end = float(moment.get("e") or 0.0)
+        length = max(ZOOM_SLOW_RANGE[0], min(ZOOM_SLOW_RANGE[1], end - start + 0.2 if end > start else 2.0))
+    length = min(length, room)
+    if style == "slow":
+        ramp_in = max(0.4, length - ramp_out - 0.15)       # keeps moving in while she talks
+    if style == "reveal":
+        ramp_out = max(0.4, length - ramp_in - 0.2)        # opens up slowly
+    scale = min(ZOOM_TOP_SCALE, ZOOM_SCALE.get(kind, 1.08) + extra)
+    return style, length, scale, ramp_in, ramp_out
+
+
+def _zoom_keyframes(source, moments, splits, log: list | None = None, *, face_at=None) -> list[ZoomKeyframe]:
+    """Key moments -> zooms inside kept parts, away from joins, at most one every 3 s and never overlapping. A
+    moment near the end of its part starts its zoom earlier (still inside the part) instead of being dropped.
+    `face_at(t)` (optional) finds her face at source second t, so the zoom goes to her face / the product.
+    `log` (optional) gets one row per moment: the word, its kind and what became of it (diagnostics)."""
+    from . import zoom_framing
+
+    visible = [(float(s["start"]), float(s["end"])) for s in splits if s["visible"]]
+    out: list[ZoomKeyframe] = []
+
+    def note(moment, result, **more):
+        if log is not None:
+            log.append({"s": round(float(moment["s"]), 3), "word": str(moment.get("w", "")), "kind": str(moment["kind"]),
+                        "zoom": result, **more})
+
+    ordered = sorted(moments, key=lambda m: float(m["s"]))
+    for n, moment in enumerate(ordered):
+        kind = str(moment["kind"])
+        t = float(moment["s"]) - ZOOM_LEAD_SEC
+        part = next(((a, b) for a, b in visible if a <= float(moment["s"]) <= b), None)
+        if part is None:
+            note(moment, "cut_out")
+            continue
+        a, b = part
+        t = max(t, a + ZOOM_EDGE_SEC)
+        if b - ZOOM_EDGE_SEC - t < ZOOM_MIN_SEC:
+            t = max(a + ZOOM_EDGE_SEC, b - ZOOM_EDGE_SEC - ZOOM_MIN_SEC)
+        room = b - ZOOM_EDGE_SEC - t
+        if room < ZOOM_MIN_SEC:
+            note(moment, "part_too_short")
+            continue
+        if out and (t - out[-1].source_time < ZOOM_MIN_SPACING_SEC
+                    or (out[-1].source_asset_id == source.source_asset_id
+                        and t < out[-1].source_time + out[-1].duration + ZOOM_GAP_SEC)):
+            note(moment, "too_close")
+            continue
+        # A long (slow / reveal) zoom ends in time for the next moment, when that one is far enough to get its own.
+        nxt = next((float(m["s"]) - ZOOM_LEAD_SEC for m in ordered[n + 1:]
+                    if float(m["s"]) - ZOOM_LEAD_SEC - t >= ZOOM_MIN_SPACING_SEC), None)
+        if nxt is not None and nxt - ZOOM_GAP_SEC - t >= ZOOM_MIN_SEC:
+            room = min(room, nxt - ZOOM_GAP_SEC - t)
+        style, length, scale, ramp_in, ramp_out = _zoom_move(moment, kind, t, room)
+        face = None
+        if face_at is not None:
+            try:
+                face = face_at(t + min(length, 1.0) / 2)
+            except Exception:                    # noqa: BLE001 -- no face info: centred, as before
+                face = None
+        x, y = zoom_framing.pan_for(kind, face, scale)
+        note(moment, "added", style=style, target="face" if face and kind in zoom_framing.FACE_KINDS
+             else "product" if face and kind in zoom_framing.PRODUCT_KINDS else "centre")
+        out.append(ZoomKeyframe(
+            keyframe_id=f"z-{source.source_order:03d}-{len(out) + 1:02d}",
+            source_asset_id=source.source_asset_id, source_time=round(t, 3), duration=round(length, 3),
+            scale=round(scale, 3), kind=kind, origin="ai", x=x, y=y,
+            ramp_in=round(ramp_in, 3), ramp_out=round(ramp_out, 3), style=style,
+        ))
+    return out
 
 
 def _rolls(split: Mapping, words, duration: float) -> tuple[float, float]:
@@ -126,45 +214,6 @@ def _rolls(split: Mapping, words, duration: float) -> tuple[float, float]:
     pre = max(0.0, min(ROLL_MAX_SEC, room_before, start))
     post = max(0.0, min(ROLL_MAX_SEC, room_after, duration - end))
     return round(pre, 3), round(post, 3)
-
-
-def _zoom_keyframes(source, moments, splits, log: list | None = None) -> list[ZoomKeyframe]:
-    """Key moments -> zooms inside kept parts, away from joins, at most one every 3 s. A moment near the end
-    of its part starts its zoom earlier (still inside the part) instead of being dropped. `log` (optional)
-    gets one row per moment: the word, its kind and what became of it (diagnostics: why a cut has N zooms)."""
-    visible = [(float(s["start"]), float(s["end"])) for s in splits if s["visible"]]
-    out: list[ZoomKeyframe] = []
-
-    def note(moment, result):
-        if log is not None:
-            log.append({"s": round(float(moment["s"]), 3), "word": str(moment.get("w", "")), "kind": str(moment["kind"]),
-                        "zoom": result})
-
-    for moment in sorted(moments, key=lambda m: float(m["s"])):
-        t = float(moment["s"]) - ZOOM_LEAD_SEC
-        part = next(((a, b) for a, b in visible if a <= float(moment["s"]) <= b), None)
-        if part is None:
-            note(moment, "cut_out")
-            continue
-        a, b = part
-        t = max(t, a + ZOOM_EDGE_SEC)
-        if b - ZOOM_EDGE_SEC - t < ZOOM_MIN_SEC:
-            t = max(a + ZOOM_EDGE_SEC, b - ZOOM_EDGE_SEC - ZOOM_MIN_SEC)
-        length = min(ZOOM_MAX_SEC, b - ZOOM_EDGE_SEC - t)
-        if length < ZOOM_MIN_SEC:
-            note(moment, "part_too_short")
-            continue
-        if out and t - out[-1].source_time < ZOOM_MIN_SPACING_SEC:
-            note(moment, "too_close")
-            continue
-        note(moment, "added")
-        kind = str(moment["kind"])
-        out.append(ZoomKeyframe(
-            keyframe_id=f"z-{source.source_order:03d}-{len(out) + 1:02d}",
-            source_asset_id=source.source_asset_id, source_time=round(t, 3), duration=round(length, 3),
-            scale=ZOOM_SCALE.get(kind, 1.08), kind=kind, origin="ai",
-        ))
-    return out
 
 
 def _clip(*, clip_id: str, source, split: Mapping, words, selected: bool,
@@ -310,7 +359,9 @@ def process_with_simple_engine(
                     ))
 
             zoom_log: list = []
-            zoom_keyframes.extend(_zoom_keyframes(source, out.get("moments") or [], out["splits"], zoom_log))
+            zoom_keyframes.extend(_zoom_keyframes(
+                source, out.get("moments") or [], out["splits"], zoom_log,
+                face_at=None if voice_only else (lambda t, _p=path: _zoom_framing.face_at(_p, t))))
             if broll_sources:
                 engine_moments.extend({**dict(m), "source_asset_id": source.source_asset_id}
                                       for m in out.get("moments") or [] if isinstance(m, Mapping))

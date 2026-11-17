@@ -650,7 +650,8 @@ def test_auto_zoom_keyframes_come_from_the_existing_word_fix_call(video):
     keys = result.draft.zoom_keyframes
     assert result.draft.auto_zoom_enabled is True and keys
     assert {k.kind for k in keys} <= {"hook", "product", "price", "cta", "look", "benefit"}       # unknown kinds dropped
-    assert all(1.10 <= k.scale <= 1.25 and 0.9 <= k.duration <= 2.2 for k in keys)   # 21 Oct: 110-125 %
+    assert all(1.10 <= k.scale <= 1.25 and 0.9 <= k.duration <= 3.5 for k in keys)   # 110-125 %; slow ones follow
+    # their sentence (smart zoom, 16 Nov) and never overlap the next one
     assert all(b.source_time - a.source_time >= 3.0 for a, b in zip(keys, keys[1:]))
     for k in keys:   # inside a kept clip and away from its joins
         assert any(c.start + 0.3 - 1e-6 <= k.source_time and k.source_time + k.duration <= c.end - 0.3 + 1e-6
@@ -668,7 +669,7 @@ def test_word_fix_still_accepts_the_old_list_answer():
     assert fixes == [[1, "por", "Shein"]] and moments == []
     shown, fixes, moments, _ = engine.fix_words_and_moments(
         words, splits, lambda p: ('{"fix": [], "zoom": [[0, "price"], [9, "price"]]}', {}))
-    assert fixes == [] and moments == [{"i": 0, "kind": "price"}]      # index 9 is not a kept word
+    assert fixes == [] and moments == [{"i": 0, "kind": "price", "style": ""}]      # index 9 is not a kept word
 
 
 # ------------------------------------------------------------------ 1.2.1 sale review (off by default)
@@ -761,13 +762,13 @@ def test_word_fix_reads_the_last_answer_and_does_not_ask_again_for_trailing_text
         calls.append(p)
         return ('{"fix": [[1, "Shein"]], "zoom": [[0, "hook"]]}\n\nWait, I should keep {that} as is.', {})
     shown, fixes, moments, usage = engine.fix_words_and_moments(words, splits, call)
-    assert len(calls) == 1 and fixes == [[1, "set", "Shein"]] and moments == [{"i": 0, "kind": "hook"}]
+    assert len(calls) == 1 and fixes == [[1, "set", "Shein"]] and moments == [{"i": 0, "kind": "hook", "style": ""}]
     calls.clear()
     def corrected(p):
         calls.append(p)
         return '{"fix": [[1, "Shein"]], "zoom": []}  Actually: {"fix": [], "zoom": [[0, "hook"]]}', {}
     shown, fixes, moments, usage = engine.fix_words_and_moments(words, splits, corrected)
-    assert len(calls) == 1 and fixes == [] and moments == [{"i": 0, "kind": "hook"}]
+    assert len(calls) == 1 and fixes == [] and moments == [{"i": 0, "kind": "hook", "style": ""}]
 
 
 def test_effort_per_step_default_rollback_and_request(monkeypatch):

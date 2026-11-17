@@ -3,7 +3,8 @@
 # Security review 4 Nov, point 13 (7 Nov): every package pinned to the exact version inside the running Modal
 # image (built 30 Oct 2026), direct and indirect. To update: change a version on purpose, run the tests, deploy.
 # Direct needs: boto3 redis rq requests python-dotenv numpy SQLAlchemy psycopg[binary] sentry-sdk
-#               fastapi[standard] onnxruntime (Clean up voice v2)
+#               fastapi[standard] onnxruntime (Clean up voice v2) opencv-python-headless (smart zoom, 16 Nov:
+#               OpenCV's built-in face finder; needs numpy>=2, no other package)
 agent-detector==2.0.0
 annotated-doc==0.0.5
 annotated-types==0.8.0
@@ -37,6 +38,7 @@ MarkupSafe==3.0.4
 mdurl==0.1.2
 numpy==2.4.6
 onnxruntime==1.31.1
+opencv-python-headless==4.14.0.94
 opentelemetry-api==1.45.2
 opentelemetry-exporter-http-transport==0.66b2
 opentelemetry-exporter-otlp-common==0.66b2

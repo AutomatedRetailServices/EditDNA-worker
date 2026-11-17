@@ -332,7 +332,17 @@ def test_no_broll_request_gives_the_same_output_as_before(media, meta):
     old = before.process_with_simple_engine(request, _paths(media, ("voice",)), transcribe=Hearing(), llm=FakeLLM())
     new = simple_engine_adapter.process_with_simple_engine(request, _paths(media, ("voice",)), transcribe=Hearing(),
                                                            llm=FakeLLM())
-    assert json.dumps(_stable(result_to_dict(new)), sort_keys=True) == json.dumps(_stable(result_to_dict(old)), sort_keys=True)
+    assert json.dumps(_no_zoom(_stable(result_to_dict(new))), sort_keys=True) == \
+        json.dumps(_no_zoom(_stable(result_to_dict(old))), sort_keys=True)
+
+
+def _no_zoom(payload: dict) -> dict:
+    """Smart zoom (PO 16 Nov 2026) changed the Auto Zoom AI keyframes and their diagnostics on purpose
+    (tests/test_cutsell_smart_zoom.py); everything else must stay exactly as before."""
+    payload["draft"].pop("zoom_keyframes", None)
+    for item in payload["draft"]["diagnostics"]["simple_engine"]["sources"]:
+        item.pop("zoom_moments", None)
+    return payload
 
 
 def test_switch_off_treats_every_source_as_voice_exactly_as_before(media, monkeypatch):

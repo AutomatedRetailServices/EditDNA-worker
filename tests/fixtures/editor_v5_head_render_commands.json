@@ -271,7 +271,7 @@
   "-i",
   "/ov/v.mp4",
   "-filter_complex",
-  "[0:v]setpts=PTS-STARTPTS[v0];[1:v]trim=duration=1.500,scale=180:-1,setpts=PTS-STARTPTS+0.500/TB[ov1];[v0][ov1]overlay=x='W*0.300000-w/2':y='H*0.400000-h/2':enable='between(t,0.500,2.000)':eof_action=pass[v1];[2:v]trim=duration=2.000,scale=144:-1,setpts=PTS-STARTPTS+1.000/TB[ov2];[v1][ov2]overlay=x='W*0.500000-w/2':y='H*0.500000-h/2':enable='between(t,1.000,3.000)':eof_action=pass[v2];[2:a]atrim=duration=2.000,asetpts=PTS-STARTPTS,adelay=1000|1000[ova2];[0:a][ova2]amix=inputs=2:duration=first:dropout_transition=0[aout]",
+  "[0:v]setpts=PTS-STARTPTS[v0];[1:v]trim=duration=1.500,scale=180:-1,setpts=PTS-STARTPTS+0.500/TB[ov1];[v0][ov1]overlay=x='W*0.300000-w/2':y='H*0.400000-h/2':enable='between(t,0.500,2.000)':eof_action=pass[v1];[2:v]trim=duration=2.000,scale=144:-1,setpts=PTS-STARTPTS+1.000/TB[ov2];[v1][ov2]overlay=x='W*0.500000-w/2':y='H*0.500000-h/2':enable='between(t,1.000,3.000)':eof_action=pass[v2];[2:a]atrim=duration=2.000,asetpts=PTS-STARTPTS,adelay=1000|1000[ova2];[0:a][ova2]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]",
   "-map",
   "[v2]",
   "-map",

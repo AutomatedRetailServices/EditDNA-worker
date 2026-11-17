@@ -38,6 +38,9 @@ SALE_REVIEW_PROMPT = (_HERE / "prompts" / "sale_review_v1.txt").read_text(encodi
 SALE_REVIEW_KINDS = ("restart", "mixed")          # measured on the Gold: never made a sales video worse
 SALE_REVIEW_ALL_KINDS = ("restart", "mixed", "repeat", "missing")   # "repeat" / "missing": measured, not enabled
 ZOOM_KINDS = ("hook", "product", "price", "cta", "look", "benefit")
+# Smart zoom (PO 16 Nov 2026): how each zoom moves -- "fast" punch-in on a strong word, "slow" push-in that
+# follows the sentence, "reveal" (starts close, opens up to show the whole thing). Missing = from its kind.
+ZOOM_STYLES = ("fast", "slow", "reveal")
 BREATH_AFTER, BREATH_BEFORE = 0.30, 0.15         # natural pause kept around each kept phrase (s), silence only
 
 OV = 0.08                                   # audio crossfade assumed at every junction (s)
@@ -633,10 +636,11 @@ def fix_words_and_moments(words, splits, call: LLMCall):
     for mark in marks or []:
         try:
             i, kind = int(mark[0]), str(mark[1]).strip().lower()
+            style = str(mark[2]).strip().lower() if len(mark) > 2 else ""
         except Exception:
             continue
         if i in allowed and kind in ZOOM_KINDS and not any(m["i"] == i for m in moments):
-            moments.append({"i": i, "kind": kind})
+            moments.append({"i": i, "kind": kind, "style": style if style in ZOOM_STYLES else ""})
     if not pairs:
         return words, ([] if pairs == [] else [["error"]]), moments, usage
     shown = [dict(w) for w in words]; fixes = []
@@ -898,4 +902,25 @@ def process(words, duration, audio_path, video_path=None, run: int = 0, scene_cu
         log["revision_venta"] = info["sale_review"]
     return {"engine": VERSION, "duration": float(duration), "cut_duration": cut_duration, "passes": info["passes"],
             "splits": splits, "captions": caps, "caption_groups": caption_groups(caps), "log": log, "usage": info["usage"],
-            "moments": [{"i": m["i"], "kind": m["kind"], "s": words[m["i"]]["s"], "w": words[m["i"]]["w"]} for m in moments]}
+            "moments": [{"i": m["i"], "kind": m["kind"], "s": words[m["i"]]["s"], "w": words[m["i"]]["w"],
+                         "style": m.get("style", ""), "e": phrase_end(words, m["i"])} for m in moments]}
+
+
+PHRASE_GAP_SEC, PHRASE_MAX_SEC = 0.45, 4.0
+
+
+def phrase_end(words, i: int) -> float:
+    """End (source s) of the phrase that starts at word i: up to a sentence mark (. ! ?) or a pause, at most 4 s
+    (a "slow" zoom follows it)."""
+    start = float(words[i]["s"])
+    end = float(words[i]["e"])
+    for j in range(i, len(words)):
+        w = words[j]
+        if j > i and float(w["s"]) - end > PHRASE_GAP_SEC:
+            break
+        if float(w["e"]) - start > PHRASE_MAX_SEC:
+            break
+        end = float(w["e"])
+        if str(w["w"]).rstrip().endswith((".", "!", "?", "…")):
+            break
+    return round(end, 3)

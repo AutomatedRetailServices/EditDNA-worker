@@ -513,6 +513,15 @@ class ZoomKeyframe:
     scale: float
     kind: str = "key"
     origin: str = "ai"
+    # Smart zoom (PO 16 Nov 2026): where it pushes in and how it moves. x / y = offset of the picture's centre
+    # as a fraction of the frame (keyframes.py), towards her face or the product; ramp_in / ramp_out = seconds
+    # to reach the zoom and to come back (0 = the old 0.4 s); style = "punch" (fast), "push" (slow, follows the
+    # sentence), "reveal" (starts close, opens up), "" = the old soft push-in. Older apps ignore them.
+    x: float = 0.0
+    y: float = 0.0
+    ramp_in: float = 0.0
+    ramp_out: float = 0.0
+    style: str = ""
 
 
 @dataclass(frozen=True)

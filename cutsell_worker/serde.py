@@ -221,7 +221,26 @@ def _zoom_keyframe_from_dict(item: dict) -> ZoomKeyframe:
         source_asset_id=str(item.get("source_asset_id") or ""),
         source_time=source_time, duration=duration, scale=scale,
         kind=str(item.get("kind") or "key")[:32], origin=str(item.get("origin") or "ai")[:16],
+        x=_unit_offset(item.get("x")), y=_unit_offset(item.get("y")),
+        ramp_in=_ramp(item.get("ramp_in"), duration), ramp_out=_ramp(item.get("ramp_out"), duration),
+        style=str(item.get("style") or "")[:16],
     )
+
+
+def _unit_offset(value) -> float:
+    try:
+        number = float(value or 0.0)
+    except (TypeError, ValueError):
+        raise ValueError("zoom keyframe offset must be a number") from None
+    return round(max(-1.0, min(1.0, number)), 4)
+
+
+def _ramp(value, duration: float) -> float:
+    try:
+        number = float(value or 0.0)
+    except (TypeError, ValueError):
+        raise ValueError("zoom keyframe ramp must be a number") from None
+    return round(max(0.0, min(float(duration), number)), 3)
 
 
 def _text_overlay_from_dict(item: dict) -> TextOverlay:

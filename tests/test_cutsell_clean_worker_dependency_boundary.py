@@ -14,6 +14,11 @@ FORBIDDEN_HEAVY_IMPORTS = {
 }
 
 
+#: The one exception (PO 16 Nov 2026, smart zoom): OpenCV's built-in face finder, imported only inside a function and
+#: optional (no OpenCV = centred zooms, as before). Installed in the CPU worker image only.
+ALLOWED_OPTIONAL = {("cutsell_worker/zoom_framing.py", "cv2")}
+
+
 def test_clean_worker_does_not_import_legacy_heavy_ml_stack():
     violations = []
     for path in Path("cutsell_worker").glob("*.py"):
@@ -25,7 +30,7 @@ def test_clean_worker_does_not_import_legacy_heavy_ml_stack():
             elif isinstance(node, ast.ImportFrom) and node.module:
                 names = [node.module.split(".", 1)[0]]
             for name in names:
-                if name in FORBIDDEN_HEAVY_IMPORTS:
+                if name in FORBIDDEN_HEAVY_IMPORTS and (path.as_posix(), name) not in ALLOWED_OPTIONAL:
                     violations.append(f"{path}:{getattr(node, 'lineno', '?')} imports {name}")
     assert not violations, "Legacy heavy imports leaked into clean CutSell worker: " + "; ".join(violations)
 

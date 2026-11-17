@@ -139,7 +139,9 @@ def keyframe_to_dict(keyframe: TransformKeyframe) -> dict:
 
 
 def zoom_to_keyframes(zoom) -> tuple[TransformKeyframe, ...]:
-    """One Auto Zoom AI push-in (legacy `zoom_keyframes` item) as its four keyframes."""
+    """One Auto Zoom AI push-in (legacy `zoom_keyframes` item) as its four keyframes: 1.0 at t, the zoom at
+    t + ramp_in, held, back to 1.0 at t + d (ramp_out before). Smart zoom (16 Nov): the zoomed keyframes carry
+    the pan (x, y) towards her face / the product; no ramps given = the old 0.4 s (min(0.4, d / 3))."""
     get = (lambda key, default=None: zoom.get(key, default)) if isinstance(zoom, dict) else \
         (lambda key, default=None: getattr(zoom, key, default))
     t = float(get("source_time"))
@@ -147,14 +149,30 @@ def zoom_to_keyframes(zoom) -> tuple[TransformKeyframe, ...]:
     s = float(get("scale", 1.08) or 1.08)
     base_id = str(get("keyframe_id") or f"z{int(t * 1000)}")
     origin = "ai" if str(get("origin") or "ai") == "ai" else "user"
-    r = min(ZOOM_RAMP_SEC, d / 3.0)
-    times_scales = ((t, 1.0), (t + r, s), (t + d - r, s), (t + d, 1.0))
+    r_in, r_out = zoom_ramps(d, get("ramp_in"), get("ramp_out"))
+    x = clamp_offset(s, float(get("x", 0.0) or 0.0))
+    y = clamp_offset(s, float(get("y", 0.0) or 0.0))
+    steps = ((t, 1.0, 0.0, 0.0), (t + r_in, s, x, y), (t + d - r_out, s, x, y), (t + d, 1.0, 0.0, 0.0))
     return tuple(
         TransformKeyframe(keyframe_id=f"{base_id}-{n}", target="video", scale=round(scale, 4),
+                          x=round(px, 4), y=round(py, 4),
                           source_asset_id=str(get("source_asset_id") or ""), source_time=round(time, 3),
                           origin=origin, kind=str(get("kind") or "key")[:32], group=base_id)
-        for n, (time, scale) in enumerate(times_scales, start=1)
+        for n, (time, scale, px, py) in enumerate(steps, start=1)
     )
+
+
+def zoom_ramps(duration: float, ramp_in=None, ramp_out=None) -> tuple[float, float]:
+    """Seconds to zoom in and to come back for a zoom of `duration` (the iPhone uses the same rule)."""
+    d = max(0.0, float(duration))
+    default = min(ZOOM_RAMP_SEC, d / 3.0)
+    r_in = float(ramp_in) if ramp_in else default
+    r_out = float(ramp_out) if ramp_out else default
+    r_in, r_out = max(0.0, min(r_in, d)), max(0.0, min(r_out, d))
+    if r_in + r_out > d:                      # never past each other
+        k = d / (r_in + r_out)
+        r_in, r_out = r_in * k, r_out * k
+    return r_in, r_out
 
 
 def clamp_offset(scale: float, offset: float) -> float:

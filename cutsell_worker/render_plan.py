@@ -353,6 +353,13 @@ def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str],
     tombstones = tuple(getattr(draft, "zoom_removed", ()) or ())
     if tombstones and zooms:
         zooms = tuple(k for k in zooms if not is_tombstoned_zoom(k, tombstones))
+    if not keyframes_set and any(float(getattr(z, "x", 0) or 0) or float(getattr(z, "y", 0) or 0)
+                                 or float(getattr(z, "ramp_in", 0) or 0) or float(getattr(z, "ramp_out", 0) or 0)
+                                 for z in zooms):
+        # Smart zoom (16 Nov 2026): the AI zooms of a draft never opened in the editor are drawn through the same
+        # keyframe track as the editor's, so their aim (x / y) and their speed (ramp_in / ramp_out) reach the video.
+        from .keyframes import zoom_to_keyframes
+        transform = tuple(k for z in zooms for k in zoom_to_keyframes(z))
     durations = _source_durations(local_paths)
     # 21 Oct (CapCut keyframes): the video keyframes are ONE track over the whole edited video, so
     # the picture moves smoothly across joins; each clip draws its own piece of that track.
@@ -423,7 +430,7 @@ def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str],
             rotation=(int(getattr(draft, "rotation", 0) or 0) + int(getattr(clip, "rotation", 0) or 0)) % 360,
             audio_pre_roll=float(getattr(clip, "audio_pre_roll", 0.0) or 0.0) if rolls else 0.0,
             audio_post_roll=float(getattr(clip, "audio_post_roll", 0.0) or 0.0) if rolls else 0.0,
-            zoom_keyframes=() if keyframes_set else tuple(
+            zoom_keyframes=() if keyframes_set or transform else tuple(
                 (float(k.source_time), float(k.duration), float(k.scale))
                 for k in zooms if k.source_asset_id in ("", clip.source_asset_id)
             ),
