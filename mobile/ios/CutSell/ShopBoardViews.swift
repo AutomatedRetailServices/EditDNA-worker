@@ -189,6 +189,8 @@ struct ShopBoardFlowView: View {
     let onClose: () -> Void
 
     enum Step: Equatable { case add, shape(UUID), style, board, share }
+    /// "Add another photo or item" on Your board (PO 17 Nov): the add screen's button goes straight back to the board.
+    @State private var addingFromBoard = false
 
     @StateObject private var model: ShopBoardModel
     @State private var step: Step
@@ -207,7 +209,12 @@ struct ShopBoardFlowView: View {
         ZStack {
             switch step {
             case .add:
-                ShopAddProductsView(model: model, onBack: onClose, onShape: { step = .shape($0) }, onNext: { step = .style })
+                ShopAddProductsView(model: model, onBack: addingFromBoard ? { addingFromBoard = false; step = .board } : onClose,
+                                    onShape: { step = .shape($0) },
+                                    onNext: {
+                                        if addingFromBoard { addingFromBoard = false; step = .board } else { step = .style }
+                                    },
+                                    nextTitle: addingFromBoard ? "Back to my board" : "Choose a style")
             case .shape(let id):
                 if let item = model.items.first(where: { $0.id == id }) {
                     ShopShapeView(item: item, onBack: { step = .add }, onUse: { model.useShaped($0, for: id); step = .add },
@@ -221,7 +228,8 @@ struct ShopBoardFlowView: View {
                 })
             case .board:
                 ShopBoardScreen(model: model, onBack: { step = .style }, onTitle: { showingTitle = true },
-                                onBackground: { showingBackground = true }, onNext: { model.prepareShare(); step = .share })
+                                onBackground: { showingBackground = true }, onNext: { model.prepareShare(); step = .share },
+                                onAdd: { model.pinPlaces(); addingFromBoard = true; step = .add })
             case .share:
                 ShopShareView(model: model, onBack: { step = .board })
             }
@@ -244,6 +252,9 @@ struct ShopBoardFlowView: View {
         .onAppear { ShopFonts.registerIfNeeded() }
         // Saves itself (Edits › Shop boards) a moment after each change, and when the flow closes.
         .onReceive(model.objectWillChange.debounce(for: .seconds(1), scheduler: RunLoop.main)) { _ in saveBoard() }
+        // New products coming in never move the ones she already placed (PO 17 Nov).
+        .onChange(of: model.items.map { $0.cutout != nil }) { _, _ in model.reapplyPins() }
+        .onChange(of: model.busy) { _, _ in model.reapplyPins() }
         .onDisappear { saveBoard() }
     }
 
@@ -289,6 +300,7 @@ struct ShopAddProductsView: View {
     let onBack: () -> Void
     let onShape: (UUID) -> Void
     let onNext: () -> Void
+    var nextTitle: String = "Choose a style"
 
     @EnvironmentObject private var appState: AppState
     @State private var pickingPhotos = false
@@ -331,7 +343,7 @@ struct ShopAddProductsView: View {
                     .padding(.top, 26)
                     .padding(.bottom, 24)
                 }
-                ShopBigButton(title: "Choose a style", enabled: ShopBoardRules.canChooseStyle(model.items) && model.busy.isEmpty,
+                ShopBigButton(title: nextTitle, enabled: ShopBoardRules.canChooseStyle(model.items) && model.busy.isEmpty,
                               id: "shopChooseStyle", action: onNext)
                     .padding(.horizontal, 20)
                     .padding(.bottom, 24)
@@ -684,6 +696,8 @@ struct ShopBoardScreen: View {
     let onTitle: () -> Void
     let onBackground: () -> Void
     let onNext: () -> Void
+    /// Figma S4+ (PO 17 Nov, option 3): "Add another photo or item" opens Add products; back on the board after.
+    var onAdd: () -> Void = {}
     /// The product being moved by hand (Figma S4e 3053:196): blue outline, pinch and twist apply to it.
     @State private var selected: UUID?
 
@@ -732,7 +746,21 @@ struct ShopBoardScreen: View {
                     .padding(.horizontal, 24)
                     .padding(.top, 14)
                     .accessibilityIdentifier("shopMoveHint")
-                Spacer(minLength: 20)
+                if ShopBoardRules.remaining(model.items) > 0 {
+                    Button(action: onAdd) {
+                        HStack(spacing: 7) {
+                            Image(systemName: "plus.square").font(.system(size: 17, weight: .semibold))
+                            Text(L10n.tr("Add another photo or item")).font(CS.inter(14, .bold))
+                        }
+                        .foregroundStyle(Color(fixed: 0x1769FF))
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 10)
+                    .accessibilityIdentifier("shopAddAnother")
+                }
+                Spacer(minLength: 12)
                 ShopBigButton(title: "Next: share", id: "shopNextShare", action: onNext)
                     .padding(.horizontal, 20)
                     .padding(.bottom, 24)

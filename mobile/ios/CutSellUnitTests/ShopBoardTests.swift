@@ -959,3 +959,39 @@ final class ShopSizeLimitTests: XCTestCase {
         XCTAssertEqual(ShopAdjust.pinched(ShopAdjust(), by: 10).scale, ShopAdjust.scaleRange.upperBound) // no base: as before
     }
 }
+
+/// PO 17 Nov 2026 (Figma S4+ 3073:300): "Add another photo or item" on Your board -- the products already placed stay
+/// exactly where she put them while new ones come in.
+@MainActor
+final class ShopAddAnotherTests: XCTestCase {
+    func testNewProductsNeverMoveTheOnesAlreadyPlaced() throws {
+        let model = ShopBoardModel()
+        let colors: [UIColor] = [.red, .blue, .green]
+        model.items = colors.enumerated().map { i, c in ShopItem(source: .photos, cutout: ShopSynthetic.cutout(c, w: 100 + i * 20, h: 160)) }
+        let ids = model.items.map(\.id)
+        model.adjusts[ids[0]] = ShopAdjust(offset: CGSize(width: 30, height: 40), scale: 1.4, rotation: -8)
+        let board = ShopLayout.designSize
+        func frames() -> [UUID: (CGRect, Double)] {
+            let s = model.snapshot()
+            var out: [UUID: (CGRect, Double)] = [:]
+            for i in s.placements.indices { if let f = s.frame(at: i, board: board) { out[s.itemIDs[i]] = (f.rect, f.rotation) } }
+            return out
+        }
+        let before = frames()
+        model.pinPlaces()
+        model.items.append(ShopItem(source: .photos, cutout: ShopSynthetic.cutout(.orange, w: 140, h: 140)))
+        model.items.append(ShopItem(source: .photos, cutout: ShopSynthetic.cutout(.purple, w: 90, h: 180)))
+        model.reapplyPins()
+        let after = frames()
+        XCTAssertEqual(after.count, 5)
+        for id in ids {
+            let (a, ra) = try XCTUnwrap(after[id]), (b, rb) = try XCTUnwrap(before[id])
+            XCTAssertEqual(a.midX, b.midX, accuracy: 0.5); XCTAssertEqual(a.midY, b.midY, accuracy: 0.5)
+            XCTAssertEqual(a.width, b.width, accuracy: 0.5); XCTAssertEqual(ra, rb, accuracy: 0.01)
+        }
+        // Pins are let go once nothing is loading: her next moves are hers.
+        model.adjusts[ids[1]] = ShopAdjust(offset: CGSize(width: -50, height: 0))
+        model.reapplyPins()
+        XCTAssertEqual(model.adjusts[ids[1]]?.offset.width, -50)
+    }
+}

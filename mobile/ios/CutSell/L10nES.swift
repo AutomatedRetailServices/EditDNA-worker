@@ -1738,6 +1738,8 @@ enum L10nES {
         "Open TikTok": "Abrir TikTok",
         "A photo couldn't be opened. Try another one.": "No se pudo abrir una foto. Prueba con otra.",
         "Shop boards": "Shop boards",
+        "Add another photo or item": "Agregar otra foto o artículo",
+        "Back to my board": "Volver a mi board",
         "Shop\nboards": "Shop\nboards",
         "Yesterday": "Ayer",
         "Your boards, saved as you make them.": "Tus boards, guardados mientras los armas.",

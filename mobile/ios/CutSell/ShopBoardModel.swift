@@ -196,6 +196,37 @@ final class ShopBoardModel: ObservableObject {
 
     /// Your board's × (Figma S4x): the product leaves the board and every other product STAYS where it is now
     /// (the layout for one product fewer is different, so each one gets the hand edit that keeps it in place).
+    /// PO 17 Nov ("Add another photo or item" on Your board): the products already on the board stay exactly where she
+    /// put them while new ones come in. `pinPlaces()` remembers where each one is drawn; `reapplyPins()` puts them
+    /// back there each time the layout changes (a new photo ready); the pins are let go once nothing is loading.
+    private var pinned: [UUID: (rect: CGRect, rotation: Double)] = [:]
+
+    func pinPlaces() {
+        let board = ShopLayout.designSize
+        let now = snapshot()
+        pinned = [:]
+        for index in now.placements.indices {
+            if let placed = now.frame(at: index, board: board) { pinned[now.itemIDs[index]] = placed }
+        }
+    }
+
+    func reapplyPins() {
+        guard !pinned.isEmpty else { return }
+        let board = ShopLayout.designSize
+        let after = snapshot()
+        for index in after.placements.indices {
+            let itemID = after.itemIDs[index]
+            guard let old = pinned[itemID] else { continue }
+            let placement = after.placements[index]
+            let image = after.images[placement.itemIndex]
+            let aspect = CGFloat(image.width) / CGFloat(max(1, image.height))
+            let base = ShopLayout.frame(for: placement.slot, aspect: aspect, board: board)
+            let keep = ShopAdjust.keeping(old.rect, rotation: old.rotation, base: base, baseRotation: placement.slot.rotation)
+            if adjusts[itemID] != keep { adjusts[itemID] = keep }
+        }
+        if busy.isEmpty { pinned = [:] }
+    }
+
     func removeKeepingPlaces(_ id: UUID) {
         let board = ShopLayout.designSize
         let before = snapshot()

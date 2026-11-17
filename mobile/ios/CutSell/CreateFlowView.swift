@@ -113,8 +113,14 @@ struct CreateFlowView: View {
             showingGallery = true
         }
         .fullScreenCover(isPresented: $showingShopBoard) {
-            ShopBoardFlowView(onClose: { showingShopBoard = false })
-                .environmentObject(appState)
+            // PO 17 Nov: her saved boards first (and "+ New Shop board" there); none yet = straight to a new one.
+            if ShopBoardStore.shared.boards.isEmpty {
+                ShopBoardFlowView(onClose: { showingShopBoard = false })
+                    .environmentObject(appState)
+            } else {
+                ShopBoardsHubView(onClose: { showingShopBoard = false })
+                    .environmentObject(appState)
+            }
         }
         // Create · Mix row: the same Mix · Setup as New Mix in Plan.
         .fullScreenCover(isPresented: $showingMix) {

@@ -384,6 +384,40 @@ struct ShopBoardsTabView: View {
 }
 
 /// What the full-screen Shop board opens with (nil = a new board).
+/// PO 17 Nov 2026 ("no tenemos acceso a los ya hechos, solo si hacemos uno nuevo"): the Home card opens her saved
+/// Shop boards first (Figma S0 3074:270: the Shop boards tab with a back button instead of the bottom bar); "+ New Shop
+/// board" or a saved board opens the board itself. With no saved boards it goes straight to a new one.
+struct ShopBoardsHubView: View {
+    let onClose: () -> Void
+    @ObservedObject private var store = ShopBoardStore.shared
+    @EnvironmentObject private var appState: AppState
+    @State private var open: ShopBoardOpen?
+
+    var body: some View {
+        ZStack {
+            ScreenBackground()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ShopBackButton(action: onClose)
+                        .padding(.top, 8)
+                    WIScreenTitle(title: "Shop boards", subtitle: "Your boards, saved as you make them.")
+                        .padding(.top, 14)
+                    ShopBoardsGrid(onNew: { open = ShopBoardOpen(model: nil) },
+                                   onOpen: { id in if let model = store.open(id) { open = ShopBoardOpen(model: model) } })
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
+            }
+        }
+        .environment(\.colorScheme, .light)
+        .fullScreenCover(item: $open) { open in
+            ShopBoardFlowView(saved: open.model, onClose: { self.open = nil })
+                .environmentObject(appState)
+        }
+        .accessibilityIdentifier("shopBoardsHub")
+    }
+}
+
 struct ShopBoardOpen: Identifiable {
     let id = UUID()
     let model: ShopBoardModel?
