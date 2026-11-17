@@ -20,9 +20,8 @@ image = (
 app = modal.App("cutsell-smart-zoom-demo")
 VIDEO_KEY, GOLD_ID = "Yaskira/04.MP4", "Y04"
 OUT_PREFIX = "private-qa/smart-zoom/20261116"
-PRICES = {"in": 3.00, "write": 3.75, "read": 0.30, "out": 15.00}        # Sonnet 5.5, US$ per million
 LABELS = {"hook": "gancho", "product": "producto", "price": "precio", "cta": "compra", "look": "mira esto",
-          "benefit": "beneficio", "closeup": "de cerca", "point": "punto"}
+          "benefit": "beneficio", "closeup": "de cerca", "point": "punto", "micro": "micro"}
 MOVES = {"fast": "rapido", "slow": "lento", "reveal": "abre", "hold": "entra y sale en el siguiente punto"}
 
 
@@ -61,11 +60,13 @@ def demo(video: bytes) -> dict:
     draft = result.draft
     diag = draft.diagnostics["simple_engine"]
     usage = diag.get("usage") or [u for s in diag.get("sources", []) for u in (s.get("usage") or [])]
-    cost = sum((int(u.get("input_tokens") or 0) * PRICES["in"] + int(u.get("cache_creation_input_tokens") or 0) * PRICES["write"]
-                + int(u.get("cache_read_input_tokens") or 0) * PRICES["read"] + int(u.get("output_tokens") or 0) * PRICES["out"]) / 1e6
-               for u in usage if isinstance(u, dict))
+    from cutsell_worker.simple_engine import llm as _llm
+
+    cost = sum(_llm.call_cost(u)["usd"] for u in usage if isinstance(u, dict))
     zooms = []
     log = [row for s in diag.get("sources", []) for row in (s.get("zoom_moments") or [])]
+    vision = [r for r in log if r.get("zoom") in ("vision", "vision_failed")]
+    cost += sum(float(r.get("usd") or 0) for r in vision)
     for k in draft.zoom_keyframes:
         at = source_time_to_timeline(draft.selected, k.source_asset_id, k.source_time)
         row = next((r for r in log if r.get("zoom") == "added" and abs(float(r["s"]) - k.source_time) < 1.2), {})
@@ -93,7 +94,7 @@ def demo(video: bytes) -> dict:
                            "-movflags", "+faststart", str(final)], capture_output=True, text=True)
     if done.returncode != 0:
         return {"error": "labels: " + done.stderr[-300:], "cost_usd": round(cost, 4)}
-    return {"mp4": final.read_bytes(), "zooms": zooms, "cost_usd": round(cost, 4),
+    return {"mp4": final.read_bytes(), "zooms": zooms, "cost_usd": round(cost, 4), "vision": vision,
             "cut_sec": round(sum(c.end - c.start for c in draft.selected), 1), "kept": len(draft.selected)}
 
 
@@ -126,10 +127,11 @@ def main():
     out = demo.remote(s3.get_object(Bucket=bucket, Key=VIDEO_KEY)["Body"].read())
     if out.get("error"):
         raise SystemExit(f"RESULT failed: {out['error'][:200]} (cost ~US${out.get('cost_usd')})")
-    s3.put_object(Bucket=bucket, Key=f"{OUT_PREFIX}/y04-smart-zoom.mp4", Body=out.pop("mp4"), ContentType="video/mp4")
-    s3.put_object(Bucket=bucket, Key=f"{OUT_PREFIX}/y04-zooms.json", Body=json.dumps(out, ensure_ascii=False, indent=1),
+    s3.put_object(Bucket=bucket, Key=f"{OUT_PREFIX}/y04-smart-zoom-haiku.mp4", Body=out.pop("mp4"), ContentType="video/mp4")
+    s3.put_object(Bucket=bucket, Key=f"{OUT_PREFIX}/y04-zooms-haiku.json", Body=json.dumps(out, ensure_ascii=False, indent=1),
                   ContentType="application/json")
     kinds = {}
     for z in out["zooms"]:
         kinds[f"{z['kind']}/{z['style']}/{z['target']}"] = kinds.get(f"{z['kind']}/{z['style']}/{z['target']}", 0) + 1
-    print(f"RESULT ok: {len(out['zooms'])} zooms {kinds}; cut {out['cut_sec']}s; cost ~US${out['cost_usd']}")
+    seen = [{k: v.get(k) for k in ("zoom", "frames", "seen", "usd", "error")} for v in out.get("vision") or []]
+    print(f"RESULT ok: {len(out['zooms'])} zooms {kinds}; vision {seen}; cut {out['cut_sec']}s; cost ~US${out['cost_usd']}")

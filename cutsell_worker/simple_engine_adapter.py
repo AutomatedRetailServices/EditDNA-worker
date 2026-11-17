@@ -98,6 +98,34 @@ class NoSpeechError(ValueError):
 
 ENGINE_NAME = "simple"
 from . import zoom_framing as _zoom_framing  # noqa: E402
+from . import zoom_vision as _zoom_vision  # noqa: E402
+
+
+def _zoom_eyes(path: str, words: list, log: list):
+    """Claude Haiku looks at one frame per planned zoom (one call per video, PO 17 Nov) -> per moment a box or None.
+    What it cost goes into the zoom log (diagnostics); a failure only means the face finder is used instead."""
+    def eyes(moments):
+        frames, where = [], []
+        for n, moment in enumerate(moments):
+            jpeg = _zoom_vision.grab_jpeg(path, float(moment["s"]) + 0.2)     # the moment the zoom lands
+            if jpeg:
+                frames.append((jpeg, _zoom_vision.context_for(moment, words)))
+                where.append(n)
+        seen = [None] * len(moments)
+        if not frames:
+            return seen
+        try:
+            answers, usage = _zoom_vision.look(frames)
+        except Exception as exc:                  # noqa: BLE001
+            log.append({"zoom": "vision_failed", "error": exc.__class__.__name__})
+            return seen
+        log.append({"zoom": "vision", "model": usage.get("model"), "frames": len(frames),
+                    "input_tokens": usage.get("input_tokens"), "output_tokens": usage.get("output_tokens"),
+                    "usd": usage.get("usd"), "seen": sum(1 for a in answers if a)})
+        for n, answer in zip(where, answers):
+            seen[n] = answer
+        return seen
+    return eyes
 
 ProgressCallback = Callable[[str, int], None]
 
@@ -174,15 +202,17 @@ def _zoom_lead(moment, kind: str) -> float:
     return ZOOM_SLOW_LEAD if style == "slow" else float(ZOOM_MOVES[style][1])
 
 
-def _zoom_keyframes(source, moments, splits, log: list | None = None, *, face_at=None) -> list[ZoomKeyframe]:
+def _zoom_keyframes(source, moments, splits, log: list | None = None, *, face_at=None, eyes=None) -> list[ZoomKeyframe]:
     """Key moments -> zooms inside kept parts, away from joins, at most one every 3 s and never overlapping. A
     moment near the end of its part starts its zoom earlier (still inside the part) instead of being dropped.
-    `face_at(t)` (optional) finds her face at source second t, so the zoom goes to her face / the product.
+    `eyes(moments)` (optional, PO 17 Nov: Claude Haiku looks at one frame per zoom) -> per moment {"target", "box"} or
+    None: the zoom fills the screen with that box (the product, her face, her arm...). Where it has no answer,
+    `face_at(t)` (optional) finds her face at source second t (OpenCV), and the zoom goes to her face / below it.
     `log` (optional) gets one row per moment: the word, its kind and what became of it (diagnostics)."""
     from . import zoom_framing
 
     visible = [(float(s["start"]), float(s["end"])) for s in splits if s["visible"]]
-    out: list[ZoomKeyframe] = []
+    out: list = []          # the planned zooms (moment, t, length, scale, ramps, style), framed after the loop
 
     def note(moment, result, **more):
         if log is not None:
@@ -217,9 +247,7 @@ def _zoom_keyframes(source, moments, splits, log: list | None = None, *, face_at
         if room < ZOOM_MIN_SEC:
             note(moment, "part_too_short")
             continue
-        if out and (t - out[-1].source_time < ZOOM_MIN_SPACING_SEC
-                    or (out[-1].source_asset_id == source.source_asset_id
-                        and t < out[-1].source_time + out[-1].duration + ZOOM_GAP_SEC)):
+        if out and (t - out[-1]["t"] < ZOOM_MIN_SPACING_SEC or t < out[-1]["t"] + out[-1]["length"] + ZOOM_GAP_SEC):
             note(moment, "too_close")
             continue
         # A long (slow / reveal) zoom ends in time for the next moment, when that one is far enough to get its own.
@@ -228,27 +256,44 @@ def _zoom_keyframes(source, moments, splits, log: list | None = None, *, face_at
         if nxt is not None and nxt - ZOOM_GAP_SEC - t >= ZOOM_MIN_SEC:
             room = min(room, nxt - ZOOM_GAP_SEC - t)
         style, length, scale, ramp_in, ramp_out = _zoom_move(moment, kind, t, room)
-        face = None
-        if face_at is not None:
-            try:
-                face = face_at(t + min(length, 1.0) / 2)
-            except Exception:                    # noqa: BLE001 -- no face info: centred, as before
-                face = None
-        if kind == "closeup":
-            part = str(moment.get("part") or "face")
-            scale, x, y = zoom_framing.closeup(part, face)
-            target = f"closeup:{part}" if face else "centre"
+        out.append({"moment": moment, "kind": kind, "t": t, "length": length, "scale": scale, "ramp_in": ramp_in,
+                    "ramp_out": ramp_out, "style": style})
+    seen = [None] * len(out)
+    if eyes is not None and out:
+        try:
+            seen = list(eyes([z["moment"] for z in out]))[:len(out)]
+            seen += [None] * (len(out) - len(seen))
+        except Exception:                        # noqa: BLE001 -- no answer: the face finder, as before
+            seen = [None] * len(out)
+    zooms: list[ZoomKeyframe] = []
+    for z, eye in zip(out, seen):
+        moment, kind, t, length, scale = z["moment"], z["kind"], z["t"], z["length"], z["scale"]
+        if eye:
+            scale, x, y = zoom_framing.from_box(kind, eye["target"], eye["box"])
+            target = f"seen:{eye['target']}"
         else:
-            x, y = zoom_framing.pan_for(kind, face, scale)
-            target = ("face" if face and kind in zoom_framing.FACE_KINDS
-                      else "product" if face and kind in zoom_framing.PRODUCT_KINDS else "centre")
-        note(moment, "added", style=style, target=target)
-        out.append(ZoomKeyframe(
-            keyframe_id=f"z-{source.source_order:03d}-{len(out) + 1:02d}",
+            face = None
+            if face_at is not None:
+                try:
+                    face = face_at(t + min(length, 1.0) / 2)
+                except Exception:                # noqa: BLE001 -- no face info: centred, as before
+                    face = None
+            if kind == "closeup":
+                part = str(moment.get("part") or "face")
+                scale, x, y = zoom_framing.closeup(part, face)
+                target = f"closeup:{part}" if face else "centre"
+            else:
+                x, y = zoom_framing.pan_for(kind, face, scale)
+                target = ("face" if face and kind in zoom_framing.FACE_KINDS
+                          else "product" if face and kind in zoom_framing.PRODUCT_KINDS else "centre")
+        note(moment, "added", style=z["style"], target=target)
+        zooms.append(ZoomKeyframe(
+            keyframe_id=f"z-{source.source_order:03d}-{len(zooms) + 1:02d}",
             source_asset_id=source.source_asset_id, source_time=round(t, 3), duration=round(length, 3),
             scale=round(scale, 3), kind=kind, origin="ai", x=x, y=y,
-            ramp_in=round(ramp_in, 3), ramp_out=round(ramp_out, 3), style=style,
+            ramp_in=round(z["ramp_in"], 3), ramp_out=round(z["ramp_out"], 3), style=z["style"],
         ))
+    out = zooms
     return _with_micro_zooms(source, out, visible, log, face_at)
 
 
@@ -442,7 +487,8 @@ def process_with_simple_engine(
             zoom_log: list = []
             zoom_keyframes.extend(_zoom_keyframes(
                 source, out.get("moments") or [], out["splits"], zoom_log,
-                face_at=None if voice_only else (lambda t, _p=path: _zoom_framing.face_at(_p, t))))
+                face_at=None if voice_only else (lambda t, _p=path: _zoom_framing.face_at(_p, t)),
+                eyes=None if voice_only or not _zoom_vision.enabled() else _zoom_eyes(path, words, zoom_log)))
             if broll_sources:
                 engine_moments.extend({**dict(m), "source_asset_id": source.source_asset_id}
                                       for m in out.get("moments") or [] if isinstance(m, Mapping))

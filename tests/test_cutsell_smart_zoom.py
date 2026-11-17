@@ -197,7 +197,7 @@ def test_an_outline_zooms_in_on_one_point_and_back_out_on_the_next():
     assert first.source_time + first.ramp_in == pytest.approx(2.0)                   # lands on "primero"
     assert first.source_time + first.duration == pytest.approx(5.0 + 0.2)            # back out on "segundo"
     assert third.source_time + third.duration == pytest.approx(12.5 + 0.2)           # back out on "cuarto"
-    assert [r["zoom"] for r in log] == ["added", "zoom_out", "added", "zoom_out"]
+    assert [r["zoom"] for r in sorted(log, key=lambda r: r["s"])] == ["added", "zoom_out", "added", "zoom_out"]
     _, _, moments, _ = E.fix_words_and_moments(
         [{"w": "primero", "s": 0.0, "e": 0.4}], [{"start": 0.0, "end": 1.0, "visible": True}],
         lambda p: ('{"fix": [], "zoom": [[0, "point", "fast"]]}', {}))
@@ -229,3 +229,71 @@ def test_a_very_long_filter_graph_goes_through_a_script_file(tmp_path, monkeypat
     assert len(render._with_filter_scripts(cmd, str(tmp_path))[-4]) < 1000          # the graph moved to a file
     render._run(cmd, output_path=out)
     assert out.exists() and out.stat().st_size > 0
+
+
+# ------------------------------------------------------------------ Haiku looks at the frames (PO 17 Nov)
+from cutsell_worker import zoom_vision as V
+
+
+def test_haiku_answer_is_read_frame_by_frame_and_bad_boxes_are_ignored():
+    text = '{"frames": [{"n": 1, "target": "product", "box": [0.55, 0.45, 0.75, 0.70]},' \
+           ' {"n": 2, "target": "none", "box": [0, 0, 1, 1]}, {"n": 3, "target": "arm", "box": [0.2, 0.5, 0.2, 0.5]},' \
+           ' {"n": 9, "target": "face", "box": [0.4, 0.1, 0.6, 0.3]}]}'
+    assert V.parse(text, 3) == [{"target": "product", "box": (0.55, 0.45, 0.75, 0.70)}, None, None]
+    assert V.parse("not json", 2) == [None, None]
+
+
+def test_one_call_for_all_frames_with_what_she_says(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    sent = {}
+
+    class Reply:
+        status_code = 200
+
+        def json(self):
+            return {"content": [{"type": "text", "text": '{"frames": [{"n": 1, "target": "arm", "box": [0.2, 0.4, 0.5, 0.7]}]}'}],
+                    "usage": {"input_tokens": 2000, "output_tokens": 60}}
+
+    def post(url, json, headers, timeout):
+        sent.update(json)
+        return Reply()
+
+    answers, usage = V.look([(b"\xff\xd8jpeg", 'she says "mi piel" -- zoom reason: closeup (skin)')], post=post)
+    assert answers == [{"target": "arm", "box": (0.2, 0.4, 0.5, 0.7)}]
+    assert sent["model"] == "claude-haiku-5-5" and usage["usd"] == pytest.approx(0.00023)
+    kinds = [b["type"] for b in sent["messages"][0]["content"]]
+    assert kinds == ["text", "text", "image"]                               # instructions, what she says, the frame
+
+
+def test_what_haiku_saw_decides_where_and_how_deep():
+    # the bottle low on the right: the product zoom goes there and fills ~40 % of the height
+    s, x, y = F.from_box("product", "product", (0.55, 0.50, 0.75, 0.72))
+    assert 1.6 <= s <= 1.8 and x < 0 and y < 0                           # picture moves left and up: bottle centred
+    # "skin" while rubbing her arm: a deep close-up on the arm
+    s2, x2, _ = F.from_box("closeup", "arm", (0.15, 0.45, 0.45, 0.70))
+    assert s2 >= 1.35 and x2 > 0
+    # a hook on her face stays moderate
+    assert F.from_box("hook", "face", (0.4, 0.1, 0.6, 0.28))[0] <= 1.40
+    # a list point while she holds the product up: on the product
+    assert F.from_box("point", "product", (0.4, 0.3, 0.6, 0.6))[0] >= 1.2
+
+
+def test_the_zoom_uses_haiku_and_falls_back_to_the_face_finder():
+    log = []
+    moments = [_moment(2.0, "product", "fast"), _moment(8.0, "hook", "slow", e=10.0)]
+    keys = A._zoom_keyframes(SOURCE, moments, SPLITS, log, face_at=lambda t: FACE,
+                             eyes=lambda ms: [{"target": "product", "box": (0.55, 0.5, 0.75, 0.72)}, None])
+    main = [k for k in keys if k.kind != "micro"]
+    assert main[0].scale >= 1.6 and main[0].x < 0                         # what Haiku saw
+    assert main[1].y > 0                                                   # no answer: OpenCV face, as before
+    assert [r["target"] for r in log if r.get("zoom") == "added" and r["kind"] != "micro"] == ["seen:product", "face"]
+    broken = A._zoom_keyframes(SOURCE, moments, SPLITS, face_at=lambda t: FACE, eyes=lambda ms: 1 / 0)
+    assert [k.kind for k in broken if k.kind != "micro"] == ["product", "hook"]   # a failing call never breaks the cut
+
+
+def test_vision_can_be_switched_off(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setenv("CUTSELL_ZOOM_VISION", "0")
+    assert not V.enabled()
+    monkeypatch.setenv("CUTSELL_ZOOM_VISION", "1")
+    assert V.enabled()

@@ -160,3 +160,33 @@ def closeup(part: str, face: Optional[Face]) -> tuple[float, float, float]:
     x = clamp_offset(scale, CLOSEUP_SPOT[0] - 0.5 - (tx - 0.5) * scale)
     y = clamp_offset(scale, CLOSEUP_SPOT[1] - 0.5 - (ty - 0.5) * scale)
     return round(scale, 3), round(x, 4), round(y, 4)
+
+
+# ------------------------------------------------------------------ what Claude Haiku saw (zoom_vision, PO 17 Nov)
+
+#: kind -> (how much of the screen height the thing fills, the least and the most it may zoom, where it sits)
+SEEN_FILL = {
+    "face_kinds": (0.30, 1.12, 1.40, (0.5, 0.42)),
+    "product_kinds": (0.42, 1.20, 1.80, (0.5, 0.5)),
+    "closeup": (0.58, 1.35, 2.00, (0.5, 0.48)),
+    "micro": (0.25, 1.04, 1.08, (0.5, 0.45)),
+}
+
+
+def from_box(kind: str, target: str, box) -> tuple[float, float, float]:
+    """(scale, x, y) that fills the screen with `box` (left, top, right, bottom; fractions of the frame) the way a
+    zoom of this kind should: a product fills ~40 % of the height, a close-up ~60 %, a face moment stays moderate."""
+    left, top, right, bottom = (float(v) for v in box)
+    group = ("closeup" if kind == "closeup" else "micro" if kind == "micro"
+             else "product_kinds" if kind in PRODUCT_KINDS else "face_kinds")
+    if group == "face_kinds" and target not in ("face", "eyes", "lips", "hair"):
+        group = "product_kinds"          # a hook / list point while she shows the product: on the product
+    fill, least, most, (sx, sy) = SEEN_FILL[group]
+    width, height = max(right - left, 1e-3), max(bottom - top, 1e-3)
+    scale = fill / height
+    scale = min(scale, 0.92 / width, 0.92 / height)        # the whole thing stays on screen
+    scale = round(max(least, min(most, scale)), 3)
+    cx, cy = (left + right) / 2, (top + bottom) / 2
+    x = clamp_offset(scale, sx - 0.5 - (cx - 0.5) * scale)
+    y = clamp_offset(scale, sy - 0.5 - (cy - 0.5) * scale)
+    return scale, round(x, 4), round(y, 4)
