@@ -67,14 +67,24 @@ def _reference(photos):
     return board
 
 
-def _copy(style, photos):
+def _copy(style, photos, kinds):
     """Her board drawn from the map (the iPhone does the same with her own products)."""
     from PIL import ImageDraw, ImageFont
 
     board = _gradient(_rgb(style["background"]["top"]), _rgb(style["background"]["bottom"]))
-    slots = sorted(style["slots"], key=lambda s: -s["front"])          # back to front
-    for n, s in enumerate(slots):
-        _paste(board, photos[n % len(photos)], (s["x"] * W, s["y"] * H, s["w"] * W, s["h"] * H), s["rotation"])
+    # like the iPhone (ShopIdeaMatch): trimmed cut-outs, each into the biggest free place of its kind
+    trimmed = [p.convert("RGBA").crop(p.convert("RGBA").getchannel("A").getbbox()) for p in photos]
+    slots = style["slots"]
+    order = sorted(range(len(slots)), key=lambda i: -slots[i]["w"] * slots[i]["h"])
+    taken, pairs = set(), []
+    for n, kind in enumerate(kinds):
+        s = next((i for i in order if i not in taken and slots[i]["kind"] == kind), None)
+        s = s if s is not None else next((i for i in order if i not in taken), None)
+        if s is not None:
+            taken.add(s)
+            pairs.append((slots[s], trimmed[n]))
+    for s, photo in sorted(pairs, key=lambda p: -p[0]["front"]):    # back to front
+        _paste(board, photo, (s["x"] * W, s["y"] * H, s["w"] * W, s["h"] * H), s["rotation"])
     d = ImageDraw.Draw(board)
     for t in style["texts"]:
         path = SERIF if t["font"] in ("serif", "script", "display", "handwritten") else (SANS_B if t["weight"] in ("bold", "black") else SANS)
@@ -91,7 +101,7 @@ def _copy(style, photos):
 
 
 @app.function(image=image, secrets=[modal.Secret.from_name("cutsell-worker")], timeout=600, cpu=1.0, memory=1024)
-def demo(raw_photos: list[bytes]) -> dict:
+def demo(raw_photos: list[bytes], kinds: list[str]) -> dict:
     import base64
     import io
     import sys
@@ -110,7 +120,7 @@ def demo(raw_photos: list[bytes]) -> dict:
     seconds = round(__import__("time").time() - started, 1)
     if result["style"] is None:
         return {"error": result["error"], "cost_usd": result["cost_usd"], "seconds": seconds}
-    copy = _copy(result["style"], photos)
+    copy = _copy(result["style"], photos, kinds)
     sheet = Image.new("RGB", (W * 2 + 60, H + 140), (255, 255, 255))
     sheet.paste(reference, (20, 120))
     sheet.paste(copy, (W + 40, 120))
@@ -155,7 +165,9 @@ def main():
         or sorted(k for k in listed if k.startswith(IN_PREFIX + "in/") and k.endswith(".png"))[:4]
     if not keys:
         raise SystemExit("RESULT failed: no product photos found")
-    out = demo.remote([s3.get_object(Bucket=bucket, Key=k)["Body"].read() for k in keys])
+    kind_of = {"pants": "bottom", "skirt": "bottom", "shirt": "top", "sweater": "top", "top": "top", "shoes": "shoes", "bag": "bag"}
+    kinds = [next((v for n, v in kind_of.items() if n in k.rsplit("/", 1)[-1]), "other") for k in keys]
+    out = demo.remote([s3.get_object(Bucket=bucket, Key=k)["Body"].read() for k in keys], kinds)
     if out.get("error"):
         raise SystemExit(f"RESULT failed: {out['error']} (cost ~US${out.get('cost_usd')}, {out.get('seconds')} s)")
     s3.put_object(Bucket=bucket, Key=f"{OUT_PREFIX}/idea-sheet.jpg", Body=out.pop("sheet"), ContentType="image/jpeg")
