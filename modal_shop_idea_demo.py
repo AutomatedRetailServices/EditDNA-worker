@@ -17,7 +17,7 @@ image = (
     .add_local_file("cutsell_app/shop_idea_routes.py", remote_path="/root/shop_idea_routes.py")
 )
 app = modal.App("cutsell-shop-idea-demo")
-IN_PREFIX = "private-qa/shape-compare/20261112/inputs/"
+IN_PREFIX = "private-qa/shape-compare/20261112/"
 OUT_PREFIX = "private-qa/shop-idea/20261118"
 W, H = 1080, 1920
 SERIF = "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"
@@ -149,8 +149,10 @@ def main():
     s3 = boto3.client("s3", region_name=env.get("AWS_REGION", "us-east-1"), aws_access_key_id=env["AWS_ACCESS_KEY_ID"],
                       aws_secret_access_key=env["AWS_SECRET_ACCESS_KEY"], aws_session_token=env.get("AWS_SESSION_TOKEN") or None)
     bucket = env["S3_BUCKET"]
-    keys = sorted(o["Key"] for o in s3.list_objects_v2(Bucket=bucket, Prefix=IN_PREFIX).get("Contents", [])
-                  if o["Key"].lower().endswith((".jpg", ".jpeg", ".png", ".webp")))[:4]
+    listed = [o["Key"] for o in s3.list_objects_v2(Bucket=bucket, Prefix=IN_PREFIX).get("Contents", [])]
+    # the product cut-outs made on 12 Nov (clean shop photos); else the original photos
+    keys = sorted(k for k in listed if k.startswith(IN_PREFIX + "out/") and k.endswith("__nano-banana.png"))[:4] \
+        or sorted(k for k in listed if k.startswith(IN_PREFIX + "in/") and k.endswith(".png"))[:4]
     if not keys:
         raise SystemExit("RESULT failed: no product photos found")
     out = demo.remote([s3.get_object(Bucket=bucket, Key=k)["Body"].read() for k in keys])
