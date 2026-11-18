@@ -21,6 +21,8 @@ final class ShopBoardModel: ObservableObject {
     /// Items whose photo is being cut out now.
     @Published var busy: Set<UUID> = []
     @Published var template: ShopTemplate = .everydayChic
+    /// "My idea" (PO 18 Nov): her saved style -- an exact map of a board she liked; nil = Collage / Wear it.
+    @Published var idea: ShopIdeaStyle?
     @Published var bigTitle = ShopTemplate.everydayChic.bigTitle
     @Published var scriptLine = ShopTemplate.everydayChic.scriptLine
     /// The line at the bottom of the board ("YOUR BRAND" by default; PO 14 Nov, Figma S4d2 3062:193). Empty = none.
@@ -262,8 +264,26 @@ final class ShopBoardModel: ObservableObject {
 
     // MARK: Template, title, look
 
+    /// One of her styles (an exact copy of a board she liked): its places, colours and texts, with her products.
+    func use(_ idea: ShopIdeaStyle) {
+        if template == .wearIt { choose(.everydayChic) }
+        self.idea = idea
+        template = .everydayChic
+        bigTitle = idea.firstText("title") ?? ""
+        scriptLine = idea.firstText("subtitle") ?? ""
+        if let brand = idea.firstText("brand") { bottomLine = brand }
+        style = ShopBoardStyle(matchBackground: false, background: .color(idea.top), matchTitle: false,
+                               titleColor: ShopIdeaStyle.rgb(idea.texts.first?.color ?? "") ?? ShopRGB(hex: 0x0B1020))
+        variant = 0
+        clearHandEdits()
+    }
+
     func choose(_ template: ShopTemplate) {
         let leavingWearIt = self.template == .wearIt && template != .wearIt
+        if idea != nil {
+            idea = nil
+            style = ShopBoardStyle(background: .classic(template.background))
+        }
         self.template = template
         bigTitle = template.bigTitle
         scriptLine = template.scriptLine
@@ -326,7 +346,34 @@ final class ShopBoardModel: ObservableObject {
 
     // MARK: Drawing
 
+    /// A style of hers on the carousel (its own words, no hand edits), or her board in it.
+    func snapshot(idea: ShopIdeaStyle, handEdited: Bool = false) -> ShopBoardSnapshot {
+        let usable = items.filter { $0.cutout != nil }
+        let placements = ShopIdeaMatch.placements(idea, kinds: usable.map(\.kind))
+        let ids = usable.map(\.id)
+        let placedIDs = placements.map { ids[$0.itemIndex] }
+        // Her own background choice wins once she changes it; until then, the idea's exact top / bottom colours.
+        var top = idea.top, bottom = idea.bottom
+        var texture: ShopTexture?
+        if handEdited, style.background != .color(idea.top) {
+            let colors = style.backgroundColors(palette: palette)
+            top = colors.top; bottom = colors.bottom
+            if case .texture(let t) = style.background { texture = t }
+        }
+        return ShopBoardSnapshot(
+            images: usable.compactMap(\.cutout), placements: placements, itemIDs: placedIDs,
+            adjusts: handEdited ? placedIDs.map { adjusts[$0] ?? ShopAdjust() } : placedIDs.map { _ in ShopAdjust() },
+            drawOrder: ShopDrawOrder.order(itemIDs: placedIDs, raised: handEdited ? raised : []),
+            titleAdjust: ShopAdjust(), top: top, bottom: bottom, texture: texture,
+            textureMatched: false, photo: nil,
+            bigTitle: handEdited ? bigTitle : (idea.firstText("title") ?? ""),
+            scriptLine: handEdited ? scriptLine : (idea.firstText("subtitle") ?? ""),
+            bottomLine: handEdited ? bottomLine : (idea.firstText("brand") ?? ""),
+            wearIt: false, pair: fontPair, titleColor: style.titleColor, ideaTexts: idea.texts)
+    }
+
     func snapshot(template override: ShopTemplate? = nil) -> ShopBoardSnapshot {
+        if override == nil, let idea { return snapshot(idea: idea, handEdited: true) }
         let tmpl = override ?? template
         var look = style
         var title = bigTitle, script = scriptLine
@@ -387,6 +434,8 @@ struct ShopBoardSnapshot {
     var wearIt = false
     var pair: ShopFontPair
     var titleColor: ShopRGB
+    /// "My idea": the texts exactly where the idea had them (instead of the title block and the brand line).
+    var ideaTexts: [ShopIdeaStyle.Text] = []
 
     var isDark: Bool { top.mixed(bottom, 0.5).luminance < 0.25 }
 
@@ -483,7 +532,12 @@ struct ShopBoardCanvas: View {
                         .position(x: frame.midX, y: frame.midY)
                 }
             }
-            texts(sx: sx, sy: sy)
+            if snapshot.ideaTexts.isEmpty {
+                texts(sx: sx, sy: sy)
+            } else {
+                ShopIdeaTexts(texts: snapshot.ideaTexts, title: snapshot.bigTitle, subtitle: snapshot.scriptLine,
+                              brand: snapshot.bottomLine, width: width)
+            }
         }
         .frame(width: width, height: height)
         .clipped()

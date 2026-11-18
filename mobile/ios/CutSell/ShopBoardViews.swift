@@ -643,11 +643,21 @@ struct ShopStyleView: View {
     let onBack: () -> Void
     let onNext: () -> Void
     /// PO 18 Nov 2026 (Figma S3p-B 3078:319, option B): swipe left / right through HER board in each style, like
-    /// picking a wallpaper; the cards beside peek in. Only Collage and Wear it (PO: "solo collage, wear it and the
-    /// upload the idea"); the old colour variants stay readable for boards saved with them, but are not offered.
-    @State private var page: ShopTemplate?
+    /// picking a wallpaper; the cards beside peek in. Only Collage, Wear it, her saved styles and "＋ My idea"
+    /// (PO: "solo collage, wear it and the upload the idea"); the old colour variants still open for saved boards.
+    @EnvironmentObject private var appState: AppState
+    @ObservedObject private var ideas = ShopIdeaStore.shared
+    @State private var page: Page?
+    @State private var pickingIdea = false
+    @State private var reading: ShopIdeaPicture?
+    @State private var renaming: ShopIdeaStyle?
+    @State private var newName = ""
+
+    enum Page: Hashable { case template(ShopTemplate), style(UUID), add }
 
     static let choices: [ShopTemplate] = [.everydayChic, .wearIt]
+
+    private var pages: [Page] { Self.choices.map { .template($0) } + ideas.styles.map { .style($0.id) } + [.add] }
 
     var body: some View {
         ZStack {
@@ -662,13 +672,13 @@ struct ShopStyleView: View {
                     let width = min(geo.size.width - 104, height * 9 / 16)
                     ScrollView(.horizontal, showsIndicators: false) {
                         LazyHStack(spacing: 14) {
-                            ForEach(Self.choices) { template in
-                                card(template, width: width)
+                            ForEach(pages, id: \.self) { p in
+                                card(p, width: width)
                                     .frame(width: width)
                                     .scrollTransition { content, phase in
                                         content.scaleEffect(phase.isIdentity ? 1 : 0.86).opacity(phase.isIdentity ? 1 : 0.55)
                                     }
-                                    .id(template)
+                                    .id(p)
                             }
                         }
                         .scrollTargetLayout()
@@ -681,58 +691,147 @@ struct ShopStyleView: View {
                 .padding(.top, 14)
                 nameAndDots
                     .padding(.top, 10)
-                ShopBigButton(title: "Create board", id: "shopCreateBoard", action: onNext)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 14)
-                    .padding(.bottom, 24)
+                ShopBigButton(title: page == .add ? "Upload an idea" : "Create board", id: "shopCreateBoard") {
+                    if page == .add { pickingIdea = true } else { onNext() }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 14)
+                .padding(.bottom, 24)
             }
         }
         .onAppear {
+            if let idea = model.idea, ideas.styles.contains(where: { $0.id == idea.id }) { page = .style(idea.id); return }
             let start = Self.choices.contains(model.template) ? model.template : .everydayChic
-            if start != model.template { model.choose(start) }
-            page = start
+            if model.idea != nil || start != model.template { model.choose(start) }
+            page = .template(start)
         }
-        .onChange(of: page) { _, now in
-            if let now, now != model.template { model.choose(now) }
+        .onChange(of: page) { _, now in apply(now) }
+        .sheet(isPresented: $pickingIdea) {
+            ShopPhotoPicker(limit: 1) { providers in
+                pickingIdea = false
+                guard let provider = providers.first, provider.canLoadObject(ofClass: UIImage.self) else { return }
+                provider.loadObject(ofClass: UIImage.self) { object, _ in
+                    guard let image = object as? UIImage else { return }
+                    Task { @MainActor in reading = ShopIdeaPicture(image: image) }
+                }
+            }
+            .ignoresSafeArea()
+        }
+        .fullScreenCover(item: $reading) { picture in
+            ShopIdeaFlowView(model: model, picture: picture.image, onClose: { reading = nil }, onUse: { style in
+                reading = nil
+                model.use(style)
+                page = .style(style.id)
+            })
+            .environmentObject(appState)
+        }
+        .alert(L10n.tr("Rename style"), isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+            TextField(L10n.tr("Name"), text: $newName)
+            Button(L10n.tr("Save")) { if let r = renaming { ideas.rename(r.id, to: newName) }; renaming = nil }
+            Button(L10n.tr("Cancel"), role: .cancel) { renaming = nil }
         }
         .accessibilityIdentifier("shopChooseStyleScreen")
     }
 
-    private func card(_ template: ShopTemplate, width: CGFloat) -> some View {
-        ShopBoardCanvas(snapshot: model.snapshot(template: template), width: width)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .shadow(color: Color(fixed: 0x1769FF).opacity(0.18), radius: 15, x: 0, y: 14)
-            .accessibilityLabel(L10n.tr(Self.name(template)))
-            .accessibilityAddTraits(page == template ? .isSelected : [])
-            .accessibilityIdentifier("shopTemplate_\(template.rawValue)")
-            .onTapGesture { withAnimation(.snappy) { page = template } }
+    private func apply(_ now: Page?) {
+        switch now {
+        case .template(let t):
+            if model.idea != nil || t != model.template { model.choose(t) }
+        case .style(let id):
+            if let style = ideas.styles.first(where: { $0.id == id }), model.idea?.id != id { model.use(style) }
+        default: break
+        }
+    }
+
+    @ViewBuilder
+    private func card(_ p: Page, width: CGFloat) -> some View {
+        switch p {
+        case .template(let template):
+            ShopBoardCanvas(snapshot: model.snapshot(template: template), width: width)
+                .shopCarouselCard(selected: page == p)
+                .accessibilityLabel(L10n.tr(Self.name(template)))
+                .accessibilityIdentifier("shopTemplate_\(template.rawValue)")
+                .onTapGesture { withAnimation(.snappy) { page = p } }
+        case .style(let id):
+            if let style = ideas.styles.first(where: { $0.id == id }) {
+                ShopBoardCanvas(snapshot: model.snapshot(idea: style), width: width)
+                    .shopCarouselCard(selected: page == p)
+                    .accessibilityLabel(style.name)
+                    .accessibilityIdentifier("shopMyStyle")
+                    .onTapGesture { withAnimation(.snappy) { page = p } }
+                    .contextMenu {
+                        Button(L10n.tr("Rename"), systemImage: "pencil") { newName = style.name; renaming = style }
+                        Button(L10n.tr("Delete"), systemImage: "trash", role: .destructive) {
+                            ideas.delete(id)
+                            if page == p { page = .template(.everydayChic) }
+                        }
+                    }
+            }
+        case .add:
+            Button { pickingIdea = true } label: {
+                VStack(spacing: 12) {
+                    Image(systemName: "photo.badge.plus").font(.system(size: 40, weight: .semibold))
+                        .foregroundStyle(Color(fixed: 0x1769FF))
+                    Text(L10n.tr("My idea")).font(CS.inter(20, .heavy)).foregroundStyle(Color(fixed: 0x0B1020))
+                    Text(L10n.tr("Upload a screenshot of a board you like. We copy it exactly, with your products."))
+                        .font(CS.inter(13, .medium)).foregroundStyle(Color(fixed: 0x6B7385))
+                        .multilineTextAlignment(.center).padding(.horizontal, 18)
+                    Text(L10n.tr("About 2 cents · saved on this iPhone")).font(CS.inter(11, .bold))
+                        .foregroundStyle(Color(fixed: 0x1769FF))
+                }
+                .frame(width: width, height: width * 16 / 9)
+                .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(.white))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Color(fixed: 0x1769FF), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])))
+                .shadow(color: Color(fixed: 0x1769FF).opacity(0.14), radius: 15, x: 0, y: 14)
+            }
+            .buttonStyle(BubblePress())
+            .accessibilityIdentifier("shopMyIdea")
+        }
     }
 
     static func name(_ template: ShopTemplate) -> String { template == .wearIt ? "Wear it" : "Collage" }
 
+    private func label(_ p: Page) -> (icon: String, name: String) {
+        switch p {
+        case .template(let t): (t == .wearIt ? "figure.stand" : "square.grid.2x2", L10n.tr(Self.name(t)))
+        case .style(let id): ("sparkles", ideas.styles.first { $0.id == id }?.name ?? L10n.tr("My style"))
+        case .add: ("plus", L10n.tr("My idea"))
+        }
+    }
+
     /// The style's name in a white pill (with its icon), the page dots, then the list of styles.
     private var nameAndDots: some View {
-        let current = page ?? model.template
+        let current = page ?? .template(model.template)
+        let shown = label(current)
         return VStack(spacing: 10) {
             HStack(spacing: 6) {
-                Image(systemName: current == .wearIt ? "figure.stand" : "square.grid.2x2")
-                    .font(.system(size: 13, weight: .bold)).foregroundStyle(Color(fixed: 0x1769FF))
-                Text(L10n.tr(Self.name(current))).font(CS.inter(13, .bold)).foregroundStyle(Color(fixed: 0x0B1020))
+                Image(systemName: shown.icon).font(.system(size: 13, weight: .bold)).foregroundStyle(Color(fixed: 0x1769FF))
+                Text(verbatim: shown.name).font(CS.inter(13, .bold)).foregroundStyle(Color(fixed: 0x0B1020)).lineLimit(1)
             }
             .padding(.horizontal, 14).padding(.vertical, 7)
             .background(Capsule().fill(.white).shadow(color: Color(fixed: 0x1769FF).opacity(0.14), radius: 6, x: 0, y: 4))
             .accessibilityIdentifier("shopStyleName")
             HStack(spacing: 7) {
-                ForEach(Self.choices) { t in
-                    Capsule().fill(t == current ? Color(fixed: 0x1769FF) : Color(fixed: 0xC7D1E6))
-                        .frame(width: t == current ? 18 : 7, height: 7)
+                ForEach(pages, id: \.self) { p in
+                    Capsule().fill(p == current ? Color(fixed: 0x1769FF) : Color(fixed: 0xC7D1E6))
+                        .frame(width: p == current ? 18 : 7, height: 7)
                 }
             }
             .animation(.snappy, value: current)
-            Text(Self.choices.map { L10n.tr(Self.name($0)) }.joined(separator: "  ·  "))
+            Text(verbatim: (Self.choices.map { L10n.tr(Self.name($0)) } + (ideas.styles.isEmpty ? [] : [L10n.tr("My styles")])
+                            + ["＋ " + L10n.tr("My idea")]).joined(separator: "  ·  "))
                 .font(CS.inter(11, .semibold)).foregroundStyle(Color(fixed: 0x6B7385))
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+private extension View {
+    func shopCarouselCard(selected: Bool) -> some View {
+        clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: Color(fixed: 0x1769FF).opacity(0.18), radius: 15, x: 0, y: 14)
+            .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 

@@ -1014,3 +1014,69 @@ final class ShopStyleCarouselTests: XCTestCase {
         XCTAssertTrue(ShopTemplate.allCases.contains(.trendyInspo))       // still readable for saved boards
     }
 }
+
+/// PO 18 Nov 2026 ("up load an idea es para replicar EXACT SAME THING"): her products go into the idea's own places.
+@MainActor
+final class ShopIdeaTests: XCTestCase {
+    private func idea() throws -> ShopIdeaStyle {
+        let json = #"""
+        {"background": {"top": "#FCE0E5", "bottom": "#F8D0D8"},
+         "texts": [{"text": "glow kit", "role": "title", "x": 0.07, "y": 0.05, "w": 0.6, "h": 0.09, "color": "#9E2654",
+                    "font": "display", "weight": "black", "align": "left", "uppercase": false, "rotation": 0},
+                   {"text": "@her.shop", "role": "brand", "x": 0.3, "y": 0.92, "w": 0.4, "h": 0.03, "color": "#9E2654",
+                    "font": "sans", "weight": "bold", "align": "center", "uppercase": false, "rotation": 0}],
+         "slots": [{"kind": "shoes", "x": 0.2, "y": 0.62, "w": 0.5, "h": 0.25, "rotation": 0, "front": 1},
+                   {"kind": "top", "x": 0.09, "y": 0.2, "w": 0.45, "h": 0.32, "rotation": -4, "front": 2}]}
+        """#
+        return try JSONDecoder().decode(ShopIdeaStyle.self, from: Data(json.utf8))
+    }
+
+    func testTheServerMapIsReadAndGetsAnIdAndAName() throws {
+        let style = try idea()
+        XCTAssertEqual(style.slots.count, 2)
+        XCTAssertEqual(style.name, "My style")
+        XCTAssertEqual(style.top, ShopRGB(hex: 0xFCE0E5))
+        XCTAssertEqual(style.firstText("brand"), "@her.shop")
+    }
+
+    func testEachProductGoesToThePlaceOfItsKindAndExtrasGoSmallAtTheBottom() throws {
+        let style = try idea()
+        let placed = ShopIdeaMatch.placements(style, kinds: [.top, .shoes, .bag])
+        XCTAssertEqual(placed.count, 3)
+        let shirt = try XCTUnwrap(placed.first { $0.itemIndex == 0 }).slot
+        XCTAssertEqual(shirt.center.x, (0.09 + 0.225) * 390, accuracy: 0.5)            // the idea's top place
+        XCTAssertEqual(shirt.rotation, -4)
+        let shoes = try XCTUnwrap(placed.first { $0.itemIndex == 1 }).slot
+        XCTAssertEqual(shoes.center.y, (0.62 + 0.125) * 844, accuracy: 0.5)            // the idea's shoes place
+        let bag = try XCTUnwrap(placed.first { $0.itemIndex == 2 }).slot
+        XCTAssertEqual(bag.size, CGSize(width: 78, height: 78))                        // more than the idea: small
+        XCTAssertEqual(placed.map(\.itemIndex), [0, 1, 2])                             // back to front: front 2, 1, extra
+    }
+
+    func testUsingAStyleTakesItsWordsAndChoosingCollageLeavesIt() throws {
+        let model = ShopBoardModel()
+        model.items = [ShopItem(source: .photos, cutout: ShopSynthetic.cutout(.blue, w: 100, h: 140))]
+        model.use(try idea())
+        XCTAssertEqual(model.bigTitle, "glow kit")
+        XCTAssertEqual(model.bottomLine, "@her.shop")
+        let snap = model.snapshot()
+        XCTAssertEqual(snap.ideaTexts.count, 2)
+        XCTAssertEqual(snap.top, ShopRGB(hex: 0xFCE0E5))
+        model.choose(.everydayChic)
+        XCTAssertNil(model.idea)
+        XCTAssertTrue(model.snapshot().ideaTexts.isEmpty)
+    }
+
+    func testStylesAreSavedOnThePhone() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("styles-\(UUID().uuidString)")
+        let store = ShopIdeaStore(folder: folder)
+        var style = try idea()
+        style.name = "Glow kit"
+        store.save(style, picture: nil)
+        XCTAssertEqual(ShopIdeaStore(folder: folder).styles.map(\.name), ["Glow kit"])
+        store.rename(style.id, to: "Beach day")
+        XCTAssertEqual(store.styles.first?.name, "Beach day")
+        store.delete(style.id)
+        XCTAssertTrue(store.styles.isEmpty)
+    }
+}

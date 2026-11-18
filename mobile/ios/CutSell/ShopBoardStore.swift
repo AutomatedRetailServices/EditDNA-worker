@@ -52,6 +52,8 @@ struct ShopBoardRecord: Codable, Identifiable, Equatable {
     /// Wear it with a video (14 Nov): "background.mov" in the board's folder and its length. Missing before.
     var hasVideoBackground: Bool?
     var videoDuration: Double?
+    /// "My idea" (18 Nov): the style of hers this board uses (its exact map). Missing before / for Collage, Wear it.
+    var idea: ShopIdeaStyle?
 
     /// "CUTSELL · Everyday chic" under the tile.
     var displayTitle: String {
@@ -141,7 +143,8 @@ final class ShopBoardStore: ObservableObject {
             affiliateLink: model.affiliateLink, caption: model.caption, items: items,
             adjusts: model.adjusts.mapValues { .init(dx: $0.offset.width, dy: $0.offset.height, scale: $0.scale, rotation: $0.rotation) },
             raised: model.raised, hasPhotoBackground: model.photoBackground != nil,
-            hasVideoBackground: model.videoBackground != nil, videoDuration: model.videoBackground == nil ? nil : model.videoDuration)
+            hasVideoBackground: model.videoBackground != nil, videoDuration: model.videoBackground == nil ? nil : model.videoDuration,
+            idea: model.idea)
         boards.removeAll { $0.id == record.id }
         boards.insert(record, at: 0)
         if thumbnail != nil { thumbnailVersion[record.id, default: 0] += 1 }
@@ -192,6 +195,7 @@ final class ShopBoardStore: ObservableObject {
                                      matchTitle: record.matchTitle, titleColor: record.titleColor)
         model.affiliateLink = record.affiliateLink
         model.caption = record.caption
+        model.idea = record.idea
         if record.hasPhotoBackground {
             model.photoBackground = UIImage(contentsOfFile: dir.appendingPathComponent("background.jpg").path)
         }
