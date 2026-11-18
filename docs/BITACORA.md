@@ -146,7 +146,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
   - Choose a style en carrusel (Figma S3p-B 3078:319): Collage, Wear it, sus estilos guardados y ＋ My idea.
   - My idea (Figma S3i-C 3078:418 / S3i-D 3078:499): sube la captura de un board y la app copia fondo, textos y
     lugares con SUS productos (por tipo). Se guarda en el iPhone. Usa el servidor `80a64109` (en vivo 18 nov).
-  - Conocido: los lugares de los productos salen corridos en la prueba real; arreglo en el servidor.
+  - Prueba real: cada producto cae 98-100 % sobre su lugar; la IA no ve giros pequeños (4-6°).
 - **Pruebas:** 111 pruebas de la app, 0 fallas (CI `44370166492`).
 - **Diseño:** docs/design-audit/build-99/cambios.md.
 

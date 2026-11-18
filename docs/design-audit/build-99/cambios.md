@@ -17,5 +17,7 @@
 - ＋ My idea: ella sube la captura de un board; el servidor (`POST /v1/shop/idea`) devuelve el mapa (fondo, textos,
   lugares de productos por tipo) y la app pone SUS productos en esos lugares, por tipo. Se guarda como estilo en el
   iPhone (no en el servidor). Mantener presionado: Rename / Delete.
-- Conocido (18 nov): en la prueba real los textos y el fondo salieron bien, pero los lugares de los productos
-  salieron corridos y más chicos. Se arregla en el servidor (sin build nuevo).
+- Prueba real (18 nov, US$0.0135): fondo y textos bien; cada producto cae 98-100 % sobre su lugar real (pants,
+  shirt, shoes, sweater, por tipo como la app). Diferencias: la IA leyó los productos derechos (en la captura tenían
+  4-6° de giro) y el título sale un poco más chico. La primera hoja salió mal por mi dibujo de prueba (fotos sin
+  recortar y en otro orden), no por la IA.
