@@ -342,7 +342,7 @@ struct ShopIdeaFlowView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             Text(L10n.tr(failed ? "We couldn't read this picture. Try another screenshot with the products easy to see."
-                                : "About 2 cents · saved on this iPhone only"))
+                                : "Saved on this iPhone only"))
                 .font(CS.inter(12, .medium))
                 .foregroundStyle(Color(fixed: failed ? 0xE5484D : 0x6B7385))
                 .multilineTextAlignment(.center).frame(maxWidth: .infinity)

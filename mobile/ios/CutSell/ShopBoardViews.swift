@@ -776,7 +776,7 @@ struct ShopStyleView: View {
                     Text(L10n.tr("Upload a screenshot of a board you like. We copy it exactly, with your products."))
                         .font(CS.inter(13, .medium)).foregroundStyle(Color(fixed: 0x6B7385))
                         .multilineTextAlignment(.center).padding(.horizontal, 18)
-                    Text(L10n.tr("About 2 cents · saved on this iPhone")).font(CS.inter(11, .bold))
+                    Text(L10n.tr("Saved on this iPhone only")).font(CS.inter(11, .bold))
                         .foregroundStyle(Color(fixed: 0x1769FF))
                 }
                 .frame(width: width, height: width * 16 / 9)
