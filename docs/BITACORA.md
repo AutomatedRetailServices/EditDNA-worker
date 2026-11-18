@@ -34,7 +34,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
-| 98 | 2026-11-17 | ✅ subido (pedido) | feature/shop-board | `f92efc93` | "Add another photo or item" + boards guardados desde Home + mismo límite de tamaño |
+| 98 | 2026-11-17 19:13 | ✅ subido 19:13 (pedido `bc4e282a`) | feature/shop-board | `f92efc93` | "Add another photo or item" + boards guardados desde Home + mismo límite de tamaño |
 | 97 | 2026-11-17 16:16 | ✅ subido 16:16 (pedido `6baa8a27`) | feature/shop-board | `de036d94` | Sin Shape it + zoom inteligente (velocidad y punto del zoom del motor) |
 | 94 | 2026-11-15 14:41 | ✅ subido | feature/shop-board | `94577d79` (pedido `48003e28`) | Wear it con video de fondo (hasta 12 s, con sonido) |
 | 93 | 2026-11-14 16:56 | ✅ subido | feature/shop-board | `d3e8aaa3` (pedido `b9f18d7e`) | Wear it + quitar productos + YOUR BRAND editable + bocina del B-roll |
