@@ -642,49 +642,97 @@ struct ShopStyleView: View {
     @ObservedObject var model: ShopBoardModel
     let onBack: () -> Void
     let onNext: () -> Void
+    /// PO 18 Nov 2026 (Figma S3p-B 3078:319, option B): swipe left / right through HER board in each style, like
+    /// picking a wallpaper; the cards beside peek in. Only Collage and Wear it (PO: "solo collage, wear it and the
+    /// upload the idea"); the old colour variants stay readable for boards saved with them, but are not offered.
+    @State private var page: ShopTemplate?
+
+    static let choices: [ShopTemplate] = [.everydayChic, .wearIt]
 
     var body: some View {
         ZStack {
             HomeBackdrop()
             VStack(alignment: .leading, spacing: 0) {
                 ShopHeader(title: "Choose a style", onBack: onBack)
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(L10n.tr("Templates")).font(CS.inter(13, .bold)).foregroundStyle(Color(fixed: 0x6B7385))
-                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 12) {
-                            // Figma S3w (3064:206): the 4th tile is Wear it (was "+ More soon").
-                            ForEach(ShopTemplate.allCases) { template in templateCard(template) }
+                Text(L10n.tr("Swipe to see your board in each style"))
+                    .font(CS.inter(13, .medium)).foregroundStyle(Color(fixed: 0x6B7385))
+                    .padding(.horizontal, 24).padding(.top, 6)
+                GeometryReader { geo in
+                    let height = max(200, geo.size.height - 12)
+                    let width = min(geo.size.width - 104, height * 9 / 16)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(spacing: 14) {
+                            ForEach(Self.choices) { template in
+                                card(template, width: width)
+                                    .frame(width: width)
+                                    .scrollTransition { content, phase in
+                                        content.scaleEffect(phase.isIdentity ? 1 : 0.86).opacity(phase.isIdentity ? 1 : 0.55)
+                                    }
+                                    .id(template)
+                            }
                         }
-                        .padding(.top, 12)
+                        .scrollTargetLayout()
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.top, 12)
-                    .padding(.bottom, 20)
+                    .scrollTargetBehavior(.viewAligned)
+                    .scrollPosition(id: $page)
+                    .contentMargins(.horizontal, (geo.size.width - width) / 2, for: .scrollContent)
+                    .frame(height: height)
                 }
+                .padding(.top, 14)
+                nameAndDots
+                    .padding(.top, 10)
                 ShopBigButton(title: "Create board", id: "shopCreateBoard", action: onNext)
                     .padding(.horizontal, 20)
+                    .padding(.top, 14)
                     .padding(.bottom, 24)
             }
+        }
+        .onAppear {
+            let start = Self.choices.contains(model.template) ? model.template : .everydayChic
+            if start != model.template { model.choose(start) }
+            page = start
+        }
+        .onChange(of: page) { _, now in
+            if let now, now != model.template { model.choose(now) }
         }
         .accessibilityIdentifier("shopChooseStyleScreen")
     }
 
-    /// 166 × 258, radius 18; a 140.4 pt board preview inside (her own products in the template's arrangement).
-    private func templateCard(_ template: ShopTemplate) -> some View {
-        let selected = model.template == template
-        return Button { model.choose(template) } label: {
-            ShopBoardCanvas(snapshot: model.snapshot(template: template), width: 140.4)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .frame(maxWidth: .infinity, maxHeight: 258, alignment: .top)
-                .padding(.top, selected ? 6 : 8)
-                .frame(height: 258, alignment: .top)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .shopCard(radius: 18, selected: selected)
+    private func card(_ template: ShopTemplate, width: CGFloat) -> some View {
+        ShopBoardCanvas(snapshot: model.snapshot(template: template), width: width)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: Color(fixed: 0x1769FF).opacity(0.18), radius: 15, x: 0, y: 14)
+            .accessibilityLabel(L10n.tr(Self.name(template)))
+            .accessibilityAddTraits(page == template ? .isSelected : [])
+            .accessibilityIdentifier("shopTemplate_\(template.rawValue)")
+            .onTapGesture { withAnimation(.snappy) { page = template } }
+    }
+
+    static func name(_ template: ShopTemplate) -> String { template == .wearIt ? "Wear it" : "Collage" }
+
+    /// The style's name in a white pill (with its icon), the page dots, then the list of styles.
+    private var nameAndDots: some View {
+        let current = page ?? model.template
+        return VStack(spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: current == .wearIt ? "figure.stand" : "square.grid.2x2")
+                    .font(.system(size: 13, weight: .bold)).foregroundStyle(Color(fixed: 0x1769FF))
+                Text(L10n.tr(Self.name(current))).font(CS.inter(13, .bold)).foregroundStyle(Color(fixed: 0x0B1020))
+            }
+            .padding(.horizontal, 14).padding(.vertical, 7)
+            .background(Capsule().fill(.white).shadow(color: Color(fixed: 0x1769FF).opacity(0.14), radius: 6, x: 0, y: 4))
+            .accessibilityIdentifier("shopStyleName")
+            HStack(spacing: 7) {
+                ForEach(Self.choices) { t in
+                    Capsule().fill(t == current ? Color(fixed: 0x1769FF) : Color(fixed: 0xC7D1E6))
+                        .frame(width: t == current ? 18 : 7, height: 7)
+                }
+            }
+            .animation(.snappy, value: current)
+            Text(Self.choices.map { L10n.tr(Self.name($0)) }.joined(separator: "  ·  "))
+                .font(CS.inter(11, .semibold)).foregroundStyle(Color(fixed: 0x6B7385))
         }
-        .buttonStyle(BubblePress())
-        .accessibilityLabel(L10n.tr(template.title))
-        .accessibilityAddTraits(selected ? .isSelected : [])
-        .accessibilityIdentifier("shopTemplate_\(template.rawValue)")
+        .frame(maxWidth: .infinity)
     }
 }
 

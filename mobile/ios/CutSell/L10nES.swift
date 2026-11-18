@@ -1739,6 +1739,8 @@ enum L10nES {
         "A photo couldn't be opened. Try another one.": "No se pudo abrir una foto. Prueba con otra.",
         "Shop boards": "Shop boards",
         "Add another photo or item": "Agregar otra foto o artículo",
+        "Swipe to see your board in each style": "Desliza para ver tu board en cada estilo",
+        "Collage": "Collage",
         "Back to my board": "Volver a mi board",
         "Shop\nboards": "Shop\nboards",
         "Yesterday": "Ayer",

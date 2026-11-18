@@ -1002,3 +1002,15 @@ final class ShopAddAnotherTests: XCTestCase {
         XCTAssertEqual(model.adjusts[ids[1]]?.offset.width, -50)
     }
 }
+
+/// PO 18 Nov 2026 (Figma S3p-B 3078:319): Choose a style is a swipe carousel of HER board, only Collage and Wear it
+/// ("solo collage, wear it and the upload the idea"); boards saved with the old colour variants still open.
+@MainActor
+final class ShopStyleCarouselTests: XCTestCase {
+    func testOnlyCollageAndWearItAreOffered() {
+        XCTAssertEqual(ShopStyleView.choices, [.everydayChic, .wearIt])
+        XCTAssertEqual(ShopStyleView.name(.everydayChic), "Collage")
+        XCTAssertEqual(ShopStyleView.name(.wearIt), "Wear it")
+        XCTAssertTrue(ShopTemplate.allCases.contains(.trendyInspo))       // still readable for saved boards
+    }
+}
