@@ -12,6 +12,11 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 ## Motor de B-roll (servidor, no es un build de la app)
 
+- **18 nov 2026 14:15 ET · DEPLOY con OK de la PO ("ok")** — `feat/simple-engine-v1` → `80a64109` (rama `feature/shop-idea`). API de Render (`dep-dbuvhup5efls73berus0`) en vivo; 9,424 pruebas del motor pasan.
+  - Nuevo: `POST /v1/shop/idea` para "My idea" del Shop board. Ella sube la captura de un board que le gusta; Claude Sonnet 5.5 la mira una vez y devuelve un mapa exacto: colores del fondo, cada texto (palabras, lugar, color, tipo de letra) y el lugar de cada producto (qué tipo, tamaño, giro). El iPhone arma el board de ella con sus productos en esos lugares y lo guarda como estilo en el teléfono.
+  - Nada se guarda en el servidor (ni la foto ni el mapa) y la foto no se escribe en los registros. Máximo 30 ideas por día por usuaria.
+  - Prueba real (board de prueba con 4 fotos de producto del bucket privado): encontró los 4 productos (bottom, top, shoes, top) y los 3 textos (título serif, subtítulo, marca). Tardó 5.3 s y costó US$0.0135. Hoja de comparación solo en el bucket privado: `private-qa/shop-idea/20261118/idea-sheet.jpg`.
+
 - **17 nov 2026 14:20 ET · DEPLOY con OK de la PO ("ok")** — `feat/simple-engine-v1` → `fb3226b2` (rama `feature/smart-zoom`). Worker de Modal (128 pruebas pasan; 9,420 pruebas del motor pasan) y API de Render (`dep-dbuaertbedkc73992leg`) en vivo.
   - Zoom inteligente: la IA (Sonnet, en la misma revisión de palabras, sin costo extra) marca cada zoom y su tipo: rápido, lento, abrir, de cerca (cara, piel, ojos, labios, pelo, manos, cuerpo), puntos de una lista (entra en uno, sale en el siguiente). Zooms micro suaves en tramos quietos (sin IA).
   - Claude Haiku 5.5 mira un cuadro por zoom (una sola llamada por video, ~US$0.001) y dice a dónde va: el producto, su cara, su brazo... Si falla: detector de cara de OpenCV; si no hay cara: al centro. `CUTSELL_ZOOM_VISION=0` lo apaga.
