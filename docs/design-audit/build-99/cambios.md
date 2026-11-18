@@ -1,0 +1,21 @@
+# Assessment de diseño · Build 99 · Choose a style en carrusel + My idea
+
+- **Rama:** `feature/shop-board`
+- **Base:** build 98. Pantallas diseñadas primero en Figma (18 nov 2026, página "💡 10 · Shop board (propuesta)").
+
+| Pantalla | Figma | Estado |
+|---|---|---|
+| Choose a style · carrusel (Collage, Wear it, sus estilos, ＋ My idea) | S3p-B `3078:319` (elegido por la PO: "me gusta la B") | ✅ igual a Figma |
+| My idea · leyendo su captura | S3i-C `3078:418` | ✅ igual a Figma |
+| My idea · resultado + "Use this style" | S3i-D `3078:499` | ✅ igual a Figma |
+| Clon · botón cambiar cámara (build 92) | — | 🟠 en la app; falta en Figma |
+
+## Cambios
+- Choose a style va después de agregar los productos. Solo dos estilos fijos: Collage y Wear it (PO: "solo collage,
+  wear it and the upload the idea"); los templates inventados se quitaron.
+- Carrusel: se desliza de lado, una página por estilo, con el nombre en una píldora y puntos abajo.
+- ＋ My idea: ella sube la captura de un board; el servidor (`POST /v1/shop/idea`) devuelve el mapa (fondo, textos,
+  lugares de productos por tipo) y la app pone SUS productos en esos lugares, por tipo. Se guarda como estilo en el
+  iPhone (no en el servidor). Mantener presionado: Rename / Delete.
+- Conocido (18 nov): en la prueba real los textos y el fondo salieron bien, pero los lugares de los productos
+  salieron corridos y más chicos. Se arregla en el servidor (sin build nuevo).

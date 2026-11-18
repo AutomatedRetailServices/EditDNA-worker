@@ -39,6 +39,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 99 | 2026-11-18 16:35 | ✅ subido (pedido) | feature/shop-board | `0cb3b834` | Choose a style en carrusel (Collage, Wear it, sus estilos) + ＋ My idea |
 | 98 | 2026-11-17 19:13 | ✅ subido 19:13 (pedido `bc4e282a`) | feature/shop-board | `f92efc93` | "Add another photo or item" + boards guardados desde Home + mismo límite de tamaño |
 | 97 | 2026-11-17 16:16 | ✅ subido 16:16 (pedido `6baa8a27`) | feature/shop-board | `de036d94` | Sin Shape it + zoom inteligente (velocidad y punto del zoom del motor) |
 | 94 | 2026-11-15 14:41 | ✅ subido | feature/shop-board | `94577d79` (pedido `48003e28`) | Wear it con video de fondo (hasta 12 s, con sonido) |
@@ -137,6 +138,17 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 | 1 | 2026-10-12 13:01 | ❌ falló | feature/ios-captions-v2 | `d90bfc50` | Primer intento, no llegó a TestFlight |
 
 ---
+
+## Build 99
+
+- **Fecha:** 18 nov 2026 · **Rama:** `feature/shop-board` · **Commit:** `0cb3b834` · Pedido por la PO ("ok", 18 nov).
+- **Qué cambia:**
+  - Choose a style en carrusel (Figma S3p-B 3078:319): Collage, Wear it, sus estilos guardados y ＋ My idea.
+  - My idea (Figma S3i-C 3078:418 / S3i-D 3078:499): sube la captura de un board y la app copia fondo, textos y
+    lugares con SUS productos (por tipo). Se guarda en el iPhone. Usa el servidor `80a64109` (en vivo 18 nov).
+  - Conocido: los lugares de los productos salen corridos en la prueba real; arreglo en el servidor.
+- **Pruebas:** 111 pruebas de la app, 0 fallas (CI `44370166492`).
+- **Diseño:** docs/design-audit/build-99/cambios.md.
 
 ## Build 98
 
