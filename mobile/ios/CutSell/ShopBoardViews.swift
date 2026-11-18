@@ -517,6 +517,12 @@ enum ShopShapeFeature {
     static let isOn = false
 }
 
+/// "My idea" (the AI copies a screenshot) is off (PO 18 Nov 2026: "NO nos interesa poner esto... mejor que ella pueda
+/// agregar solo sin costos"): the carousel shows only Collage and Wear it. The code stays for later.
+enum ShopIdeaFeature {
+    static let isOn = false
+}
+
 
 struct ShopShapeView: View {
     let item: ShopItem
@@ -657,7 +663,9 @@ struct ShopStyleView: View {
 
     static let choices: [ShopTemplate] = [.everydayChic, .wearIt]
 
-    private var pages: [Page] { Self.choices.map { .template($0) } + ideas.styles.map { .style($0.id) } + [.add] }
+    private var pages: [Page] {
+        Self.choices.map { .template($0) } + (ShopIdeaFeature.isOn ? ideas.styles.map { .style($0.id) } + [.add] : [])
+    }
 
     var body: some View {
         ZStack {

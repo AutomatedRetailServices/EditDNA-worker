@@ -1011,6 +1011,7 @@ final class ShopStyleCarouselTests: XCTestCase {
         XCTAssertEqual(ShopStyleView.choices, [.everydayChic, .wearIt])
         XCTAssertEqual(ShopStyleView.name(.everydayChic), "Collage")
         XCTAssertEqual(ShopStyleView.name(.wearIt), "Wear it")
+        XCTAssertFalse(ShopIdeaFeature.isOn, "My idea is off (PO 18 Nov: no AI cost on boards)")
         XCTAssertTrue(ShopTemplate.allCases.contains(.trendyInspo))       // still readable for saved boards
     }
 }
