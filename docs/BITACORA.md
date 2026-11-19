@@ -51,7 +51,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
-| 100 | 2026-11-18 22:05 | ✅ subido (pedido PENDING) | feature/shop-board | `fbbb837e` | Title & design (Layout, Letters, Add) + Background › Cut + productos fuera del borde; My idea apagado; sin "2 cents" |
+| 100 | 2026-11-18 22:05 | ✅ subido (pedido `133e4fd2`) | feature/shop-board | `fbbb837e` | Title & design (Layout, Letters, Add) + Background › Cut + productos fuera del borde; My idea apagado; sin "2 cents" |
 | 99 | 2026-11-18 16:51 | ✅ subido 16:51 (pedido `e92d17e1`) | feature/shop-board | `0cb3b834` | Choose a style en carrusel (Collage, Wear it, sus estilos) + ＋ My idea |
 | 98 | 2026-11-17 19:13 | ✅ subido 19:13 (pedido `bc4e282a`) | feature/shop-board | `f92efc93` | "Add another photo or item" + boards guardados desde Home + mismo límite de tamaño |
 | 97 | 2026-11-17 16:16 | ✅ subido 16:16 (pedido `6baa8a27`) | feature/shop-board | `de036d94` | Sin Shape it + zoom inteligente (velocidad y punto del zoom del motor) |
