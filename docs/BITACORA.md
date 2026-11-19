@@ -5,6 +5,18 @@ Este archivo es el registro permanente de cada versión de la app de iPhone de C
 Regla: después de CADA build nuevo, agregar su entrada al inicio de este archivo, en el mismo commit del build. Si el build cambia pantallas, actualizar también docs/design-audit/.
 
 
+
+## Rama · arreglos del 19 nov (después del build 100, sin build todavía)
+
+- PO: "no me deja mover seleccionar nada de ese menu (add)", "no sé qué dice ese menú y para qué es", "recicle bin como en
+  IG", "en choose a style sigue el texto de + my idea · debe eliminarse".
+- Causa: al tocar algo en Title & design el cambio pasaba detrás del menú y no se veía; lo agregado quedaba escondido.
+- Arreglos: Add cierra el menú y lo nuevo queda en el board, elegido; Words/Layout/Letters muestran arriba el título
+  del board en vivo (Figma T1b 3085:489); papelera tipo Instagram al arrastrar (Figma S4t-A/B 3085:417 / 3085:453);
+  el menú de mantener presionado cabe en el board; Choose a style ya no dice "＋ My idea".
+- Prueba en el simulador con el flujo real (ShopDesignUITests): Layout, Letters, Add, mover, mantener presionado,
+  duplicar, soltar en la papelera y Cut funcionan. 122 pruebas de la app, 0 fallas.
+
 ## Rama · Title & design + Background › Cut (18 nov 2026, sin build todavía)
 
 - Pedido por la PO con 20 ejemplos de boards de Instagram ("mira las letras… cómo se corta backgrounds… recuadros
