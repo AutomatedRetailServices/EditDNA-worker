@@ -1,0 +1,86 @@
+name: CutSell iOS Shop board design probe (on request)
+
+# PO 19 Nov: "no me deja mover seleccionar nada de ese menu". Drives the real Shop board flow (sample products, no
+# user data, no paid compute) through Title & design and Background › Cut; frames + log to probe/shop-design-result.
+on:
+  push:
+    branches: [probe/shop-design]
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select the newest Xcode
+        run: |
+          latest="$(ls -d /Applications/Xcode*.app | grep -vi beta | sort -V | tail -1)"
+          sudo xcode-select -s "$latest"
+      - name: Add the UI test target and build for testing
+        working-directory: mobile/ios
+        run: |
+          brew install xcodegen >/dev/null
+          cat >> project.yml <<'YML'
+            CutSellUITests:
+              type: bundle.ui-testing
+              platform: iOS
+              sources:
+                - CutSellUITests/ShopDesignUITests.swift
+              dependencies:
+                - target: CutSell
+              settings:
+                base:
+                  PRODUCT_BUNDLE_IDENTIFIER: ai.cutsell.app.uitests
+                  GENERATE_INFOPLIST_FILE: YES
+                  TEST_TARGET_NAME: CutSell
+          schemes:
+            CutSellUITests:
+              build:
+                targets:
+                  CutSell: all
+                  CutSellUITests: [test]
+              test:
+                config: Debug
+                targets:
+                  - CutSellUITests
+          YML
+          xcodegen generate
+          udid="$(xcrun simctl list devices available --json | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)["devices"]
+          c=sorted((r,x["name"],x["udid"]) for r,v in d.items() if "iOS" in r for x in v if x["name"].startswith("iPhone"))
+          n=[x for x in c if x[0]==c[-1][0]]
+          pick=[x for x in n if x[1].endswith("Pro")] or n
+          print(pick[0][2])')"
+          echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
+          set +e
+          xcodebuild build-for-testing -project CutSell.xcodeproj -scheme CutSellUITests -sdk iphonesimulator \
+            -destination "id=$udid" -derivedDataPath build CODE_SIGNING_ALLOWED=NO > "$RUNNER_TEMP/build.log" 2>&1
+          status=$?
+          grep -E "error:" "$RUNNER_TEMP/build.log" | sort -u | head -8 | while IFS= read -r l; do echo "::error title=build::$(echo "$l" | sed 's#.*/mobile/ios/##' | cut -c1-300)"; done
+          exit $status
+      - name: Drive Title & design by hand (XCUITest)
+        working-directory: mobile/ios
+        run: |
+          mkdir -p "$RUNNER_TEMP/sd"
+          xcrun simctl boot "$SIM_UDID" || true
+          xcrun simctl bootstatus "$SIM_UDID" -b
+          xcrun simctl ui "$SIM_UDID" appearance light || true
+          set +e
+          TEST_RUNNER_SD_OUT="$RUNNER_TEMP/sd" xcodebuild test-without-building -project CutSell.xcodeproj -scheme CutSellUITests \
+            -sdk iphonesimulator -destination "id=$SIM_UDID" -derivedDataPath build \
+            -only-testing:CutSellUITests/ShopDesignUITests CODE_SIGNING_ALLOWED=NO > "$RUNNER_TEMP/test.log" 2>&1
+          set -e
+          grep -E "SDUI|error|failed|passed" "$RUNNER_TEMP/test.log" | tail -80 > "$RUNNER_TEMP/sd/xctest.txt" || true
+          cat "$RUNNER_TEMP/sd/xctest.txt"
+      - name: Push the frames to probe/shop-design-result
+        if: always()
+        run: |
+          cd "$RUNNER_TEMP/sd"
+          git init -q && git checkout -q -b probe/shop-design-result
+          git add -A
+          git -c user.name="cutsell-ci" -c user.email="ci@cutsell.invalid" commit -q -m "shop design probe for ${{ github.sha }}"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" probe/shop-design-result

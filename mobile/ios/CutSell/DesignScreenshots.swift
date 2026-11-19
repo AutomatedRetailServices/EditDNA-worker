@@ -250,6 +250,9 @@ struct DesignScreenshotRoot: View {
                     ShopBackgroundSheet(model: Self.sampleShopBoard, onDone: {}, startTab: .cut)
                 }
             }
+        // The real flow on Your board (sample products), for the Title & design probe (19 Nov).
+        case "shop_flow":
+            ShopBoardFlowView(saved: Self.sampleShopBoard, onClose: {})
         case "shop_board_designed":
             ShopBoardScreen(model: Self.designedShopBoard, onBack: {}, onTitle: {}, onBackground: {}, onNext: {})
         case "plan_built":
