@@ -51,6 +51,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 100 | 2026-11-18 22:05 | ✅ subido (pedido PENDING) | feature/shop-board | `fbbb837e` | Title & design (Layout, Letters, Add) + Background › Cut + productos fuera del borde; My idea apagado; sin "2 cents" |
 | 99 | 2026-11-18 16:51 | ✅ subido 16:51 (pedido `e92d17e1`) | feature/shop-board | `0cb3b834` | Choose a style en carrusel (Collage, Wear it, sus estilos) + ＋ My idea |
 | 98 | 2026-11-17 19:13 | ✅ subido 19:13 (pedido `bc4e282a`) | feature/shop-board | `f92efc93` | "Add another photo or item" + boards guardados desde Home + mismo límite de tamaño |
 | 97 | 2026-11-17 16:16 | ✅ subido 16:16 (pedido `6baa8a27`) | feature/shop-board | `de036d94` | Sin Shape it + zoom inteligente (velocidad y punto del zoom del motor) |
@@ -150,6 +151,18 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 | 1 | 2026-10-12 13:01 | ❌ falló | feature/ios-captions-v2 | `d90bfc50` | Primer intento, no llegó a TestFlight |
 
 ---
+
+## Build 100
+
+- **Fecha:** 18 nov 2026 · **Rama:** `feature/shop-board` · **Commit:** `fbbb837e` · Pedido por la PO ("ok", 22:02).
+- **Qué cambia:**
+  - Title & design (Figma T1–T3): Words · Layout (6 formas del título, tamaño, espacio, color) · Letters (19 letras,
+    7 nuevas gratis) · Add (texto, etiqueta + flecha, cuadro, botón, marco, línea, destello, cinta, forma).
+  - Mantener presionado: Front · Back · Duplicate · Delete · Edit words. Los productos también van atrás.
+  - Background › Cut (Figma T4): foto + color, franja, tarjeta adentro, marco doble, arco; productos fuera del borde.
+  - My idea apagado (costaba) y sin el texto "About 2 cents".
+- **Pruebas:** 122 pruebas de la app, 0 fallas (CI `44446150645`). Capturas del simulador comparadas con Figma.
+- **Diseño:** docs/design-audit/build-100/cambios.md.
 
 ## Build 99
 
