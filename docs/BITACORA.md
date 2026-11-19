@@ -7,6 +7,16 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 
 
+
+## Rama · editor: clips girados (19 nov, sin build todavía)
+
+- PO (proyecto "Cut Nov 14"): en el editor algunos clips salían girados. Causa: la vista previa del editor usaba el giro
+  del primer video para todos los clips; un video filmado en otra posición salía de lado. La exportación ya giraba
+  cada clip con el suyo (ExportSegment.transform). Arreglo: cada clip con el giro de su propio video
+  (PreviewOrientation). 126 pruebas de la app, 0 fallas.
+- B-roll de ese proyecto: el trabajo del 14 nov ya no está en el servidor (la cola guarda poco tiempo); todos los clips
+  entraron como clips con voz. Pendiente: saber si los clips de B-roll se marcaron como B-roll al subirlos.
+
 ## Rama · 19 nov tarde (después del build 101, sin build todavía)
 
 - Papelera **debajo del board, afuera** (PO: "que se ponga fuera del recuadro… se puede borrar sin querer"): solo borra
