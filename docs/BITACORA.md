@@ -72,6 +72,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 102 | 2026-11-19 17:00 | ✅ subido (pedido PENDING) | feature/shop-board | `c5066c9b` | Papelera debajo del board (afuera); Add products opción A (solo fotos) |
 | 101 | 2026-11-19 10:17 | ✅ subido 10:17 (pedido `6eed9c93`) | feature/shop-board | `34a6b83f` | Add deja lo nuevo en el board; título en vivo en el menú; papelera tipo IG; menú de mantener presionado cabe; sin "＋ My idea" |
 | 100 | 2026-11-18 22:18 | ✅ subido 22:18 (pedido `133e4fd2`) | feature/shop-board | `fbbb837e` | Title & design (Layout, Letters, Add) + Background › Cut + productos fuera del borde; My idea apagado; sin "2 cents" |
 | 99 | 2026-11-18 16:51 | ✅ subido 16:51 (pedido `e92d17e1`) | feature/shop-board | `0cb3b834` | Choose a style en carrusel (Collage, Wear it, sus estilos) + ＋ My idea |
@@ -173,6 +174,13 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 | 1 | 2026-10-12 13:01 | ❌ falló | feature/ios-captions-v2 | `d90bfc50` | Primer intento, no llegó a TestFlight |
 
 ---
+
+## Build 102
+
+- **Fecha:** 19 nov 2026 · **Rama:** `feature/shop-board` · **Commit:** `c5066c9b` · Pedido por la PO ("ok si", 16:59).
+- **Qué cambia:** la papelera sale debajo del board, afuera del recuadro (Figma S4t-A/B); Add products con la opción A
+  (Figma S2-A / S2-A0): una tarjeta "Add photos", sin "From my products" ni Shape it.
+- **Pruebas:** 123 pruebas de la app, 0 fallas; flujo real en el simulador; capturas iguales a Figma.
 
 ## Build 101
 
