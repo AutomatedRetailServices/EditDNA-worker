@@ -223,6 +223,7 @@ final class DraftPlaybackController: ObservableObject {
         let video: AVAssetTrack
         let audio: AVAssetTrack?
         let transform: CGAffineTransform
+        let naturalSize: CGSize
         let openedAt: Date
     }
     private var sourceCache: [String: LoadedSource] = [:]
@@ -250,7 +251,9 @@ final class DraftPlaybackController: ObservableObject {
                     guard let video = try? await asset.loadTracks(withMediaType: .video).first else { return (id, nil) }
                     let audio = try? await asset.loadTracks(withMediaType: .audio).first
                     let transform = (try? await video.load(.preferredTransform)) ?? .identity
-                    return (id, LoadedSource(asset: asset, video: video, audio: audio, transform: transform, openedAt: Date()))
+                    let natural = (try? await video.load(.naturalSize)) ?? .zero
+                    return (id, LoadedSource(asset: asset, video: video, audio: audio, transform: transform,
+                                             naturalSize: natural, openedAt: Date()))
                 }
             }
             for await (id, loaded) in group {
@@ -382,6 +385,9 @@ final class DraftPlaybackController: ObservableObject {
             var insertedVideo = false
             var setVideoTransform = false
             var windows: [CaptionClipWindow] = []
+            /// Each clip's place and its own source's turn (PO 19 Nov: clips from a video filmed the other way showed
+            /// sideways: the one track carried the first source's turn for every clip).
+            var turns: [PreviewOrientation.Segment] = []
             /// The video's own sound per clip on the played timeline: (start, end, volume).
             var baseLevels: [(start: Double, end: Double, level: Double)] = []
             let master = model.masterMuted ? 0 : model.masterVolume
@@ -408,6 +414,7 @@ final class DraftPlaybackController: ObservableObject {
                 let played = CMTime(seconds: clipDuration / speed, preferredTimescale: 600)
                 try videoCompositionTrack.insertTimeRange(range, of: source.video, at: cursor)
                 insertedVideo = true
+                turns.append(PreviewOrientation.Segment(start: cursor, transform: source.transform, naturalSize: source.naturalSize))
 
                 windows.append(CaptionClipWindow(
                     clipIndex: clipIndex,
@@ -523,6 +530,9 @@ final class DraftPlaybackController: ObservableObject {
                 composition.removeTimeRange(CMTimeRange(start: cutEnd, end: composition.duration))
             }
             let item = AVPlayerItem(asset: composition)
+            if let turned = PreviewOrientation.videoComposition(for: turns, track: videoCompositionTrack, duration: cutEnd) {
+                item.videoComposition = turned
+            }
             // Sped-up / slowed clips keep the voice's pitch (no chipmunk), like the export's atempo.
             item.audioTimePitchAlgorithm = .spectral
             item.forwardPlaybackEndTime = cutEnd
@@ -751,4 +761,53 @@ final class DraftPlaybackController: ObservableObject {
 
 enum DraftPlaybackError: Error {
     case compositionTrackUnavailable
+}
+
+
+/// Clips from videos filmed in different orientations (or sizes) in one preview (PO 19 Nov 2026: "la imagen está
+/// distorsionada, girada"). A composition track has one preferredTransform, so the preview turned every clip like the
+/// first one. Now each clip gets its own source's turn, fitted to the first clip's upright frame (the export already
+/// turned each clip on its own: ExportSegment.transform).
+enum PreviewOrientation {
+    struct Segment {
+        let start: CMTime
+        let transform: CGAffineTransform
+        let naturalSize: CGSize
+    }
+
+    /// The upright size of a source.
+    static func upright(_ natural: CGSize, _ t: CGAffineTransform) -> CGSize {
+        let r = CGRect(origin: .zero, size: natural).applying(t)
+        return CGSize(width: abs(r.width), height: abs(r.height))
+    }
+
+    /// The source turned upright, filling `render` (centred, like the export's aspect fill).
+    static func fitted(_ segment: Segment, render: CGSize) -> CGAffineTransform {
+        let r = CGRect(origin: .zero, size: segment.naturalSize).applying(segment.transform)
+        guard r.width > 0, r.height > 0 else { return segment.transform }
+        let upright = segment.transform.concatenating(CGAffineTransform(translationX: -r.minX, y: -r.minY))
+        let scale = max(render.width / r.width, render.height / r.height)
+        let dx = (render.width - r.width * scale) / 2, dy = (render.height - r.height * scale) / 2
+        return upright.concatenating(CGAffineTransform(scaleX: scale, y: scale))
+            .concatenating(CGAffineTransform(translationX: dx, y: dy))
+    }
+
+    /// nil when every clip comes from a source turned and sized like the first (the track's own turn is enough).
+    static func videoComposition(for segments: [Segment], track: AVCompositionTrack, duration: CMTime) -> AVVideoComposition? {
+        guard let first = segments.first else { return nil }
+        let same = segments.allSatisfy { $0.transform == first.transform && $0.naturalSize == first.naturalSize }
+        guard !same else { return nil }
+        let render = upright(first.naturalSize, first.transform)
+        guard render.width > 0, render.height > 0 else { return nil }
+        let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: track)
+        for segment in segments { layer.setTransform(fitted(segment, render: render), at: segment.start) }
+        let instruction = AVMutableVideoCompositionInstruction()
+        instruction.timeRange = CMTimeRange(start: .zero, duration: duration)
+        instruction.layerInstructions = [layer]
+        let composition = AVMutableVideoComposition()
+        composition.renderSize = CGSize(width: render.width.rounded(), height: render.height.rounded())
+        composition.frameDuration = CMTime(value: 1, timescale: 30)
+        composition.instructions = [instruction]
+        return composition
+    }
 }
