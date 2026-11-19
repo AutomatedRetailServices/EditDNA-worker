@@ -12,7 +12,7 @@ import Vision
 
 // MARK: - Letters
 
-/// Registers the twelve Shop board faces (Fonts/ShopBoard, SIL OFL) the same way the app registers Plus Jakarta Sans
+/// Registers the Shop board faces (Fonts/ShopBoard, SIL OFL) the same way the app registers Plus Jakarta Sans
 /// (CTFontManagerRegisterFontsForURL, process scope), and makes the UIFonts (weight of the variable files by
 /// font variation).
 enum ShopFonts {
@@ -21,6 +21,7 @@ enum ShopFonts {
 
     static var allFaces: [ShopFontFace] {
         ShopFontPair.allCases.flatMap { [$0.titleFace, $0.scriptFace] } + [ShopFontPair.footerFace]
+            + ShopLetter.allCases.map(\.face) + [ShopLetter.dmSerifItalic]
     }
 
     static func registerIfNeeded() {

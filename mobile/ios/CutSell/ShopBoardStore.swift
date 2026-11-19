@@ -54,6 +54,17 @@ struct ShopBoardRecord: Codable, Identifiable, Equatable {
     var videoDuration: Double?
     /// "My idea" (18 Nov): the style of hers this board uses (its exact map). Missing before / for Collage, Wear it.
     var idea: ShopIdeaStyle?
+    /// Title & design + Background › Cut (18 Nov). Missing before = the first look, nothing added, full background.
+    var titleLayout: String?
+    var bigLetter: String?
+    var scriptLetter: String?
+    var titleSize: Double?
+    var titleSpacing: Double?
+    var decor: [ShopDecor]?
+    var cut: String?
+    var cutColor: ShopRGB?
+    var pastEdge: Bool?
+    var lowered: [UUID]?
 
     /// "CUTSELL · Everyday chic" under the tile.
     var displayTitle: String {
@@ -144,7 +155,10 @@ final class ShopBoardStore: ObservableObject {
             adjusts: model.adjusts.mapValues { .init(dx: $0.offset.width, dy: $0.offset.height, scale: $0.scale, rotation: $0.rotation) },
             raised: model.raised, hasPhotoBackground: model.photoBackground != nil,
             hasVideoBackground: model.videoBackground != nil, videoDuration: model.videoBackground == nil ? nil : model.videoDuration,
-            idea: model.idea)
+            idea: model.idea,
+            titleLayout: model.titleLayout?.rawValue, bigLetter: model.bigLetter?.rawValue, scriptLetter: model.scriptLetter?.rawValue,
+            titleSize: model.titleSize, titleSpacing: model.titleSpacing, decor: model.decor, cut: model.cut.rawValue,
+            cutColor: model.cutColor, pastEdge: model.pastEdge, lowered: model.lowered)
         boards.removeAll { $0.id == record.id }
         boards.insert(record, at: 0)
         if thumbnail != nil { thumbnailVersion[record.id, default: 0] += 1 }
@@ -216,6 +230,16 @@ final class ShopBoardStore: ObservableObject {
             ShopAdjust(offset: CGSize(width: $0.dx, height: $0.dy), scale: CGFloat($0.scale), rotation: $0.rotation)
         }
         model.raised = record.raised
+        model.lowered = record.lowered ?? []
+        model.titleLayout = record.titleLayout.flatMap(ShopTitleLayout.init(rawValue:))
+        model.bigLetter = record.bigLetter.flatMap(ShopLetter.init(rawValue:))
+        model.scriptLetter = record.scriptLetter.flatMap(ShopLetter.init(rawValue:))
+        model.titleSize = record.titleSize ?? 1
+        model.titleSpacing = record.titleSpacing ?? 0
+        model.decor = record.decor ?? []
+        model.cut = record.cut.flatMap(ShopCut.init(rawValue:)) ?? .full
+        model.cutColor = record.cutColor ?? ShopRGB(hex: 0xFFFFFF)
+        model.pastEdge = record.pastEdge ?? true
         return model
     }
 

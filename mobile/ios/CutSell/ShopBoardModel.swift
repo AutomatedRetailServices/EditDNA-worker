@@ -34,7 +34,29 @@ final class ShopBoardModel: ObservableObject {
     @Published var adjusts: [UUID: ShopAdjust] = [:]
     /// Products brought to the front by a tap, last on top.
     @Published var raised: [UUID] = []
+    /// Products sent behind the others (Hold › Back), last one furthest back.
+    @Published var lowered: [UUID] = []
     @Published var photoBackground: UIImage?
+
+    // "Title & design" and Background › Cut (PO 18 Nov, Figma T1 – T4, ShopBoardDesign.swift).
+    /// nil = the board's first look (the letter style pair).
+    @Published var titleLayout: ShopTitleLayout?
+    /// Letters picked by hand for the big title and the script line (nil = the layout's own).
+    @Published var bigLetter: ShopLetter?
+    @Published var scriptLetter: ShopLetter?
+    /// Layout › Size (0.6 … 1.5) and Letter space (−2 … 8 design units).
+    @Published var titleSize: Double = 1
+    @Published var titleSpacing: Double = 0
+    /// Things she added (Add tab), back to front.
+    @Published var decor: [ShopDecor] = []
+    /// The colour the next added thing gets (Add › Color).
+    @Published var addColor = ShopRGB(hex: 0x6CC7D1)
+    /// What is picked on Your board now (a product, the title or an added thing): the sheets read it.
+    @Published var selectedDecor: UUID?
+    @Published var cut: ShopCut = .full
+    @Published var cutColor = ShopRGB(hex: 0xFFFFFF)
+    /// Background › Cut › "Products can go past the edge" (on: bigger limits, the board cuts what is outside).
+    @Published var pastEdge = true
     /// Wear it with a video (Figma W1/W2): her video file and its length; `photoBackground` is then its first picture
     /// (thumbnails, the style tile). Only Wear it uses a video.
     @Published var videoBackground: URL?
@@ -194,6 +216,89 @@ final class ShopBoardModel: ObservableObject {
         items.removeAll { $0.id == id }
         adjusts[id] = nil
         raised.removeAll { $0 == id }
+        lowered.removeAll { $0 == id }
+    }
+
+    // MARK: Things she added (Title & design › Add)
+
+    var selectedDecorHasWords: Bool {
+        selectedDecor.flatMap { id in decor.first { $0.id == id } }?.kind.hasWords ?? false
+    }
+
+    /// Adds one in the middle of the board and picks it. A second Shape in a row is a circle (T3 shows both).
+    @discardableResult
+    func addDecor(_ kind: ShopDecor.Kind) -> UUID {
+        let circle = kind == .shape && decor.last?.kind == .shape && decor.last?.circle == false
+        var new = ShopDecor.make(kind, color: kind == .text || kind == .label ? defaultInk : addColor, circle: circle)
+        // Each new one a little lower than the last of its kind, so they do not land on top of each other.
+        let same = decor.filter { $0.kind == kind }.count
+        new.y += Double(same % 5) * 24
+        decor.append(new)
+        selectedDecor = new.id
+        return new.id
+    }
+
+    /// Words and lines start in the title's colour so they read on her background.
+    private var defaultInk: ShopRGB { snapshot().titleColor }
+
+    func setText(_ text: String, for id: UUID) {
+        guard let i = decor.firstIndex(where: { $0.id == id }) else { return }
+        decor[i].text = String(text.prefix(80))
+    }
+
+    func setColor(_ color: ShopRGB, for id: UUID) {
+        guard let i = decor.firstIndex(where: { $0.id == id }) else { return }
+        decor[i].color = color
+    }
+
+    func setLetter(_ letter: ShopLetter, for id: UUID) {
+        guard let i = decor.firstIndex(where: { $0.id == id }), decor[i].kind.hasWords else { return }
+        decor[i].letter = letter
+    }
+
+    func duplicateDecor(_ id: UUID) {
+        guard let original = decor.first(where: { $0.id == id }) else { return }
+        var copy = original
+        copy.id = UUID()
+        var a = adjusts[id] ?? ShopAdjust()
+        a.offset.width += 16
+        a.offset.height += 16
+        adjusts[copy.id] = a
+        decor.append(copy)
+        selectedDecor = copy.id
+    }
+
+    func deleteDecor(_ id: UUID) {
+        decor.removeAll { $0.id == id }
+        adjusts[id] = nil
+        if selectedDecor == id { selectedDecor = nil }
+    }
+
+    func isDecor(_ id: UUID) -> Bool { decor.contains { $0.id == id } }
+
+    /// Hold › Front: an added thing goes over the products (last on top); a product over the other products.
+    func bringToFront(_ id: UUID) {
+        if let i = decor.firstIndex(where: { $0.id == id }) {
+            var d = decor.remove(at: i)
+            d.front = true
+            decor.append(d)
+        } else {
+            lowered.removeAll { $0 == id }
+            raise(id)
+        }
+    }
+
+    /// Hold › Back: an added thing goes behind the products; a product behind the other products.
+    func sendToBack(_ id: UUID) {
+        if let i = decor.firstIndex(where: { $0.id == id }) {
+            var d = decor.remove(at: i)
+            d.front = false
+            decor.insert(d, at: 0)
+        } else {
+            raised.removeAll { $0 == id }
+            lowered.removeAll { $0 == id }
+            lowered.append(id)
+        }
     }
 
     /// Your board's × (Figma S4x): the product leaves the board and every other product STAYS where it is now
@@ -312,12 +417,17 @@ final class ShopBoardModel: ObservableObject {
         clearHandEdits()
     }
 
+    /// The products' hand edits start over (the title too); what she added stays where she put it.
     func clearHandEdits() {
-        adjusts = [:]
+        let ids = Set(decor.map(\.id))
+        adjusts = adjusts.filter { ids.contains($0.key) }
         raised = []
+        lowered = []
     }
 
     func raise(_ id: UUID) {
+        guard !isDecor(id) else { return }
+        lowered.removeAll { $0 == id }
         raised.removeAll { $0 == id }
         raised.append(id)
     }
@@ -402,11 +512,20 @@ final class ShopBoardModel: ObservableObject {
             images: usable.compactMap(\.cutout), placements: placements,
             itemIDs: placedIDs,
             adjusts: handEdited ? placedIDs.map { adjusts[$0] ?? ShopAdjust() } : placedIDs.map { _ in ShopAdjust() },
-            drawOrder: ShopDrawOrder.order(itemIDs: placedIDs, raised: handEdited ? raised : []),
+            drawOrder: ShopDrawOrder.order(itemIDs: placedIDs, raised: handEdited ? raised : [], lowered: handEdited ? lowered : []),
             titleAdjust: handEdited ? (adjusts[Self.titleID] ?? ShopAdjust()) : ShopAdjust(),
             top: colors.top, bottom: colors.bottom, texture: texture, textureMatched: look.matchBackground && texture != nil,
             photo: photo, bigTitle: title, scriptLine: script, bottomLine: bottomLine, wearIt: wear, pair: fontPair,
-            titleColor: look.resolvedTitleColor(palette: palette, template: tmpl))
+            titleColor: look.resolvedTitleColor(palette: palette, template: tmpl),
+            design: handEdited ? designSnapshot : ShopDesignSnapshot())
+    }
+
+    /// Title & design + Cut as plain values for the drawing.
+    var designSnapshot: ShopDesignSnapshot {
+        ShopDesignSnapshot(layout: titleLayout, bigLetter: bigLetter, scriptLetter: scriptLetter,
+                           titleSize: CGFloat(titleSize), titleSpacing: CGFloat(titleSpacing),
+                           decor: decor, decorAdjusts: decor.map { adjusts[$0.id] ?? ShopAdjust() },
+                           cut: cut, cutColor: cutColor, cutPhoto: cut == .photoColor ? photoBackground : nil)
     }
 }
 
@@ -436,6 +555,8 @@ struct ShopBoardSnapshot {
     var titleColor: ShopRGB
     /// "My idea": the texts exactly where the idea had them (instead of the title block and the brand line).
     var ideaTexts: [ShopIdeaStyle.Text] = []
+    /// Title & design + Background › Cut (empty for the style previews).
+    var design = ShopDesignSnapshot()
 
     var isDark: Bool { top.mixed(bottom, 0.5).luminance < 0.25 }
 
@@ -518,6 +639,10 @@ struct ShopBoardCanvas: View {
         let size = CGSize(width: width, height: height)
         ZStack(alignment: .top) {
             background(size: size)
+            if snapshot.design.cut != .full {
+                ShopCutView(cut: snapshot.design.cut, color: snapshot.design.cutColor, photo: snapshot.design.cutPhoto, size: size)
+            }
+            ShopDecorLayer(design: snapshot.design, front: false, size: size)
             ForEach(snapshot.order, id: \.self) { index in
                 if let placed = snapshot.frame(at: index, board: size) {
                     let frame = placed.rect
@@ -538,6 +663,7 @@ struct ShopBoardCanvas: View {
                 ShopIdeaTexts(texts: snapshot.ideaTexts, title: snapshot.bigTitle, subtitle: snapshot.scriptLine,
                               brand: snapshot.bottomLine, width: width)
             }
+            ShopDecorLayer(design: snapshot.design, front: true, size: size)
         }
         .frame(width: width, height: height)
         .clipped()
@@ -616,22 +742,30 @@ struct ShopBoardCanvas: View {
             }
             .shadow(color: Color.black.opacity(0.25), radius: 4 * sx, x: 0, y: 1 * sx)
             .frame(width: width, height: 140 * sy, alignment: .top)
+        } else if let layout = snapshot.design.layout {
+            ShopLayoutTitle(layout: layout, big: snapshot.bigTitle, script: snapshot.scriptLine,
+                            bigLetter: snapshot.design.bigLetter, scriptLetter: snapshot.design.scriptLetter, ink: ink,
+                            scale: snapshot.design.titleSize, spacing: snapshot.design.titleSpacing, width: width)
         } else {
             classicTitleBlock(sx: sx, sy: sy, ink: ink, titleSize: titleSize)
         }
     }
 
+    /// The first look; Letters, Size and Letter space (Title & design) change it too.
     private func classicTitleBlock(sx: CGFloat, sy: CGFloat, ink: Color, titleSize: CGFloat) -> some View {
-        ZStack(alignment: .top) {
+        let d = snapshot.design
+        let titleFace = d.bigLetter?.face ?? snapshot.pair.titleFace
+        let bigSize = (d.bigLetter == nil ? titleSize : 44 * sx) * d.titleSize
+        return ZStack(alignment: .top) {
             Text(verbatim: snapshot.bigTitle)
-                .font(ShopFonts.font(snapshot.pair.titleFace, size: titleSize, opticalSize: 44 * snapshot.pair.titleScale))
-                .tracking(3.52 * sx)
+                .font(ShopFonts.font(titleFace, size: bigSize, opticalSize: 44 * snapshot.pair.titleScale * d.titleSize))
+                .tracking((3.52 + d.titleSpacing) * sx)
                 .foregroundStyle(ink)
                 .lineLimit(1).minimumScaleFactor(0.4)
                 .frame(width: width - 24 * sx)
                 .padding(.top, 24 * sy)
             Text(verbatim: snapshot.scriptLine)
-                .font(ShopFonts.font(snapshot.pair.scriptFace, size: 46 * sx))
+                .font(ShopFonts.font(d.scriptLetter?.face ?? snapshot.pair.scriptFace, size: 46 * sx * d.titleSize))
                 .foregroundStyle(ink)
                 .lineLimit(1).minimumScaleFactor(0.4)
                 .frame(width: width - 24 * sx)

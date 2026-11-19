@@ -233,7 +233,7 @@ struct ShopBoardFlowView: View {
             case .share:
                 ShopShareView(model: model, onBack: { step = .board })
             }
-            BottomSheetOverlay(isPresented: $showingTitle) { ShopTitleSheet(model: model, onDone: { showingTitle = false }) }
+            BottomSheetOverlay(isPresented: $showingTitle) { ShopTitleDesignSheet(model: model, onDone: { showingTitle = false }) }
             BottomSheetOverlay(isPresented: $showingBackground) {
                 ShopBackgroundSheet(model: model, onDone: { showingBackground = false })
             }
@@ -893,7 +893,7 @@ struct ShopBoardScreen: View {
                 .padding(.top, 14)
                 // Figma S4 / S4e: Medium 12, centred, #6B7385 (nothing picked) or #1769FF (a product picked).
                 Text(L10n.tr(selected == nil ? "Drag a product or the title · pinch to resize · twist to turn"
-                                             : "Pinch to resize · twist to turn · tap outside to finish"))
+                                             : "Pinch to resize · twist to turn · hold for more · tap outside to finish"))
                     .font(CS.inter(12, .medium))
                     .foregroundStyle(Color(fixed: selected == nil ? 0x6B7385 : 0x1769FF))
                     .multilineTextAlignment(.center)
@@ -921,6 +921,8 @@ struct ShopBoardScreen: View {
                     .padding(.bottom, 24)
             }
         }
+        .onChange(of: selected) { _, id in model.selectedDecor = id }
+        .onChange(of: model.selectedDecor) { _, id in if selected != id { selected = id } }
         .accessibilityIdentifier("shopBoardScreen")
     }
 
@@ -950,6 +952,10 @@ struct ShopBoardHandEditor: View {
     @ObservedObject var model: ShopBoardModel
     @Binding var selected: UUID?
     let width: CGFloat
+    /// Hold › menu (Front · Back · Duplicate · Delete) for this one (PO 18 Nov, Figma T3).
+    @State private var held: UUID?
+    @State private var editingWords: UUID?
+    @State private var words = ""
 
     var body: some View {
         let snapshot = model.snapshot()
@@ -977,6 +983,14 @@ struct ShopBoardHandEditor: View {
                     .position(x: placed.rect.midX, y: placed.rect.midY)
                     .allowsHitTesting(false)
             }
+            if let id = selected, let placed = snapshot.decorFrame(id, board: size) {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color(fixed: 0x1769FF), lineWidth: 2)
+                    .frame(width: max(placed.rect.width, 24) + 8, height: max(placed.rect.height, 24) + 8)
+                    .rotationEffect(.degrees(placed.rotation))
+                    .position(x: placed.rect.midX, y: placed.rect.midY)
+                    .allowsHitTesting(false)
+            }
             ForEach(snapshot.order, id: \.self) { index in
                 if let placed = snapshot.frame(at: index, board: size), selected == snapshot.itemIDs[index] {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -988,15 +1002,18 @@ struct ShopBoardHandEditor: View {
                 }
             }
             ShopBoardTouchLayer(
-                // The title is drawn over the products, so it is grabbed first.
-                itemAt: { point in
-                    snapshot.isOnTitle(point, board: size) ? ShopBoardModel.titleID
-                        : snapshot.item(at: point, board: size).map { snapshot.itemIDs[$0] }
-                },
+                // Top first: things over the products, the title, the products, things behind them.
+                itemAt: { point in snapshot.grab(at: point, board: size, titleID: ShopBoardModel.titleID) },
                 selected: { selected },
                 onTap: { id in
+                    held = nil
                     selected = id
                     if let id { model.raise(id) }
+                },
+                onHold: { id in
+                    guard id != ShopBoardModel.titleID else { return }
+                    selected = id
+                    held = id
                 },
                 onBegin: { id in
                     selected = id
@@ -1006,13 +1023,28 @@ struct ShopBoardHandEditor: View {
                 onChange: { id, start, move, pinch, twist in
                     var a = ShopAdjust.dragged(start, by: move, board: size)
                     let base = snapshot.itemIDs.firstIndex(of: id).flatMap { snapshot.baseSize(at: $0) }
-                    a = ShopAdjust.pinched(a, by: pinch, base: id == ShopBoardModel.titleID ? nil : base)
+                    a = ShopAdjust.pinched(a, by: pinch, base: id == ShopBoardModel.titleID ? nil : base, pastEdge: model.pastEdge)
                     model.adjusts[id] = ShopAdjust.twisted(a, by: twist)
                 })
             .accessibilityIdentifier("shopBoardTouchLayer")
             // Figma S4x (3061:190, PO 14 Nov): a red × on the picked product's outline removes it from the board.
             // Hidden when it is the only product (a board keeps at least 1).
-            if let id = selected, id != ShopBoardModel.titleID, model.items.count > 1,
+            if let id = held {
+                let isDecor = model.isDecor(id)
+                ShopHoldMenu(isDecor: isDecor, hasWords: model.decor.first { $0.id == id }?.kind.hasWords ?? false,
+                             onFront: { model.bringToFront(id); held = nil },
+                             onBack: { model.sendToBack(id); held = nil },
+                             onDuplicate: { model.duplicateDecor(id); held = nil },
+                             onDelete: { model.deleteDecor(id); selected = nil; held = nil },
+                             onEditWords: {
+                                 words = model.decor.first { $0.id == id }?.text ?? ""
+                                 editingWords = id
+                                 held = nil
+                             })
+                    .position(x: size.width / 2, y: min(size.height - 34, max(34, (snapshot.decorFrame(id, board: size)?.rect.maxY
+                        ?? snapshot.itemIDs.firstIndex(of: id).flatMap { snapshot.frame(at: $0, board: size)?.rect.maxY } ?? size.height / 2) + 36)))
+            }
+            if let id = selected, id != ShopBoardModel.titleID, !model.isDecor(id), model.items.count > 1,
                let index = snapshot.itemIDs.firstIndex(of: id), let placed = snapshot.frame(at: index, board: size) {
                 let corner = ShopBoardRemove.corner(of: placed.rect, rotation: placed.rotation, outset: 4)
                 Button {
@@ -1035,6 +1067,15 @@ struct ShopBoardHandEditor: View {
             }
         }
         .frame(width: size.width, height: size.height)
+        .alert(L10n.tr("Edit words"), isPresented: Binding(get: { editingWords != nil }, set: { if !$0 { editingWords = nil } })) {
+            TextField("", text: $words).accessibilityIdentifier("shopEditWordsField")
+            Button(L10n.tr("Cancel"), role: .cancel) { editingWords = nil }
+            Button(L10n.tr("Done")) {
+                if let id = editingWords { model.setText(words, for: id) }
+                editingWords = nil
+            }
+        }
+        .onChange(of: selected) { _, id in if id != held { held = nil } }
     }
 }
 
@@ -1053,6 +1094,8 @@ struct ShopBoardTouchLayer: UIViewRepresentable {
     let itemAt: (CGPoint) -> UUID?
     let selected: () -> UUID?
     let onTap: (UUID?) -> Void
+    /// A finger held still on something (Hold › menu).
+    var onHold: (UUID) -> Void = { _ in }
     /// A gesture starts on a product: returns its hand edit before the gesture.
     let onBegin: (UUID) -> ShopAdjust
     /// id, start, finger movement (points), pinch factor, twist (degrees).
@@ -1069,8 +1112,12 @@ struct ShopBoardTouchLayer: UIViewRepresentable {
         let pinch = UIPinchGestureRecognizer(target: c, action: #selector(Coordinator.pinch(_:)))
         let rotate = UIRotationGestureRecognizer(target: c, action: #selector(Coordinator.rotate(_:)))
         let tap = UITapGestureRecognizer(target: c, action: #selector(Coordinator.tap(_:)))
+        let hold = UILongPressGestureRecognizer(target: c, action: #selector(Coordinator.hold(_:)))
+        hold.minimumPressDuration = 0.45
+        hold.allowableMovement = 8
         for g in [pan, pinch, rotate] as [UIGestureRecognizer] { g.delegate = c; view.addGestureRecognizer(g) }
         view.addGestureRecognizer(tap)
+        view.addGestureRecognizer(hold)
         return view
     }
 
@@ -1144,117 +1191,12 @@ struct ShopBoardTouchLayer: UIViewRepresentable {
         @objc func tap(_ g: UITapGestureRecognizer) {
             parent.onTap(parent.itemAt(g.location(in: g.view)))
         }
-    }
-}
 
-// MARK: - 4a Title & fonts
-
-struct ShopTitleSheet: View {
-    @ObservedObject var model: ShopBoardModel
-    let onDone: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(L10n.tr("Title")).font(CS.inter(22, .heavy)).foregroundStyle(Color(fixed: 0x0B1020))
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    label("Big title  (e.g. Amazon finds, Walmart, your shop)").padding(.top, 16)
-                    field($model.bigTitle, id: "shopBigTitle").padding(.top, 6)
-                    label("Script line").padding(.top, 10)
-                    field($model.scriptLine, id: "shopScriptLine").padding(.top, 6)
-                    label("Bottom line  (your brand or shop)").padding(.top, 10)
-                    field($model.bottomLine, id: "shopBottomLine").padding(.top, 6)
-                    label("Letter style · all free").padding(.top, 12)
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10),
-                                        GridItem(.flexible(), spacing: 10)], spacing: 12) {
-                        ForEach(ShopFontPair.allCases) { pair in pairTile(pair) }
-                    }
-                    .padding(.top, 10)
-                    titleColorRow.padding(.top, 18)
-                }
-            }
-            ShopBigButton(title: "Done", id: "shopTitleDone", action: onDone)
-                .padding(.horizontal, -4)
-                .padding(.top, 20)
-                .padding(.bottom, 16)
+        @objc func hold(_ g: UILongPressGestureRecognizer) {
+            guard g.state == .began, let id = parent.itemAt(g.location(in: g.view)) else { return }
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            parent.onHold(id)
         }
-        .padding(.horizontal, 24)
-        .frame(maxHeight: 600)
-        .accessibilityIdentifier("shopTitleSheet")
-    }
-
-    private func label(_ text: String) -> some View {
-        Text(L10n.tr(text)).font(CS.inter(12, .bold)).foregroundStyle(Color(fixed: 0x6B7385))
-    }
-
-    private func field(_ text: Binding<String>, id: String) -> some View {
-        TextField("", text: text)
-            .font(CS.inter(15, .semibold))
-            .foregroundStyle(Color(fixed: 0x0B1020))
-            .padding(.horizontal, 13)
-            .frame(height: 44)
-            .background(Color(fixed: 0xFFFFFF), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color(fixed: 0xE6E9EF), lineWidth: 1))
-            .accessibilityIdentifier(id)
-    }
-
-    /// 106 × 100 tiles, radius 16: "CUTSELL" in the title face, "chic" in the script face, the name.
-    private func pairTile(_ pair: ShopFontPair) -> some View {
-        let selected = model.fontPair == pair
-        let ink = Color(fixed: 0x1E2A4A)
-        return Button { model.fontPair = pair } label: {
-            VStack(spacing: 0) {
-                Text(verbatim: "CUTSELL").font(ShopFonts.font(pair.titleFace, size: 18 * pair.titleScale, opticalSize: 18))
-                    .foregroundStyle(ink).frame(height: 24).padding(.top, 12)
-                Text(verbatim: "chic").font(ShopFonts.font(pair.scriptFace, size: 24)).foregroundStyle(ink).frame(height: 30)
-                Spacer(minLength: 0)
-                Text(L10n.tr(pair.title)).font(CS.inter(11, .bold))
-                    .foregroundStyle(selected ? Color(fixed: 0x1769FF) : Color(fixed: 0x6B7385))
-                    .padding(.bottom, 8)
-            }
-            .frame(maxWidth: .infinity).frame(height: 100)
-            .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(LinearGradient(colors: [Color(fixed: 0xFFFFFF), Color(fixed: selected ? 0xEEF3FF : 0xF7F9FF)],
-                                     startPoint: .top, endPoint: .bottom)))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(selected ? Color(fixed: 0x1769FF) : Color(fixed: 0xE6E9EF), lineWidth: selected ? 2 : 1))
-        }
-        .buttonStyle(BubblePress())
-        .accessibilityAddTraits(selected ? .isSelected : [])
-        .accessibilityIdentifier("shopFont_\(pair.rawValue)")
-    }
-
-    /// "Title color" · "✨ Matches your products" + four 24 pt swatches (the matched colour first).
-    private var titleColorRow: some View {
-        let matched = ShopBoardStyle(matchBackground: model.style.matchBackground, background: model.style.background,
-                                     matchTitle: true).resolvedTitleColor(palette: model.palette, template: model.template)
-        let others = model.palette.filter { $0.distance2(matched) > 0.01 }.prefix(3)
-        let swatches = [matched] + others
-        return HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(L10n.tr("Title color")).font(CS.inter(14, .bold)).foregroundStyle(Color(fixed: 0x0B1020))
-                Text(L10n.tr(model.style.matchTitle ? "✨ Matches your products" : "Your pick"))
-                    .font(CS.inter(11, .medium)).foregroundStyle(Color(fixed: 0x6B7385))
-            }
-            Spacer(minLength: 8)
-            HStack(spacing: 8) {
-                ForEach(Array(swatches.enumerated()), id: \.offset) { index, color in
-                    let chosen = index == 0 ? model.style.matchTitle : (!model.style.matchTitle && model.style.titleColor == color)
-                    Button {
-                        if index == 0 { model.style.matchTitle = true } else { model.style.pickTitleColor(color) }
-                    } label: {
-                        Circle().fill(color.color).frame(width: 24, height: 24)
-                            .overlay(Circle().strokeBorder(chosen ? Color(fixed: 0x1769FF) : .white, lineWidth: chosen ? 3 : 2))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(L10n.tr(index == 0 ? "✨ Matches your products" : ShopPalette.name(of: color)))
-                    .accessibilityIdentifier("shopTitleColor_\(index)")
-                }
-            }
-        }
-        .padding(.horizontal, 14)
-        .frame(height: 46)
-        .background(Color(fixed: 0xF3F5F9), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 
@@ -1264,7 +1206,7 @@ struct ShopBackgroundSheet: View {
     @ObservedObject var model: ShopBoardModel
     let onDone: () -> Void
 
-    enum Tab: String, CaseIterable { case colors = "Colors", textures = "Textures", photo = "My photo" }
+    enum Tab: String, CaseIterable { case colors = "Colors", textures = "Textures", photo = "My photo", cut = "Cut" }
     @State private var tab: Tab = .colors
     @State private var customColor = Color(fixed: 0xF1ECE4)
     @State private var pickingPhoto = false
@@ -1281,6 +1223,7 @@ struct ShopBackgroundSheet: View {
                     case .colors: colors
                     case .textures: textures
                     case .photo: photo
+                    case .cut: ShopCutTab(model: model)
                     }
                 }
                 .padding(.top, 12)
@@ -1310,29 +1253,32 @@ struct ShopBackgroundSheet: View {
 
     /// Colors · Textures · My photo: #F3F5F9 pill, the chosen one blue (110 × 32).
     private var tabs: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 0) {
             ForEach(Tab.allCases, id: \.self) { item in
                 let selected = item == tab
                 Button { withAnimation(.easeOut(duration: 0.15)) { tab = item } } label: {
+                    // Figma T4 (3084:253, PO 18 Nov): the grey tabs of Title & design, the picked one on a white pill.
                     Text(L10n.tr(item == .photo && model.template == .wearIt ? "Photo / video" : item.rawValue))
-                        .font(CS.inter(14, .bold))
-                        .foregroundStyle(selected ? .white : Color(fixed: 0x6B7385))
-                        .frame(maxWidth: .infinity).frame(height: 32)
+                        .font(CS.inter(13, selected ? .heavy : .semibold))
+                        .foregroundStyle(Color(fixed: selected ? 0x1769FF : 0x6B7385))
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                        .frame(maxWidth: .infinity).frame(height: 30)
                         .background {
                             if selected {
-                                Capsule().fill(LinearGradient(colors: [Color(fixed: 0x2F7BFF), Color(fixed: 0x0A55F0)],
-                                                              startPoint: .top, endPoint: .bottom))
+                                RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.white)
+                                    .shadow(color: Color.black.opacity(0.08), radius: 2, x: 0, y: 1)
                             }
                         }
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(selected ? .isSelected : [])
                 .accessibilityIdentifier("shopBgTab_\(item.rawValue)")
             }
         }
-        .padding(4)
-        .frame(height: 40)
-        .background(Color(fixed: 0xF3F5F9), in: Capsule())
+        .padding(3)
+        .frame(height: 36)
+        .background(Color(fixed: 0xF3F5F9), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private var matched: (top: ShopRGB, bottom: ShopRGB) { ShopPalette.softBackground(for: model.palette) }

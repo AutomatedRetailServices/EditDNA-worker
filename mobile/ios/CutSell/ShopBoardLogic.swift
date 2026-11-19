@@ -632,6 +632,13 @@ struct ShopFontCredit: Identifiable, Equatable {
         ShopFontCredit(family: "Allura", designer: "Robert Leuschke", licenseFile: "OFL-Allura"),
         ShopFontCredit(family: "Italiana", designer: "Santiago Orozco", licenseFile: "OFL-Italiana"),
         ShopFontCredit(family: "Sacramento", designer: "Astigmatic", licenseFile: "OFL-Sacramento"),
+        // Added 18 Nov 2026 (Title & design, Figma T2).
+        ShopFontCredit(family: "Instrument Serif", designer: "Rodrigo Fuenzalida, Jordan Egstad", licenseFile: "OFL-InstrumentSerif"),
+        ShopFontCredit(family: "DM Serif Display", designer: "Colophon Foundry", licenseFile: "OFL-DMSerifDisplay"),
+        ShopFontCredit(family: "Monsieur La Doulaise", designer: "Sudtipos (Alejandro Paul)", licenseFile: "OFL-MonsieurLaDoulaise"),
+        ShopFontCredit(family: "Mrs Saint Delafield", designer: "Sudtipos (Alejandro Paul)", licenseFile: "OFL-MrsSaintDelafield"),
+        ShopFontCredit(family: "Caveat", designer: "Impallari Type", licenseFile: "OFL-Caveat"),
+        ShopFontCredit(family: "Archivo Black", designer: "Omnibus-Type", licenseFile: "OFL-ArchivoBlack"),
     ]
 }
 
@@ -733,9 +740,9 @@ struct ShopAdjust: Equatable {
         return a
     }
 
-    static func pinched(_ start: ShopAdjust, by factor: CGFloat, base: CGSize? = nil) -> ShopAdjust {
+    static func pinched(_ start: ShopAdjust, by factor: CGFloat, base: CGSize? = nil, pastEdge: Bool = false) -> ShopAdjust {
         var a = start
-        let range = base.map(scaleLimits(base:)) ?? scaleRange
+        let range = base.map { scaleLimits(base: $0, pastEdge: pastEdge) } ?? scaleRange
         a.scale = min(max(start.scale * factor, range.lowerBound), range.upperBound)
         return a
     }
@@ -745,10 +752,15 @@ struct ShopAdjust: Equatable {
     /// height), as small as 36 points. `base` = the product's starting size in board design units (390 × 844).
     static let biggestWidth: CGFloat = 1.1, biggestHeight: CGFloat = 0.9, smallestSide: CGFloat = 36
 
-    static func scaleLimits(base: CGSize) -> ClosedRange<CGFloat> {
+    /// Background › Cut › "Products can go past the edge" (PO 18 Nov, Figma T4): still the same limit for every product,
+    /// but as big as 2.2 × the board's width (or 1.8 × its height); the board cuts what is outside.
+    static let pastEdgeWidth: CGFloat = 2.2, pastEdgeHeight: CGFloat = 1.8
+
+    static func scaleLimits(base: CGSize, pastEdge: Bool = false) -> ClosedRange<CGFloat> {
         guard base.width > 0, base.height > 0 else { return scaleRange }
         let design = ShopLayout.designSize
-        let upper = max(1, min(design.width * biggestWidth / base.width, design.height * biggestHeight / base.height))
+        let bw = pastEdge ? pastEdgeWidth : biggestWidth, bh = pastEdge ? pastEdgeHeight : biggestHeight
+        let upper = max(1, min(design.width * bw / base.width, design.height * bh / base.height))
         let lower = min(1, max(0.05, smallestSide / min(base.width, base.height)))
         return lower...upper
     }
@@ -769,8 +781,10 @@ struct ShopAdjust: Equatable {
 
 enum ShopDrawOrder {
     /// Drawing order of `count` places: untouched ones first (Figma order), then the ones raised by a tap, last on top.
-    static func order(itemIDs: [UUID], raised: [UUID]) -> [Int] {
-        let rank = Dictionary(raised.enumerated().map { ($1, $0) }, uniquingKeysWith: { _, last in last })
+    /// `lowered` (Hold › Back, PO 18 Nov): under every other product, the last one sent back furthest back.
+    static func order(itemIDs: [UUID], raised: [UUID], lowered: [UUID] = []) -> [Int] {
+        var rank = Dictionary(raised.enumerated().map { ($1, $0) }, uniquingKeysWith: { _, last in last })
+        for (i, id) in lowered.enumerated() { rank[id] = -2 - i }
         return itemIDs.indices.sorted { a, b in
             let ra = rank[itemIDs[a]] ?? -1, rb = rank[itemIDs[b]] ?? -1
             return ra == rb ? a < b : ra < rb
