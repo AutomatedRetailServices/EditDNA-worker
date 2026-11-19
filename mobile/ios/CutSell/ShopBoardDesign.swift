@@ -78,7 +78,7 @@ enum ShopLetter: String, CaseIterable, Codable, Identifiable {
         case .monsieur: "fall girls night"
         case .mrsSaint: "Nothing Here"
         case .greatVibes: "Christmas Chic"
-        case .caveat: "Flattering Fit ↙"
+        case .caveat: "Flattering Fit"
         case .archivo: "AMAZON"
         case .bebas: "ELEVATE ANY OUTFIT"
         case .playfair: "Fashion Finds"
@@ -953,8 +953,8 @@ struct ShopLayoutSample: View {
                 VStack(spacing: 2) {
                     Text(verbatim: "AMAZON EDIT").font(CS.inter(7, .medium)).tracking(2.1).foregroundStyle(ink)
                     HStack(spacing: 4) {
-                        t("Mom", ShopLetter.dmSerif.face, 19)
-                        t("Uniform", ShopLetter.dmSerifItalic, 19)
+                        t("Mom", ShopLetter.dmSerif.face, 17)
+                        t("Uniform", ShopLetter.dmSerifItalic, 17)
                     }
                 }
             case .boldScript:
