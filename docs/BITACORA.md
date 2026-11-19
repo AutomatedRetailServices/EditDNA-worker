@@ -55,6 +55,9 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 ## Motor de B-roll (servidor, no es un build de la app)
 
+- **19 nov 2026 18:32 ET · DEPLOY con OK de la PO ("ok")** — `feat/simple-engine-v1` → `b35caab9` (rama `feature/broll-trace`). Render `dep-dbvodlon74is739smcog` en vivo.
+  - Una línea en el registro por cada video enviado: cuántos clips y la marca de cada uno (`clip_type`, `broll_kind`). Sin nombres, links ni datos de la usuaria. Para revisar la prueba de B-roll de la PO ("no hizo b-roll", proyecto "Cut Nov 14").
+
 - **18 nov 2026 14:15 ET · DEPLOY con OK de la PO ("ok")** — `feat/simple-engine-v1` → `80a64109` (rama `feature/shop-idea`). API de Render (`dep-dbuvhup5efls73berus0`) en vivo; 9,424 pruebas del motor pasan.
   - Nuevo: `POST /v1/shop/idea` para "My idea" del Shop board. Ella sube la captura de un board que le gusta; Claude Sonnet 5.5 la mira una vez y devuelve un mapa exacto: colores del fondo, cada texto (palabras, lugar, color, tipo de letra) y el lugar de cada producto (qué tipo, tamaño, giro). El iPhone arma el board de ella con sus productos en esos lugares y lo guarda como estilo en el teléfono.
   - Nada se guarda en el servidor (ni la foto ni el mapa) y la foto no se escribe en los registros. Máximo 30 ideas por día por usuaria.
