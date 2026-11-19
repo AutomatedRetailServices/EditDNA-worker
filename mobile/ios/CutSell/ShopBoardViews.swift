@@ -1041,8 +1041,7 @@ struct ShopBoardHandEditor: View {
                                  editingWords = id
                                  held = nil
                              })
-                    .position(x: size.width / 2, y: min(size.height - 34, max(34, (snapshot.decorFrame(id, board: size)?.rect.maxY
-                        ?? snapshot.itemIDs.firstIndex(of: id).flatMap { snapshot.frame(at: $0, board: size)?.rect.maxY } ?? size.height / 2) + 36)))
+                    .position(x: size.width / 2, y: holdMenuY(id, snapshot: snapshot, size: size))
             }
             if let id = selected, id != ShopBoardModel.titleID, !model.isDecor(id), model.items.count > 1,
                let index = snapshot.itemIDs.firstIndex(of: id), let placed = snapshot.frame(at: index, board: size) {
@@ -1076,6 +1075,17 @@ struct ShopBoardHandEditor: View {
             }
         }
         .onChange(of: selected) { _, id in if id != held { held = nil } }
+    }
+
+    /// Just under what is held, kept on the board.
+    private func holdMenuY(_ id: UUID, snapshot: ShopBoardSnapshot, size: CGSize) -> CGFloat {
+        var bottom: CGFloat = size.height / 2
+        if let placed = snapshot.decorFrame(id, board: size) {
+            bottom = placed.rect.maxY
+        } else if let index = snapshot.itemIDs.firstIndex(of: id), let placed = snapshot.frame(at: index, board: size) {
+            bottom = placed.rect.maxY
+        }
+        return min(size.height - 34, max(34, bottom + 36))
     }
 }
 

@@ -835,7 +835,7 @@ struct ShopTitleDesignSheet: View {
 
     // MARK: Add (T3)
 
-    static let addColors: [ShopRGB] = [0xFFFFFF, 0xEDE6DA, 0xD9C7B0, 0xB8955A, 0x6CC7D1, 0x8A4B32, 0x3F4A2A, 0x0B1020].map { ShopRGB(hex: $0) }
+    static let addColors: [ShopRGB] = ([0xFFFFFF, 0xEDE6DA, 0xD9C7B0, 0xB8955A, 0x6CC7D1, 0x8A4B32, 0x3F4A2A, 0x0B1020] as [UInt32]).map { ShopRGB(hex: $0) }
 
     private var addTab: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1022,7 +1022,7 @@ struct ShopAddSample: View {
 /// Background › Cut (T4).
 struct ShopCutTab: View {
     @ObservedObject var model: ShopBoardModel
-    static let frameColors: [ShopRGB] = [0xFFFFFF, 0xF1ECE4, 0xB8955A, 0x8B7D6E, 0x3F4A2A, 0x0B1020].map { ShopRGB(hex: $0) }
+    static let frameColors: [ShopRGB] = ([0xFFFFFF, 0xF1ECE4, 0xB8955A, 0x8B7D6E, 0x3F4A2A, 0x0B1020] as [UInt32]).map { ShopRGB(hex: $0) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
