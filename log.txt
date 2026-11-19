@@ -1,0 +1,21 @@
+SDUI buttons: shopBoardScreen=Back | shopBoardScreen=Title, HOLIDAY | shopBoardScreen=Shuffle, New layout | shopBoardScreen=Background, ✨ Match | shopBoardScreen=Add another photo or item | shopBoardScreen=Next: share
+SDUI tap shopTitle: exists=true hittable=true frame=(24.0, 616.6666870117188, 111.33332824707031, 52.0)
+SDUI PASS Title & design opens
+SDUI tap shopLayout_tall: exists=true hittable=true frame=(30.0, 499.3333435058594, 106.0, 99.99996948242188)
+SDUI FAIL Layout › Tall gets picked
+SDUI tap shopDesignTab_2: exists=true hittable=true frame=(201.0, 201.0, 87.0, 30.0)
+SDUI PASS Letters tab opens
+SDUI tap shopLetter_instrument: exists=true hittable=true frame=(24.0, 481.3333435058594, 354.0, 47.999969482421875)
+SDUI PASS Letters › Instrument gets picked
+SDUI tap shopDesignTab_3: exists=true hittable=true frame=(288.0, 201.0, 87.0, 30.0)
+SDUI PASS Add tab opens
+SDUI tap shopAdd_tag: exists=true hittable=true frame=(266.0, 269.3333435058594, 106.0, 92.0)
+SDUI PASS Add closes the sheet: the tag waits on the board
+SDUI FAIL hold menu shows
+SDUI tap shopHoldDuplicate: exists=true hittable=true frame=(225.0, 299.3333333333333, 46.0, 40.0)
+SDUI tap shopBackground: exists=true hittable=true frame=(266.6666564941406, 616.6666870117188, 111.33334350585938, 52.0)
+SDUI tap shopBgTab_Cut: exists=true hittable=true frame=(288.0, 225.0, 87.0, 30.0)
+SDUI PASS Cut tab opens
+SDUI tap shopCut_doubleFrame: exists=true hittable=true frame=(148.0, 405.3333435058594, 106.0, 100.0)
+SDUI PASS Cut › Double frame gets picked
+SDUI tap shopBackgroundDone: exists=true hittable=true frame=(20.0, 772.0, 362.0, 54.0)
