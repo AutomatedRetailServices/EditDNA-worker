@@ -24,12 +24,20 @@ final class ShopDesignUITests: XCTestCase {
         step += 1
         try? XCUIScreen.main.screenshot().pngRepresentation.write(to: out.appendingPathComponent(String(format: "%02d_%@.png", step, name)))
     }
-    private func el(_ id: String) -> XCUIElement { app.descendants(matching: .any).matching(identifier: id).firstMatch }
+    private func el(_ id: String) -> XCUIElement {
+        let byID = app.descendants(matching: .any).matching(identifier: id).firstMatch
+        if byID.exists { return byID }
+        if let label = fallbackLabels[id] {
+            let byLabel = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", label)).firstMatch
+            if byLabel.exists { return byLabel }
+        }
+        return byID
+    }
     private func pause(_ s: Double) { RunLoop.current.run(until: Date().addingTimeInterval(s)) }
     private func tap(_ id: String) {
         var e = el(id)
         if !e.waitForExistence(timeout: 2), let label = fallbackLabels[id] {
-            e = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", label)).firstMatch
+            e = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", label)).firstMatch
         }
         let ok = e.waitForExistence(timeout: 5)
         log("tap \(id): exists=\(ok) hittable=\(ok && e.isHittable) frame=\(ok ? "\(e.frame)" : "-")")
@@ -38,7 +46,10 @@ final class ShopDesignUITests: XCTestCase {
     }
 
     private let fallbackLabels = ["shopTitle": "Title", "shopBackground": "Background", "shopTitleDone": "Done",
-                                  "shopBackgroundDone": "Done"]
+                                  "shopBackgroundDone": "Done", "shopDesignTab_2": "Letters", "shopDesignTab_3": "Add",
+                                  "shopLetter_instrument": "DUPES THAT", "shopAdd_tag": "Tag", "shopAdd_sparkle": "Sparkle",
+                                  "shopBgTab_Cut": "Cut", "shopCut_doubleFrame": "Double frame", "shopHoldDuplicate": "Duplicate",
+                                  "shopLayout_tall": "Tall"]
 
     func testTitleAndDesignWorksByHand() {
         app = XCUIApplication()
@@ -61,9 +72,8 @@ final class ShopDesignUITests: XCTestCase {
         tap("shopDesignTab_3")
         check(el("shopAdd_tag").waitForExistence(timeout: 3), "Add tab opens")
         tap("shopAdd_tag")
-        shot("added_tag")
-        tap("shopTitleDone")
-        check(!el("shopTitleSheet").exists, "Done closes the sheet")
+        pause(1)
+        check(!el("shopTitleSheet").exists, "Add closes the sheet: the tag waits on the board")
         shot("board_with_tag")
         // The tag starts in the middle of the board (design 195 × 430 of 390 × 844).
         let layer = el("shopBoardTouchLayer")
@@ -80,6 +90,12 @@ final class ShopDesignUITests: XCTestCase {
         shot("hold_menu")
         tap("shopHoldDuplicate")
         shot("duplicated")
+        // Instagram-style bin: drag the copy (just below-right of the first) to the bottom of the board.
+        let copy = layer.coordinate(withNormalizedOffset: CGVector(dx: 0.7 + 16 / 390, dy: 0.3 + 16 / 693))
+        let bin = layer.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1 - 46 / 693))
+        copy.press(forDuration: 0.15, thenDragTo: bin, withVelocity: .slow, thenHoldForDuration: 0.6)
+        pause(1)
+        shot("dropped_in_bin")
         tap("shopBackground")
         tap("shopBgTab_Cut")
         check(el("shopCut_doubleFrame").waitForExistence(timeout: 3), "Cut tab opens")

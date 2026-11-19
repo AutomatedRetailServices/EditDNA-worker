@@ -642,6 +642,10 @@ struct ShopTitleDesignSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             Text(L10n.tr("Title & design")).font(CS.inter(22, .heavy)).foregroundStyle(Color(fixed: 0x0B1020))
             ShopSegmentTabs(titles: ["Words", "Layout", "Letters", "Add"], selected: $tab).padding(.top, 10)
+            if tab < 3 {
+                // PO 19 Nov: the changes happened behind the sheet. The top of her board, live, so she sees each pick.
+                ShopTitlePreview(model: model).padding(.top, 10)
+            }
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     switch tab {
@@ -864,7 +868,9 @@ struct ShopTitleDesignSheet: View {
     }
 
     private func addTile(_ kind: ShopDecor.Kind) -> some View {
-        Button { model.addDecor(kind) } label: {
+        // PO 19 Nov ("no me deja mover… seleccionar"): it was added behind the sheet. Now the sheet closes and the new
+        // thing waits on the board, picked (blue outline), ready to drag, pinch and turn.
+        Button { model.addDecor(kind); onDone() } label: {
             ZStack(alignment: .bottom) {
                 ShopAddSample(kind: kind).frame(width: 106, height: 72)
                     .frame(maxHeight: .infinity, alignment: .top)
@@ -1219,5 +1225,51 @@ struct ShopDecorLayer: View {
         }
         .frame(width: size.width, height: size.height, alignment: .topLeading)
         .allowsHitTesting(false)
+    }
+}
+
+/// The top of her board (its title), live, inside the Title & design sheet (PO 19 Nov).
+struct ShopTitlePreview: View {
+    @ObservedObject var model: ShopBoardModel
+    var width: CGFloat = 342
+
+    var body: some View {
+        let h = width * 16 / 9
+        let shown = h * 150 / ShopLayout.designSize.height
+        ShopBoardCanvas(snapshot: model.snapshot(), width: width)
+            .frame(width: width, height: h, alignment: .top)
+            .frame(width: width, height: shown, alignment: .top)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color(fixed: 0xE6E9EF), lineWidth: 1))
+            .allowsHitTesting(false)
+            .accessibilityLabel(L10n.tr("Your board"))
+            .accessibilityIdentifier("shopTitlePreview")
+    }
+}
+
+/// Drag something here to take it off the board, like Instagram (PO 19 Nov: "un recicle bin… como se hace en ig").
+struct ShopTrashBin: View {
+    let hot: Bool
+
+    var body: some View {
+        Image(systemName: "trash")
+            .font(.system(size: 20, weight: .semibold))
+            .foregroundStyle(hot ? Color.white : Color(fixed: 0x0B1020))
+            .frame(width: 52, height: 52)
+            .background(Circle().fill(hot ? Color(fixed: 0xE5484D) : Color.white.opacity(0.92)))
+            .overlay(Circle().strokeBorder(Color.white.opacity(hot ? 0 : 1), lineWidth: 1))
+            .shadow(color: Color(fixed: 0x0D1433, opacity: 0.22), radius: 8, x: 0, y: 3)
+            .scaleEffect(hot ? 1.22 : 1)
+            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: hot)
+            .allowsHitTesting(false)
+            .accessibilityIdentifier("shopTrashBin")
+    }
+
+    /// Centre of the bin on a board `size` big, and whether `point` is on it.
+    static func center(board size: CGSize) -> CGPoint { CGPoint(x: size.width / 2, y: size.height - 46) }
+    static func isOver(_ point: CGPoint, board size: CGSize) -> Bool {
+        let c = center(board: size)
+        return hypot(point.x - c.x, point.y - c.y) <= 46
     }
 }

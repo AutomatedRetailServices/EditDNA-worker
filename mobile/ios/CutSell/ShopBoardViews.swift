@@ -827,8 +827,10 @@ struct ShopStyleView: View {
                 }
             }
             .animation(.snappy, value: current)
-            Text(verbatim: (Self.choices.map { L10n.tr(Self.name($0)) } + (ideas.styles.isEmpty ? [] : [L10n.tr("My styles")])
-                            + ["＋ " + L10n.tr("My idea")]).joined(separator: "  ·  "))
+            // PO 19 Nov: "sigue el texto de + my idea · debe eliminarse" (My idea is off).
+            Text(verbatim: (Self.choices.map { L10n.tr(Self.name($0)) }
+                            + (ShopIdeaFeature.isOn ? (ideas.styles.isEmpty ? [] : [L10n.tr("My styles")]) + ["＋ " + L10n.tr("My idea")] : []))
+                .joined(separator: "  ·  "))
                 .font(CS.inter(11, .semibold)).foregroundStyle(Color(fixed: 0x6B7385))
         }
         .frame(maxWidth: .infinity)
@@ -956,6 +958,9 @@ struct ShopBoardHandEditor: View {
     @State private var held: UUID?
     @State private var editingWords: UUID?
     @State private var words = ""
+    /// Something is being dragged (the trash bin shows) and whether the finger is on the bin.
+    @State private var dragging: UUID?
+    @State private var overTrash = false
 
     var body: some View {
         let snapshot = model.snapshot()
@@ -1025,8 +1030,31 @@ struct ShopBoardHandEditor: View {
                     let base = snapshot.itemIDs.firstIndex(of: id).flatMap { snapshot.baseSize(at: $0) }
                     a = ShopAdjust.pinched(a, by: pinch, base: id == ShopBoardModel.titleID ? nil : base, pastEdge: model.pastEdge)
                     model.adjusts[id] = ShopAdjust.twisted(a, by: twist)
+                },
+                onDrag: { id, point in
+                    guard canTrash(id) else { return }
+                    if dragging != id { dragging = id; held = nil }
+                    let over = ShopTrashBin.isOver(point, board: size)
+                    if over != overTrash {
+                        overTrash = over
+                        if over { UIImpactFeedbackGenerator(style: .rigid).impactOccurred() }
+                    }
+                },
+                onDrop: { id, point in
+                    defer { dragging = nil; overTrash = false }
+                    guard canTrash(id), ShopTrashBin.isOver(point, board: size) else { return }
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        if model.isDecor(id) { model.deleteDecor(id) } else { model.remove(id) }
+                    }
+                    selected = nil
                 })
             .accessibilityIdentifier("shopBoardTouchLayer")
+            if dragging != nil {
+                ShopTrashBin(hot: overTrash)
+                    .position(ShopTrashBin.center(board: size))
+                    .transition(.scale.combined(with: .opacity))
+            }
             // Figma S4x (3061:190, PO 14 Nov): a red × on the picked product's outline removes it from the board.
             // Hidden when it is the only product (a board keeps at least 1).
             if let id = held {
@@ -1077,6 +1105,12 @@ struct ShopBoardHandEditor: View {
         .onChange(of: selected) { _, id in if id != held { held = nil } }
     }
 
+    /// The title stays; a product only while another one is left (a board keeps at least 1).
+    private func canTrash(_ id: UUID) -> Bool {
+        if id == ShopBoardModel.titleID { return false }
+        return model.isDecor(id) || model.items.count > 1
+    }
+
     /// Just under what is held, kept on the board.
     private func holdMenuY(_ id: UUID, snapshot: ShopBoardSnapshot, size: CGSize) -> CGFloat {
         var bottom: CGFloat = size.height / 2
@@ -1110,6 +1144,9 @@ struct ShopBoardTouchLayer: UIViewRepresentable {
     let onBegin: (UUID) -> ShopAdjust
     /// id, start, finger movement (points), pinch factor, twist (degrees).
     let onChange: (UUID, ShopAdjust, CGSize, CGFloat, Double) -> Void
+    /// One finger dragging `id`: where the finger is now (the trash bin), and where it was let go.
+    var onDrag: (UUID, CGPoint) -> Void = { _, _ in }
+    var onDrop: (UUID, CGPoint) -> Void = { _, _ in }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -1175,7 +1212,13 @@ struct ShopBoardTouchLayer: UIViewRepresentable {
                 let t = g.translation(in: g.view)
                 move = CGSize(width: t.x, height: t.y)
                 push()
-            case .ended, .cancelled, .failed: end()
+                if let id = active, g.numberOfTouches == 1 { parent.onDrag(id, g.location(in: g.view)) }
+            case .ended:
+                if let id = active { parent.onDrop(id, g.location(in: g.view)) }
+                end()
+            case .cancelled, .failed:
+                if let id = active { parent.onDrop(id, CGPoint(x: -999, y: -999)) }
+                end()
             default: break
             }
         }
