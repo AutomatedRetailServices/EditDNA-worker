@@ -1131,7 +1131,7 @@ struct ShopHoldMenu: View {
     let onEditWords: () -> Void
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 1) {
             button("Front", "square.3.layers.3d.top.filled", id: "shopHoldFront", action: onFront)
             button("Back", "square.3.layers.3d.bottom.filled", id: "shopHoldBack", action: onBack)
             if isDecor {
@@ -1140,7 +1140,7 @@ struct ShopHoldMenu: View {
                 button("Delete", "trash", id: "shopHoldDelete", destructive: true, action: onDelete)
             }
         }
-        .padding(4)
+        .padding(3)
         .background(Capsule().fill(Color.white).shadow(color: Color(fixed: 0x0D1433, opacity: 0.18), radius: 10, x: 0, y: 4))
         .accessibilityIdentifier("shopHoldMenu")
     }
@@ -1149,11 +1149,11 @@ struct ShopHoldMenu: View {
         Button(action: action) {
             VStack(spacing: 1) {
                 Image(systemName: icon).font(.system(size: 13, weight: .semibold))
-                Text(L10n.tr(title)).font(CS.inter(9.5, .bold)).lineLimit(1)
+                Text(L10n.tr(title)).font(CS.inter(8.5, .bold)).lineLimit(1).minimumScaleFactor(0.7)
             }
             .foregroundStyle(Color(fixed: destructive ? 0xE5484D : 0x0B1020))
-            .frame(minWidth: 52, minHeight: 40)
-            .padding(.horizontal, 4)
+            // 5 buttons fit the smallest board (19 Nov probe: "Front" and "Delete" were cut off).
+            .frame(width: 46, height: 40)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
