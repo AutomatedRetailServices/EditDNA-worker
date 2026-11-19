@@ -6,6 +6,15 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 
 
+
+## Rama · 19 nov tarde (después del build 101, sin build todavía)
+
+- Papelera **debajo del board, afuera** (PO: "que se ponga fuera del recuadro… se puede borrar sin querer"): solo borra
+  si sueltas debajo del borde de abajo del board, cerca del bote. Figma S4t-A/B movidos.
+- **Add products = opción A** (PO: "solo from photos… me gusta la A", Figma S2-A 3086:268 / S2-A0 3086:335): una tarjeta
+  "Add photos"; se quitó "From my products" y la línea de Shape it. Solo fotos (videos: pendiente de la PO).
+- 123 pruebas de la app, 0 fallas; flujo real probado en el simulador; capturas iguales a Figma.
+
 ## Rama · arreglos del 19 nov (después del build 100, sin build todavía)
 
 - PO: "no me deja mover seleccionar nada de ese menu (add)", "no sé qué dice ese menú y para qué es", "recicle bin como en
