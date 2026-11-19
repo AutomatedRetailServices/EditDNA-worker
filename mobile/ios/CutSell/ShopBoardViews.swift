@@ -307,9 +307,6 @@ struct ShopAddProductsView: View {
     /// Photos for this one item (a product from the list or a pasted link).
     @State private var photoFor: UUID?
     /// The item that asks for its photo once the current sheet has finished closing.
-    @State private var photoNext: UUID?
-    @State private var showingProducts = false
-    @State private var lastSource: ShopItemSource = .photos
     @State private var notice: String?
 
     private let columns = [GridItem(.fixed(102), spacing: 12), GridItem(.fixed(102), spacing: 12), GridItem(.fixed(102), spacing: 12)]
@@ -318,16 +315,16 @@ struct ShopAddProductsView: View {
         ZStack(alignment: .bottom) {
             HomeBackdrop()
             VStack(spacing: 0) {
-                ShopHeader(title: "Add products", subtitle: "Pick 1–12 items for your board.", onBack: onBack)
+                // Figma S2-A 3086:268 / S2-A0 3086:335 (PO 19 Nov: "solo from photos… me gusta la A").
+                ShopHeader(title: "Add products", subtitle: "Photos of your products · we cut them out", onBack: onBack)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        sourceRow(.myProducts, "From my products", "CeraVe, Dior… (your product list)") { showingProducts = true }
-                        sourceRow(.photos, "From photos", "We remove the background") { pickingPhotos = true }
+                        addPhotosCard
                         if !model.items.isEmpty {
-                            Text(verbatim: String(format: L10n.tr("Your items · %d"), model.items.count))
+                            Text(verbatim: String(format: L10n.tr("Your items · %d · tap × to remove"), model.items.count))
                                 .font(CS.inter(13, .bold))
                                 .foregroundStyle(Color(fixed: 0x6B7385))
-                                .padding(.top, 16)
+                                .padding(.top, 6)
                             LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
                                 ForEach(model.items) { item in tile(item) }
                             }
@@ -353,7 +350,6 @@ struct ShopAddProductsView: View {
         .sheet(isPresented: $pickingPhotos) {
             ShopPhotoPicker(limit: ShopBoardRules.remaining(model.items)) { providers in
                 pickingPhotos = false
-                lastSource = .photos
                 model.addPhotos(providers)
             }
             .ignoresSafeArea()
@@ -364,17 +360,6 @@ struct ShopAddProductsView: View {
                 if let provider = providers.first { model.attach(provider, to: target.id) }
             }
             .ignoresSafeArea()
-        }
-        .sheet(isPresented: $showingProducts, onDismiss: {
-            // The product list has no product photos: hers comes from Photos, after the list has closed.
-            if let id = photoNext { photoNext = nil; photoFor = id }
-        }) {
-            ShopProductListSheet { name, productID in
-                lastSource = .myProducts
-                photoNext = model.addProduct(name: name, productID: productID)
-                showingProducts = false
-            }
-            .environmentObject(appState)
         }
         .onChange(of: model.photoFailures) { _, _ in show(L10n.tr("A photo couldn't be opened. Try another one.")) }
         .accessibilityIdentifier("shopAddProducts")
@@ -387,32 +372,34 @@ struct ShopAddProductsView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { withAnimation { if notice == text { notice = nil } } }
     }
 
-    /// Figma 2 rows: 342 × 62, radius 18, a 36 pt blue circle, Bold 15 + Medium 12, "›".
-    private func sourceRow(_ source: ShopItemSource, _ title: String, _ detail: String,
-                           action: @escaping () -> Void) -> some View {
-        let full = ShopBoardRules.remaining(model.items) == 0
-        return Button(action: action) {
-            HStack(spacing: 12) {
+    /// Figma S2-A: the dashed "Add photos" card (342 wide, radius 22, #1769FF 2 pt dashes 8/6, white 85 %): a 56 pt blue
+    /// circle with a photo, "Add photos" ExtraBold 17, a Medium 12 grey line. Tall (300) while there is nothing yet.
+    private var addPhotosCard: some View {
+        let left = ShopBoardRules.remaining(model.items)
+        let empty = model.items.isEmpty
+        return Button { pickingPhotos = true } label: {
+            VStack(spacing: 0) {
                 Circle()
                     .fill(LinearGradient(colors: [Color(fixed: 0x2F7BFF), Color(fixed: 0x0A55F0)], startPoint: .top, endPoint: .bottom))
-                    .frame(width: 36, height: 36)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(L10n.tr(title)).font(CS.inter(15, .bold)).foregroundStyle(Color(fixed: 0x0B1020))
-                    Text(L10n.tr(detail)).font(CS.inter(12, .medium)).foregroundStyle(Color(fixed: 0x6B7385))
-                        .lineLimit(1).minimumScaleFactor(0.85)
-                }
-                Spacer(minLength: 0)
-                Text(verbatim: "›").font(CS.inter(22, .bold)).foregroundStyle(Color(fixed: 0x6B7385))
+                    .frame(width: 56, height: 56)
+                    .overlay(Image(systemName: "photo.on.rectangle").font(.system(size: 22, weight: .semibold)).foregroundStyle(.white))
+                Text(L10n.tr("Add photos")).font(CS.inter(17, .heavy)).foregroundStyle(Color(fixed: 0x0B1020)).padding(.top, 10)
+                Text(empty ? L10n.tr("From your camera roll · up to 12\nWe remove the background")
+                           : String(format: L10n.tr("Up to 12 · %d left"), left))
+                    .font(CS.inter(12, .medium)).foregroundStyle(Color(fixed: 0x6B7385))
+                    .multilineTextAlignment(.center).padding(.top, 4)
             }
-            .padding(.leading, 14).padding(.trailing, 18)
-            .frame(height: 62)
-            .shopCard(radius: 18, selected: lastSource == source)
+            .frame(maxWidth: .infinity)
+            .frame(height: empty ? 300 : 146)
+            .background(Color.white.opacity(0.85), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(Color(fixed: 0x1769FF), style: StrokeStyle(lineWidth: 2, dash: [8, 6])))
             .contentShape(Rectangle())
-            .opacity(full ? 0.5 : 1)
+            .opacity(left == 0 ? 0.5 : 1)
         }
         .buttonStyle(BubblePress())
-        .disabled(full)
-        .accessibilityIdentifier("shopSource_\(source.rawValue)")
+        .disabled(left == 0)
+        .accessibilityIdentifier("shopSource_photos")
     }
 
     /// Figma 2 thumbnails: 102 × 116, white, #E6E9EF border, radius 16; "✓ No background", "×", "✦ Shape it".

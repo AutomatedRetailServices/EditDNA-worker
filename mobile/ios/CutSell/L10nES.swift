@@ -1829,5 +1829,10 @@ enum L10nES {
         "Comment YES": "Comenta SÍ",
         "SHOP NOW": "COMPRA AQUÍ",
         "Early Black Friday Sale": "Venta anticipada de Black Friday",
+        "Photos of your products · we cut them out": "Fotos de tus productos · los recortamos",
+        "Add photos": "Agregar fotos",
+        "From your camera roll · up to 12\nWe remove the background": "De tu carrete · hasta 12\nLes quitamos el fondo",
+        "Up to 12 · %d left": "Hasta 12 · quedan %d",
+        "Your items · %d · tap × to remove": "Tus productos · %d · toca × para quitar",
     ]
 }
