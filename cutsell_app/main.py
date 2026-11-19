@@ -1,6 +1,8 @@
 """Standalone FastAPI entrypoint for the clean CutSell mobile backend."""
 from __future__ import annotations
 
+import logging
+
 from copy import deepcopy
 from typing import Any
 
@@ -404,6 +406,13 @@ def submit_flow_b(payload: FlowBSubmitRequest):
     except ProcessingLimitError:
         # 23 Oct: was an unhandled 500; the app retries a 429.
         raise HTTPException(status_code=429, detail="processing_concurrency_limit", headers={"Retry-After": "60"})
+    # PO 19 Nov: "no hizo b-roll". One line per cut with how each source was marked (clip_type only: no names,
+    # no links, no user data), so a cut with B-roll can be checked while its job is still on the server.
+    marks = [str((s.get("metadata") or {}).get("clip_type") or "-") for s in sources]
+    kinds = [str((s.get("metadata") or {}).get("broll_kind") or "") for s in sources]
+    logging.getLogger("cutsell.flow_b").warning(
+        "flowb_submit job=%s sources=%d clip_types=%s broll_kinds=%s", submission.job_id, len(sources),
+        ",".join(marks), ",".join(k for k in kinds if k) or "-")
     return FlowBSubmitResponse(job_id=submission.job_id, queue=submission.queue_name)
 
 
