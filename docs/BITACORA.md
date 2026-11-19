@@ -63,6 +63,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 101 | 2026-11-19 10:00 | ✅ subido (pedido PENDING) | feature/shop-board | `34a6b83f` | Add deja lo nuevo en el board; título en vivo en el menú; papelera tipo IG; menú de mantener presionado cabe; sin "＋ My idea" |
 | 100 | 2026-11-18 22:18 | ✅ subido 22:18 (pedido `133e4fd2`) | feature/shop-board | `fbbb837e` | Title & design (Layout, Letters, Add) + Background › Cut + productos fuera del borde; My idea apagado; sin "2 cents" |
 | 99 | 2026-11-18 16:51 | ✅ subido 16:51 (pedido `e92d17e1`) | feature/shop-board | `0cb3b834` | Choose a style en carrusel (Collage, Wear it, sus estilos) + ＋ My idea |
 | 98 | 2026-11-17 19:13 | ✅ subido 19:13 (pedido `bc4e282a`) | feature/shop-board | `f92efc93` | "Add another photo or item" + boards guardados desde Home + mismo límite de tamaño |
@@ -163,6 +164,14 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 | 1 | 2026-10-12 13:01 | ❌ falló | feature/ios-captions-v2 | `d90bfc50` | Primer intento, no llegó a TestFlight |
 
 ---
+
+## Build 101
+
+- **Fecha:** 19 nov 2026 · **Rama:** `feature/shop-board` · **Commit:** `34a6b83f` · Pedido por la PO ("si", 9:58).
+- **Qué cambia:** arreglos del 19 nov (ver "Rama · arreglos del 19 nov"): Add cierra el menú y lo nuevo queda en el board;
+  título en vivo en Words/Layout/Letters (Figma T1b); papelera tipo Instagram (Figma S4t-A/B); el menú de mantener
+  presionado cabe; Choose a style sin "＋ My idea".
+- **Pruebas:** 122 pruebas de la app, 0 fallas; flujo real probado en el simulador (ShopDesignUITests).
 
 ## Build 100
 
