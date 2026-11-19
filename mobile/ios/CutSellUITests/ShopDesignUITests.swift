@@ -93,8 +93,12 @@ final class ShopDesignUITests: XCTestCase {
         tap("shopHoldDuplicate")
         shot("duplicated")
         // Instagram-style bin: drag the copy (just below-right of the first) to the bottom of the board.
+        // Near the bottom edge but still on the board: nothing is deleted (PO 19 Nov: the bin is outside the board).
+        end.press(forDuration: 0.15, thenDragTo: board(0.5, 0.97), withVelocity: .slow, thenHoldForDuration: 0.6)
+        pause(1)
+        shot("near_bottom_edge_kept")
         let copy = board(0.7 + 16.0 / 390, 0.3 + 16.0 / 693)
-        let bin = board(0.5, 1 - 46.0 / 466)
+        let bin = board(0.5, 1 + 40.0 / 466)   // under the board, outside it (PO 19 Nov)
         copy.press(forDuration: 0.15, thenDragTo: bin, withVelocity: .slow, thenHoldForDuration: 0.6)
         pause(1)
         shot("dropped_in_bin")

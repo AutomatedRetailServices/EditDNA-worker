@@ -99,6 +99,14 @@ final class ShopDesignTests: XCTestCase {
         XCTAssertEqual(model.adjusts[shape]?.offset.width, 30)
     }
 
+    func testTrashBinIsOutsideTheBoard() {
+        let size = CGSize(width: 262, height: 466)
+        XCTAssertFalse(ShopTrashBin.isOver(CGPoint(x: 131, y: 460), board: size), "the bottom edge of the board never deletes")
+        XCTAssertFalse(ShopTrashBin.isOver(CGPoint(x: 131, y: 466), board: size))
+        XCTAssertTrue(ShopTrashBin.isOver(CGPoint(x: 131, y: 506), board: size), "on the bin under the board")
+        XCTAssertFalse(ShopTrashBin.isOver(CGPoint(x: 10, y: 506), board: size), "under the board but far from the bin")
+    }
+
     func testProductsCanBeSentBack() {
         let ids = [UUID(), UUID(), UUID()]
         XCTAssertEqual(ShopDrawOrder.order(itemIDs: ids, raised: [], lowered: [ids[2]]), [2, 0, 1])

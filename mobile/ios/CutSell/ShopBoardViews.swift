@@ -875,12 +875,21 @@ struct ShopBoardScreen: View {
                     let width = min(geo.size.width - 40, (geo.size.height - 8) * 9 / 16)
                     ShopBoardHandEditor(model: model, selected: $selected, width: width)
                         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        // The bin lives under the board, outside it (PO 19 Nov), over the cards while dragging.
+                        .overlay(alignment: .bottom) {
+                            if let hot = model.trashHot {
+                                ShopTrashBin(hot: hot)
+                                    .offset(y: ShopTrashBin.gap + 26)
+                                    .transition(.scale.combined(with: .opacity))
+                            }
+                        }
                         .shadow(color: Color(fixed: 0xD3DDF5), radius: 0, x: 0, y: 3)
                         .shadow(color: Color(fixed: 0x0D1433, opacity: 0.08), radius: 12, x: 0, y: 10)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                         .accessibilityIdentifier("shopBoardPreview")
                 }
                 .padding(.top, 16)
+                .zIndex(1)
                 HStack(spacing: 10) {
                     actionCard("Title", detail: model.bigTitle, id: "shopTitle", action: onTitle)
                     actionCard("Shuffle", detail: L10n.tr("New layout"), id: "shopShuffle") {
@@ -958,9 +967,8 @@ struct ShopBoardHandEditor: View {
     @State private var held: UUID?
     @State private var editingWords: UUID?
     @State private var words = ""
-    /// Something is being dragged (the trash bin shows) and whether the finger is on the bin.
+    /// Something is being dragged (the trash bin under the board shows: model.trashHot).
     @State private var dragging: UUID?
-    @State private var overTrash = false
 
     var body: some View {
         let snapshot = model.snapshot()
@@ -1033,15 +1041,15 @@ struct ShopBoardHandEditor: View {
                 },
                 onDrag: { id, point in
                     guard canTrash(id) else { return }
-                    if dragging != id { dragging = id; held = nil }
+                    if dragging != id { dragging = id; held = nil; model.trashHot = false }
                     let over = ShopTrashBin.isOver(point, board: size)
-                    if over != overTrash {
-                        overTrash = over
+                    if over != model.trashHot {
+                        model.trashHot = over
                         if over { UIImpactFeedbackGenerator(style: .rigid).impactOccurred() }
                     }
                 },
                 onDrop: { id, point in
-                    defer { dragging = nil; overTrash = false }
+                    defer { dragging = nil; model.trashHot = nil }
                     guard canTrash(id), ShopTrashBin.isOver(point, board: size) else { return }
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                     withAnimation(.easeOut(duration: 0.2)) {
@@ -1050,11 +1058,7 @@ struct ShopBoardHandEditor: View {
                     selected = nil
                 })
             .accessibilityIdentifier("shopBoardTouchLayer")
-            if dragging != nil {
-                ShopTrashBin(hot: overTrash)
-                    .position(ShopTrashBin.center(board: size))
-                    .transition(.scale.combined(with: .opacity))
-            }
+
             // Figma S4x (3061:190, PO 14 Nov): a red × on the picked product's outline removes it from the board.
             // Hidden when it is the only product (a board keeps at least 1).
             if let id = held {

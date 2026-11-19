@@ -57,6 +57,8 @@ final class ShopBoardModel: ObservableObject {
     @Published var cutColor = ShopRGB(hex: 0xFFFFFF)
     /// Background › Cut › "Products can go past the edge" (on: bigger limits, the board cuts what is outside).
     @Published var pastEdge = true
+    /// The trash bin under Your board while something is dragged: nil hidden, false shown, true the finger is on it.
+    @Published var trashHot: Bool?
     /// Wear it with a video (Figma W1/W2): her video file and its length; `photoBackground` is then its first picture
     /// (thumbnails, the style tile). Only Wear it uses a video.
     @Published var videoBackground: URL?

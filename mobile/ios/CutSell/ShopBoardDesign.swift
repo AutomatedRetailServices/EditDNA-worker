@@ -1266,10 +1266,13 @@ struct ShopTrashBin: View {
             .accessibilityIdentifier("shopTrashBin")
     }
 
-    /// Centre of the bin on a board `size` big, and whether `point` is on it.
-    static func center(board size: CGSize) -> CGPoint { CGPoint(x: size.width / 2, y: size.height - 46) }
+    /// PO 19 Nov: "que se ponga fuera del recuadro… se puede borrar sin querer": the bin sits under the board, outside
+    /// it, so arranging near the bottom edge never deletes anything. Centre 40 pt below the board's bottom edge.
+    static let gap: CGFloat = 40
+    static func center(board size: CGSize) -> CGPoint { CGPoint(x: size.width / 2, y: size.height + gap) }
+    /// Only below the board's bottom edge, and near the bin.
     static func isOver(_ point: CGPoint, board size: CGSize) -> Bool {
         let c = center(board: size)
-        return hypot(point.x - c.x, point.y - c.y) <= 46
+        return point.y > size.height && hypot(point.x - c.x, point.y - c.y) <= 52
     }
 }
