@@ -234,6 +234,24 @@ struct DesignScreenshotRoot: View {
             ShopBoardsTabView(selectTab: { _ in })
         case "shop_your_board":
             ShopBoardScreen(model: Self.sampleShopBoard, onBack: {}, onTitle: {}, onBackground: {}, onNext: {})
+        // Title & design + Background › Cut (Figma T1 – T5, 18 Nov).
+        case "shop_title_layout", "shop_title_letters", "shop_title_add":
+            let tab = ["shop_title_layout": 1, "shop_title_letters": 2, "shop_title_add": 3][screen] ?? 1
+            ZStack {
+                ShopBoardScreen(model: Self.sampleShopBoard, onBack: {}, onTitle: {}, onBackground: {}, onNext: {})
+                BottomSheetOverlay(isPresented: .constant(true)) {
+                    ShopTitleDesignSheet(model: Self.sampleShopBoard, onDone: {}, startTab: tab)
+                }
+            }
+        case "shop_bg_cut":
+            ZStack {
+                ShopBoardScreen(model: Self.sampleShopBoard, onBack: {}, onTitle: {}, onBackground: {}, onNext: {})
+                BottomSheetOverlay(isPresented: .constant(true)) {
+                    ShopBackgroundSheet(model: Self.sampleShopBoard, onDone: {}, startTab: .cut)
+                }
+            }
+        case "shop_board_designed":
+            ShopBoardScreen(model: Self.designedShopBoard, onBack: {}, onTitle: {}, onBackground: {}, onNext: {})
         case "plan_built":
             PlanView(selectTab: { _ in })
                 .task { try? await PlanWeekStore.shared.build(session: nil) }
@@ -282,6 +300,28 @@ struct DesignScreenshotRoot: View {
         }
         model.bigTitle = "HOLIDAY"
         model.scriptLine = "look for less"
+        return model
+    }()
+
+    /// Figma T5 (3084:376): the sample board made only with the new free tools (Script inside, Double frame, a label
+    /// with its arrow, sparkles, a product past the edge).
+    @MainActor static let designedShopBoard: ShopBoardModel = {
+        let model = ShopBoardModel()
+        model.items = sampleShopBoard.items.map { ShopItem(source: .photos, cutout: $0.cutout, kind: $0.kind) }
+        model.bigTitle = "THE EDIT"
+        model.scriptLine = "Fall"
+        model.titleLayout = .scriptInside
+        model.style.pick(.color(ShopRGB(hex: 0x8B7D6E)))
+        model.style.pickTitleColor(ShopRGB(hex: 0xF4EFE8))
+        model.cut = .doubleFrame
+        model.cutColor = ShopRGB(hex: 0xF4EFE8)
+        let label = model.addDecor(.label)
+        model.setText("Wide leg fit", for: label)
+        model.adjusts[label] = ShopAdjust(offset: CGSize(width: 110, height: 40))
+        model.addColor = ShopRGB(hex: 0xE7D3A4)
+        let sparkle = model.addDecor(.sparkle)
+        model.adjusts[sparkle] = ShopAdjust(offset: CGSize(width: -140, height: -250), scale: 0.6)
+        model.selectedDecor = nil
         return model
     }()
 

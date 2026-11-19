@@ -628,7 +628,13 @@ struct ShopSwatchRow<Leading: View>: View {
 struct ShopTitleDesignSheet: View {
     @ObservedObject var model: ShopBoardModel
     let onDone: () -> Void
-    @State private var tab = 1
+    @State private var tab: Int
+
+    init(model: ShopBoardModel, onDone: @escaping () -> Void, startTab: Int = 1) {
+        self.model = model
+        self.onDone = onDone
+        _tab = State(initialValue: startTab)
+    }
     /// Letters › "Change letters of": 0 big title, 1 script line, 2 the picked text on the board.
     @State private var target = 0
 

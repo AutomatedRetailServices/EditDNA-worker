@@ -1217,7 +1217,13 @@ struct ShopBackgroundSheet: View {
     let onDone: () -> Void
 
     enum Tab: String, CaseIterable { case colors = "Colors", textures = "Textures", photo = "My photo", cut = "Cut" }
-    @State private var tab: Tab = .colors
+    @State private var tab: Tab
+
+    init(model: ShopBoardModel, onDone: @escaping () -> Void, startTab: Tab = .colors) {
+        self.model = model
+        self.onDone = onDone
+        _tab = State(initialValue: startTab)
+    }
     @State private var customColor = Color(fixed: 0xF1ECE4)
     @State private var pickingPhoto = false
     /// "Use a photo instead" (Figma W1): the picker shows photos only.
