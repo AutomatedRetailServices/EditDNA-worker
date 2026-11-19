@@ -28,7 +28,7 @@ final class ShopDesignUITests: XCTestCase {
         let byID = app.descendants(matching: .any).matching(identifier: id).firstMatch
         if byID.exists { return byID }
         if let label = fallbackLabels[id] {
-            let byLabel = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", label)).firstMatch
+            let byLabel = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", label, label + ",")).firstMatch
             if byLabel.exists { return byLabel }
         }
         return byID
@@ -37,7 +37,7 @@ final class ShopDesignUITests: XCTestCase {
     private func tap(_ id: String) {
         var e = el(id)
         if !e.waitForExistence(timeout: 2), let label = fallbackLabels[id] {
-            e = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", label)).firstMatch
+            e = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", label, label + ",")).firstMatch
         }
         let ok = e.waitForExistence(timeout: 5)
         log("tap \(id): exists=\(ok) hittable=\(ok && e.isHittable) frame=\(ok ? "\(e.frame)" : "-")")
@@ -47,7 +47,7 @@ final class ShopDesignUITests: XCTestCase {
 
     private let fallbackLabels = ["shopTitle": "Title", "shopBackground": "Background", "shopTitleDone": "Done",
                                   "shopBackgroundDone": "Done", "shopDesignTab_2": "Letters", "shopDesignTab_3": "Add",
-                                  "shopLetter_instrument": "DUPES THAT", "shopAdd_tag": "Tag", "shopAdd_sparkle": "Sparkle",
+                                  "shopLetter_instrument": "DUPES THAT DON'T", "shopAdd_tag": "Tag", "shopAdd_sparkle": "Sparkle",
                                   "shopBgTab_Cut": "Cut", "shopCut_doubleFrame": "Double frame", "shopHoldDuplicate": "Duplicate",
                                   "shopLayout_tall": "Tall"]
 
@@ -76,11 +76,13 @@ final class ShopDesignUITests: XCTestCase {
         check(!el("shopTitleSheet").exists, "Add closes the sheet: the tag waits on the board")
         shot("board_with_tag")
         // The tag starts in the middle of the board (design 195 × 430 of 390 × 844).
-        let layer = el("shopBoardTouchLayer")
-        check(layer.waitForExistence(timeout: 3), "board touch layer")
-        log("layer frame \(layer.frame) hittable=\(layer.isHittable)")
-        let start = layer.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 430.0 / 844))
-        let end = layer.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.3))
+        // The board on Your board (iPhone Pro, 402 × 874 points): x 70, y 127, 262 × 466.
+        let window = app.windows.firstMatch
+        func board(_ x: CGFloat, _ y: CGFloat) -> XCUICoordinate {
+            window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 70 + 262 * x, dy: 127 + 466 * y))
+        }
+        let start = board(0.5, 430.0 / 844)
+        let end = board(0.7, 0.3)
         start.press(forDuration: 0.1, thenDragTo: end)
         pause(1)
         shot("tag_dragged")
@@ -91,8 +93,8 @@ final class ShopDesignUITests: XCTestCase {
         tap("shopHoldDuplicate")
         shot("duplicated")
         // Instagram-style bin: drag the copy (just below-right of the first) to the bottom of the board.
-        let copy = layer.coordinate(withNormalizedOffset: CGVector(dx: 0.7 + 16 / 390, dy: 0.3 + 16 / 693))
-        let bin = layer.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1 - 46 / 693))
+        let copy = board(0.7 + 16.0 / 390, 0.3 + 16.0 / 693)
+        let bin = board(0.5, 1 - 46.0 / 466)
         copy.press(forDuration: 0.15, thenDragTo: bin, withVelocity: .slow, thenHoldForDuration: 0.6)
         pause(1)
         shot("dropped_in_bin")
