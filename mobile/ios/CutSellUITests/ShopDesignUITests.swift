@@ -27,12 +27,18 @@ final class ShopDesignUITests: XCTestCase {
     private func el(_ id: String) -> XCUIElement { app.descendants(matching: .any).matching(identifier: id).firstMatch }
     private func pause(_ s: Double) { RunLoop.current.run(until: Date().addingTimeInterval(s)) }
     private func tap(_ id: String) {
-        let e = el(id)
+        var e = el(id)
+        if !e.waitForExistence(timeout: 2), let label = fallbackLabels[id] {
+            e = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", label)).firstMatch
+        }
         let ok = e.waitForExistence(timeout: 5)
         log("tap \(id): exists=\(ok) hittable=\(ok && e.isHittable) frame=\(ok ? "\(e.frame)" : "-")")
         if ok { e.tap() }
         pause(0.8)
     }
+
+    private let fallbackLabels = ["shopTitle": "Title", "shopBackground": "Background", "shopTitleDone": "Done",
+                                  "shopBackgroundDone": "Done"]
 
     func testTitleAndDesignWorksByHand() {
         app = XCUIApplication()
@@ -40,6 +46,7 @@ final class ShopDesignUITests: XCTestCase {
         app.launch()
         pause(3)
         shot("board")
+        log("buttons: " + app.buttons.allElementsBoundByIndex.prefix(25).map { "\($0.identifier)=\($0.label)" }.joined(separator: " | "))
         tap("shopTitle")
         check(el("shopTitleSheet").waitForExistence(timeout: 4), "Title & design opens")
         shot("sheet")
