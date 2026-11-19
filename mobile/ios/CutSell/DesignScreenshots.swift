@@ -253,6 +253,11 @@ struct DesignScreenshotRoot: View {
         // The real flow on Your board (sample products), for the Title & design probe (19 Nov).
         case "shop_flow":
             ShopBoardFlowView(saved: Self.sampleShopBoard, onClose: {})
+        // Add products, option A (Figma S2-A / S2-A0, 19 Nov).
+        case "shop_add_products":
+            ShopAddProductsView(model: Self.sampleShopBoard, onBack: {}, onShape: { _ in }, onNext: {})
+        case "shop_add_products_empty":
+            ShopAddProductsView(model: ShopBoardModel(), onBack: {}, onShape: { _ in }, onNext: {})
         case "shop_board_designed":
             ShopBoardScreen(model: Self.designedShopBoard, onBack: {}, onTitle: {}, onBackground: {}, onNext: {})
         case "plan_built":
