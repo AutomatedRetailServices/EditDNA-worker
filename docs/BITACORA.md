@@ -9,7 +9,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 
 
-## Rama · cámara + B-roll: el video no aparecía (20 nov, sin build todavía)
+## Rama · cámara + B-roll: el video no aparecía (20 nov, en el build 104)
 
 - PO (proyecto "Cut Nov 20"): "usando la cámara y usando b-roll no funciona. nunca agregó el broll… el video que se graba
   desde la cámara del app no se guarda en el teléfono en automático".
@@ -18,7 +18,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
   de que terminen de subir los videos; el servidor preguntó "¿está el video?" mientras subía, recibió "no" y lo recordó
   10 minutos. El editor lo marcó como borrado y pidió restaurarlo; la restauración falló porque los clips de la cámara
   no estaban en Fotos ("This video's original isn't in Photos anymore").
-- Servidor (rama `fix/source-available-cache`, `9e52489`, SIN deploy): "no está" se recuerda solo 20 s; "está" sigue
+- Servidor (`9e52489`, DEPLOY con OK de la PO 14:22 ET; Render `dep-dc09s1rl550s73884ckg` en vivo 14:23): "no está" se recuerda solo 20 s; "está" sigue
   10 min. 1342 pruebas del servidor, 0 fallas (1 nueva).
 - App (`47dbce15`): cada clip grabado con la cámara de CutSell (con voz o B-roll) se guarda también en Fotos y queda
   como el original del corte (la restauración funciona). Texto del permiso de Fotos actualizado (inglés y español).
@@ -108,7 +108,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
-| 104 | 2026-11-20 14:25 | ✅ subido (pedido `1bad6754`) | feature/shop-board | `e29f910a` | Cámara: clips guardados en Fotos; Mirror prendido por defecto |
+| 104 | 2026-11-20 14:25 | ✅ subido 14:39 (pedido `1bad6754`) | feature/shop-board | `e29f910a` | Cámara: clips guardados en Fotos; Mirror prendido por defecto |
 | 103 | 2026-11-19 18:17 | ✅ subido 18:17 (pedido `74fb3a0d`) | feature/shop-board | `87f89f57` | Editor: cada clip con el giro de su propio video (clips girados en "Cut Nov 14") |
 | 102 | 2026-11-19 17:14 | ✅ subido 17:14 (pedido `c2c61c08`) | feature/shop-board | `c5066c9b` | Papelera debajo del board (afuera); Add products opción A (solo fotos) |
 | 101 | 2026-11-19 10:17 | ✅ subido 10:17 (pedido `6eed9c93`) | feature/shop-board | `34a6b83f` | Add deja lo nuevo en el board; título en vivo en el menú; papelera tipo IG; menú de mantener presionado cabe; sin "＋ My idea" |
