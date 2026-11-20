@@ -480,7 +480,10 @@ def _source_available(uri: str) -> bool:
     """Is the stored copy still there (HEAD, cached 10 minutes)? Unknown answers count as available."""
     import time as _time
     hit = _AVAILABLE_CACHE.get(uri)
-    if hit and _time.time() - hit[0] < 600:
+    # PO 20 Nov 2026 (camera + B-roll cut showed "isn't in Photos anymore"): a video still uploading answers "not
+    # found" for a moment (audio-first: the cut is made before the videos arrive). "There" is kept 10 minutes;
+    # "missing" only 20 seconds, so the copy shows as soon as it lands.
+    if hit and _time.time() - hit[0] < (600 if hit[1] else 20):
         return hit[1]
     available = True
     try:

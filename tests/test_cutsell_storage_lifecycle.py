@@ -155,3 +155,35 @@ def test_any_server_use_of_a_file_counts_as_use(monkeypatch, tmp_path):
     monkeypatch.setattr("cutsell_worker.storage_routing.download", lambda b, k, d, client=None: d)
     storage.download_source("s3://b/cutsell/uploads/x/y/z.mov", str(tmp_path / "z.mov"))
     assert seen == ["s3://b/cutsell/uploads/x/y/z.mov"]
+
+
+def test_a_video_still_uploading_shows_as_soon_as_it_lands(monkeypatch):
+    """PO 20 Nov 2026: "missing" is remembered 20 s only (the video may still be uploading); "there" 10 minutes."""
+    import cutsell_app.main as api
+    from cutsell_worker import storage_routing as sr
+    clock = [1_000.0]
+    monkeypatch.setattr("time.time", lambda: clock[0])
+    there = {"yes": False}
+
+    class C:
+        calls = 0
+
+        def head_object(self, Bucket, Key):
+            C.calls += 1
+            if not there["yes"]:
+                raise KeyError("404")
+
+    monkeypatch.setattr(sr, "current_bucket", lambda: "b")
+    monkeypatch.setattr(sr, "default_client", lambda: C())
+    monkeypatch.setattr(sr, "is_not_found", lambda exc: isinstance(exc, KeyError))
+    api._AVAILABLE_CACHE.clear()
+    uri = "s3://b/u/late.mp4"
+    assert api._source_available(uri) is False
+    there["yes"] = True
+    clock[0] += 10
+    assert api._source_available(uri) is False        # still the 20 s memory
+    clock[0] += 11
+    assert api._source_available(uri) is True         # landed: shows now
+    clock[0] += 500
+    assert api._source_available(uri) is True and C.calls == 2
+    api._AVAILABLE_CACHE.clear()
