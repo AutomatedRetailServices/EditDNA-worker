@@ -9,6 +9,21 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 
 
+## Rama · cámara + B-roll: el video no aparecía (20 nov, sin build todavía)
+
+- PO (proyecto "Cut Nov 20"): "usando la cámara y usando b-roll no funciona. nunca agregó el broll… el video que se graba
+  desde la cámara del app no se guarda en el teléfono en automático".
+- Lo que encontré: la marca de B-roll SÍ llegó al motor (`flowb_submit … clip_types=primary,broll broll_kinds=video`,
+  17:16 UTC) y el corte SÍ tiene el B-roll ("Video 1" en la línea de overlays). Pero el corte se hace con el audio antes
+  de que terminen de subir los videos; el servidor preguntó "¿está el video?" mientras subía, recibió "no" y lo recordó
+  10 minutos. El editor lo marcó como borrado y pidió restaurarlo; la restauración falló porque los clips de la cámara
+  no estaban en Fotos ("This video's original isn't in Photos anymore").
+- Servidor (rama `fix/source-available-cache`, `9e52489`, SIN deploy): "no está" se recuerda solo 20 s; "está" sigue
+  10 min. 1342 pruebas del servidor, 0 fallas (1 nueva).
+- App (`47dbce15`): cada clip grabado con la cámara de CutSell (con voz o B-roll) se guarda también en Fotos y queda
+  como el original del corte (la restauración funciona). Texto del permiso de Fotos actualizado (inglés y español).
+  1 prueba nueva (CameraOriginalsTests).
+
 ## Rama · cámara Mirror (20 nov, sin build todavía)
 
 - PO: "el botón de mirror debería estar activado por default… la cámara en selfie mode está mirror activada, contrario a
