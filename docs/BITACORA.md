@@ -9,7 +9,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 
 
-## Rama · editor: el B-roll se veía lento (20 nov, sin build todavía)
+## Rama · editor: el B-roll se veía lento (20 nov, en el build 105)
 
 - PO (después del build 104): "el error sigue en play… el broll… es lento el video". Causa: en el editor un video
   encima (B-roll) se dibujaba con fotos sueltas, máximo 5 por segundo, sacadas una a una del video grande del servidor.
@@ -116,6 +116,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 105 | 2026-11-20 18:55 | ✅ subido (pedido PENDING) | feature/shop-board | `5cdeb1dd` | Editor: el B-roll se reproduce como video de verdad (antes lento) |
 | 104 | 2026-11-20 14:25 | ✅ subido 14:39 (pedido `1bad6754`) | feature/shop-board | `e29f910a` | Cámara: clips guardados en Fotos; Mirror prendido por defecto |
 | 103 | 2026-11-19 18:17 | ✅ subido 18:17 (pedido `74fb3a0d`) | feature/shop-board | `87f89f57` | Editor: cada clip con el giro de su propio video (clips girados en "Cut Nov 14") |
 | 102 | 2026-11-19 17:14 | ✅ subido 17:14 (pedido `c2c61c08`) | feature/shop-board | `c5066c9b` | Papelera debajo del board (afuera); Add products opción A (solo fotos) |
@@ -220,6 +221,13 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 | 1 | 2026-10-12 13:01 | ❌ falló | feature/ios-captions-v2 | `d90bfc50` | Primer intento, no llegó a TestFlight |
 
 ---
+
+## Build 105
+
+- **Fecha:** 20 nov 2026 · **Rama:** `feature/shop-board` · **Commit:** `5cdeb1dd` · Pedido por la PO ("si", 18:53).
+- **Qué cambia:** en el editor, un video encima (B-roll) se reproduce como video de verdad al mismo tiempo que el
+  corte (antes eran fotos sueltas, máximo 5 por segundo: se veía lento); usa primero la copia de este iPhone.
+- **Pruebas:** 133 pruebas de la app, 0 fallas (CI `44828271491`).
 
 ## Build 104
 
