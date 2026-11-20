@@ -9,6 +9,14 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 
 
+## Rama · editor: el B-roll se veía lento (20 nov, sin build todavía)
+
+- PO (después del build 104): "el error sigue en play… el broll… es lento el video". Causa: en el editor un video
+  encima (B-roll) se dibujaba con fotos sueltas, máximo 5 por segundo, sacadas una a una del video grande del servidor.
+  Arreglo (`49d436c9`): se reproduce como video de verdad, sin sonido propio (el sonido sigue en la mezcla del
+  editor), al mismo tiempo que el corte; usa primero la copia que este iPhone subió. 133 pruebas de la app, 0 fallas
+  (4 nuevas: OverlayVideoSyncTests).
+
 ## Rama · cámara + B-roll: el video no aparecía (20 nov, en el build 104)
 
 - PO (proyecto "Cut Nov 20"): "usando la cámara y usando b-roll no funciona. nunca agregó el broll… el video que se graba
