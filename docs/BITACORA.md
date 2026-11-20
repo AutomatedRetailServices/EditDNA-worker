@@ -8,6 +8,14 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 
 
+
+## Rama · cámara Mirror (20 nov, sin build todavía)
+
+- PO: "el botón de mirror debería estar activado por default… la cámara en selfie mode está mirror activada, contrario a
+  una cámara normal de iPhone". Ahora Mirror viene prendido: la selfie muestra la imagen real (las letras del producto se
+  leen bien). Apagado = como la cámara del iPhone (espejo). El video se guarda siempre con la imagen real.
+- 127 pruebas de la app, 0 fallas (1 nueva: CameraMirrorTests).
+
 ## Rama · editor: clips girados (19 nov, sin build todavía)
 
 - PO (proyecto "Cut Nov 14"): en el editor algunos clips salían girados. Causa: la vista previa del editor usaba el giro
