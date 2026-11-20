@@ -202,7 +202,7 @@ struct CreateCameraView: View {
         ZStack {
             CS.screenBackground.ignoresSafeArea()
             if !previewMode {
-                CameraPreview(session: camera.session, mirrored: camera.mirrorOn, position: camera.cameraPosition)
+                CameraPreview(session: camera.session, mirrored: camera.previewMirrored(position: camera.cameraPosition), position: camera.cameraPosition)
                     .ignoresSafeArea()
             }
             if showGrid {
@@ -718,7 +718,7 @@ struct CreateCameraView: View {
                 // D-133: bounded, diagnostics-only capture-metadata log.
                 let side = camera.cameraPosition == .front ? "front" : "back"
                 Task {
-                    let snapshot = await MediaDiagnostics.capture(fileURL: url, mirroredHint: camera.mirrorOn)
+                    let snapshot = await MediaDiagnostics.capture(fileURL: url, mirroredHint: false)
                     var fields: [String: String] = [
                         "device_model": CutSellDiagnostics.deviceModel,
                         "ios_version": CutSellDiagnostics.iosVersion,

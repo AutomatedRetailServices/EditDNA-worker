@@ -47,12 +47,18 @@ final class CameraController: NSObject, ObservableObject {
     private var usingPauseOutputs = false
     /// Recording through the auto-pause recorder right now.
     private var pauseRecording = false
-    /// Mirror (FICHA_03): off by default so the saved file shows text the right way round; when on,
-    /// the preview and the recorded file are flipped the same way. The last choice is remembered.
-    @Published var mirrorOn: Bool = UserDefaults.standard.bool(forKey: CameraController.mirrorKey) {
+    /// Mirror (PO 20 Nov 2026: "el botón de mirror debería estar activado por default… la cámara en selfie mode está
+    /// mirror activada, contrario a una cámara normal de iPhone"). ON by default = the product-reading view: the
+    /// preview shows the real image, so product text reads the right way. OFF = like the iPhone camera: the selfie
+    /// preview is a mirror. The saved video is ALWAYS the real image (text reads right) either way.
+    /// New key, so everyone starts with it on; the last choice is remembered.
+    @Published var mirrorOn: Bool = (UserDefaults.standard.object(forKey: CameraController.mirrorKey) as? Bool) ?? true {
         didSet { UserDefaults.standard.set(mirrorOn, forKey: Self.mirrorKey) }
     }
-    static let mirrorKey = "cutsell.camera.mirror"
+    static let mirrorKey = "cutsell.camera.mirror.readable"
+
+    /// The selfie preview is a mirror only with Mirror off (like the iPhone camera); the back camera never is.
+    func previewMirrored(position: AVCaptureDevice.Position) -> Bool { position == .front && !mirrorOn }
 
     func prepare() async {
         guard !isConfigured else {
@@ -173,9 +179,9 @@ final class CameraController: NSObject, ObservableObject {
                 connection.preferredVideoStabilizationMode = .auto
             }
             if connection.isVideoMirroringSupported {
-                // What is saved is what the preview shows: flipped only with Mirror on.
+                // The saved video is always the real image: product text reads the right way (PO 20 Nov).
                 connection.automaticallyAdjustsVideoMirroring = false
-                connection.isVideoMirrored = mirrorOn
+                connection.isVideoMirrored = false
             }
         }
         // B-roll: the clip is marked in the file itself (and sent as clip_type "broll" with the cut).
@@ -200,7 +206,7 @@ final class CameraController: NSObject, ObservableObject {
         do {
             let url = try persistentMediaURL(extension: "mov")
             try? FileManager.default.removeItem(at: url)
-            pauseRecorder.prepareConnections(mirrored: mirrorOn)
+            pauseRecorder.prepareConnections(mirrored: false)
             pauseRecorder.onLive = { [weak self] live in self?.live = live }
             pauseRecorder.onAutoStop = { [weak self] in
                 guard let self, self.pauseRecording else { return }
