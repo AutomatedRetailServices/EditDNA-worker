@@ -1066,7 +1066,7 @@ struct EditorV4View: View {
             // Higher layer on top (the export draws them in the same order).
             ForEach(model.overlaysOnScreen.sorted { $0.style.layer < $1.style.layer }) { overlay in
                 MediaOverlayOnVideo(
-                    overlay: overlay, frame: frame, time: playback.currentTime,
+                    overlay: overlay, frame: frame, time: playback.currentTime, playing: playback.isPlaying,
                     isSelected: selection == .overlay(overlay.id, isText: false),
                     keyTransform: shownOverlayTransform(overlay.id),
                     keyMode: !model.overlayKeyframes(overlayID: overlay.id).isEmpty,
@@ -2317,6 +2317,8 @@ private struct MediaOverlayOnVideo: View {
     let overlay: OverlayOnScreen
     let frame: CGSize
     let time: Double
+    /// The editor is playing (a video overlay plays with it).
+    var playing: Bool = false
     let isSelected: Bool
     /// Build 17 keyframes: the overlay's framing now (on top of its own place, size and turn).
     let keyTransform: TransformValue
@@ -2349,7 +2351,13 @@ private struct MediaOverlayOnVideo: View {
     }
 
     private var picture: some View {
-        OverlayMediaPicture(url: overlay.url, kind: overlay.kind, seconds: overlay.sourceStart + max(0, time - overlay.start))
+        ZStack {
+            OverlayMediaPicture(url: overlay.url, kind: overlay.kind, seconds: overlay.sourceStart + max(0, time - overlay.start))
+            // PO 20 Nov: a video overlay plays as real video (it was a slow series of still frames).
+            if overlay.kind == .video, let url = overlay.url {
+                OverlaySyncedVideo(url: url, seconds: overlay.sourceStart + max(0, time - overlay.start), playing: playing)
+            }
+        }
     }
 
     /// Soft edges: the picture fades out over `feather` points at its sides.

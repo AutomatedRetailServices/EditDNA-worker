@@ -268,7 +268,10 @@ extension DraftEditorViewModel {
             guard let id = item["overlay_id"]?.stringValue else { return nil }
             let uri = item["uri"]?.stringValue ?? ""
             let kind = EditorMediaKind(rawValue: item["kind"]?.stringValue ?? "photo") ?? .photo
+            // PO 20 Nov: B-roll the engine placed names the source itself; the copy this iPhone uploaded is used
+            // before the server's link (no download, plays right away).
             let url = OverlayMediaStore.localURL(forURI: uri)
+                ?? (kind == .video ? SourceVideoCache.localURL(forURI: uri) : nil)
                 ?? (item["preview_url"]?.stringValue ?? item["playback_url"]?.stringValue).flatMap(URL.init(string:))
             let start = item["start"]?.doubleValue ?? 0
             var overlay = OverlayOnScreen(
