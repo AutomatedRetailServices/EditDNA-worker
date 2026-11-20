@@ -241,6 +241,7 @@ final class CameraController: NSObject, ObservableObject {
                 "voice": outcome.heardVoice ? "yes" : "no",
                 "auto_stopped": outcome.autoStopped ? "yes" : "no",
             ])
+            await CameraOriginals.keep(outcome.url)       // PO 20 Nov: saved to Photos too
             callback?(.success(outcome.url))
         } catch {
             isRecording = false
@@ -311,6 +312,7 @@ extension CameraController: AVCaptureFileOutputRecordingDelegate {
             if let error {
                 callback?(.failure(error))
             } else if FileManager.default.fileExists(atPath: outputFileURL.path) {
+                await CameraOriginals.keep(outputFileURL)  // PO 20 Nov: saved to Photos too
                 callback?(.success(outputFileURL))
             } else {
                 callback?(.failure(CameraError.recordingFailed))
