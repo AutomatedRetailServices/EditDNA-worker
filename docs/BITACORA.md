@@ -22,7 +22,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
   10 min. 1342 pruebas del servidor, 0 fallas (1 nueva).
 - App (`47dbce15`): cada clip grabado con la cámara de CutSell (con voz o B-roll) se guarda también en Fotos y queda
   como el original del corte (la restauración funciona). Texto del permiso de Fotos actualizado (inglés y español).
-  1 prueba nueva (CameraOriginalsTests).
+  129 pruebas de la app, 0 fallas (2 nuevas: CameraOriginalsTests).
 
 ## Rama · cámara Mirror (20 nov, sin build todavía)
 
