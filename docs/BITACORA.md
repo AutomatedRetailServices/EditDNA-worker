@@ -108,7 +108,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
-| 104 | 2026-11-20 14:25 | ✅ subido (pedido PENDING) | feature/shop-board | `e29f910a` | Cámara: clips guardados en Fotos; Mirror prendido por defecto |
+| 104 | 2026-11-20 14:25 | ✅ subido (pedido `1bad6754`) | feature/shop-board | `e29f910a` | Cámara: clips guardados en Fotos; Mirror prendido por defecto |
 | 103 | 2026-11-19 18:17 | ✅ subido 18:17 (pedido `74fb3a0d`) | feature/shop-board | `87f89f57` | Editor: cada clip con el giro de su propio video (clips girados en "Cut Nov 14") |
 | 102 | 2026-11-19 17:14 | ✅ subido 17:14 (pedido `c2c61c08`) | feature/shop-board | `c5066c9b` | Papelera debajo del board (afuera); Add products opción A (solo fotos) |
 | 101 | 2026-11-19 10:17 | ✅ subido 10:17 (pedido `6eed9c93`) | feature/shop-board | `34a6b83f` | Add deja lo nuevo en el board; título en vivo en el menú; papelera tipo IG; menú de mantener presionado cabe; sin "＋ My idea" |
