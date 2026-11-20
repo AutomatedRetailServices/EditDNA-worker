@@ -108,6 +108,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 104 | 2026-11-20 14:25 | ✅ subido (pedido PENDING) | feature/shop-board | `e29f910a` | Cámara: clips guardados en Fotos; Mirror prendido por defecto |
 | 103 | 2026-11-19 18:17 | ✅ subido 18:17 (pedido `74fb3a0d`) | feature/shop-board | `87f89f57` | Editor: cada clip con el giro de su propio video (clips girados en "Cut Nov 14") |
 | 102 | 2026-11-19 17:14 | ✅ subido 17:14 (pedido `c2c61c08`) | feature/shop-board | `c5066c9b` | Papelera debajo del board (afuera); Add products opción A (solo fotos) |
 | 101 | 2026-11-19 10:17 | ✅ subido 10:17 (pedido `6eed9c93`) | feature/shop-board | `34a6b83f` | Add deja lo nuevo en el board; título en vivo en el menú; papelera tipo IG; menú de mantener presionado cabe; sin "＋ My idea" |
@@ -211,6 +212,14 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 | 1 | 2026-10-12 13:01 | ❌ falló | feature/ios-captions-v2 | `d90bfc50` | Primer intento, no llegó a TestFlight |
 
 ---
+
+## Build 104
+
+- **Fecha:** 20 nov 2026 · **Rama:** `feature/shop-board` · **Commit:** `e29f910a` · Pedido por la PO ("ok", 14:22).
+- **Qué cambia:** cada clip grabado con la cámara de CutSell se guarda también en Fotos y queda como original del corte
+  (la restauración funciona); Mirror viene prendido por defecto en la selfie (imagen real, letras legibles).
+  Servidor en vivo con el mismo pedido: `9e52489` ("no está" se recuerda 20 s; el B-roll aparece al terminar de subir).
+- **Pruebas:** 129 pruebas de la app, 0 fallas (CI `44783248573`); servidor 1342 pruebas, 0 fallas.
 
 ## Build 103
 
