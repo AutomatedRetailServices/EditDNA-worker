@@ -19,6 +19,12 @@ struct TimelineV4: View {
     var compact = false
 
     @State private var dragStartTime: Double?
+    /// PO 21 Nov (Figma 14d): the time at the left of the tracks; the play line moves over them.
+    @State private var viewStart: Double = 0
+    @State private var panStart: Double?
+    /// A finger is moving the play line.
+    @State private var lineDrag = false
+    @State private var tracksWidth: CGFloat = 300
     /// The rows under the video row slide up and down when there are more than fit.
     @State private var rowScroll: CGFloat = 0
     @State private var rowScrollStart: CGFloat?
@@ -85,10 +91,11 @@ struct TimelineV4: View {
             let pps = pixelsPerSecond
             let height = timelineHeight
             let scrollY = min(rowScroll, maxRowScroll)
-            // 21 Oct (CapCut): the white line stays in the middle of the tracks and the tracks slide under
-            // it -- while playing and while scrubbing, from the first frame to the last.
-            let cursorAt = Self.playheadX(width: width)
-            let x: (Double) -> CGFloat = { seconds in cursorAt + CGFloat(seconds - now) * pps }
+            // PO 21 Nov (Figma 14d): the play line moves over the tracks (it stood still in the middle while the
+            // tracks slid, CapCut style); the tracks show the time from `viewStart` on.
+            let start = viewStart
+            let x: (Double) -> CGFloat = { seconds in Self.cursorX + CGFloat(seconds - start) * pps }
+            let cursorAt = x(now)
             ZStack(alignment: .topLeading) {
                 Color(fixed: 0xE9ECF1)             // White Indigo timeline: light grey
                 timeLabel(now).offset(x: 16, y: 6)
@@ -126,17 +133,34 @@ struct TimelineV4: View {
 
                 rowIcons(scrollY: scrollY, height: height)
 
-                // The fixed cursor: from the top of the video track down to the last row shown.
-                RoundedRectangle(cornerRadius: 1).fill(CS.wiInk)
-                    .frame(width: 2, height: height - Self.videoBandY - 6)
-                    .offset(x: cursorAt - 1, y: Self.videoBandY + 1)
-                    .allowsHitTesting(false)
+                // The play line (Figma 14d): from the ruler down to the last row shown, with a handle on top.
+                if cursorAt >= Self.cursorX - 1, cursorAt <= width + 1 {
+                    RoundedRectangle(cornerRadius: 1).fill(CS.wiInk)
+                        .frame(width: 2, height: height - Self.videoBandY + 4)
+                        .offset(x: cursorAt - 1, y: Self.videoBandY - 9)
+                        .allowsHitTesting(false)
+                    RoundedRectangle(cornerRadius: 4).fill(CS.wiInk)
+                        .frame(width: 12, height: 16)
+                        .shadow(color: .black.opacity(0.18), radius: 1.5, y: 1)
+                        .offset(x: cursorAt - 6, y: Self.videoBandY - 23)
+                        .scaleEffect(lineDrag ? 1.15 : 1, anchor: .center)
+                        .allowsHitTesting(false)
+                        .accessibilityIdentifier("timelinePlayLine")
+                }
             }
             .frame(width: width, height: height, alignment: .topLeading)
             .clipped()
             .contentShape(Rectangle())
             .gesture(scrub)
             .simultaneousGesture(zoom)
+            .onAppear { tracksWidth = max(40, width - Self.cursorX) }
+            .onChange(of: width) { _, new in tracksWidth = max(40, new - Self.cursorX) }
+        }
+        .onChange(of: playback.currentTime) { _, now in
+            // The line stays on screen: while playing the tracks turn the page at the right side; a jump from
+            // elsewhere (undo, a tap on a clip) brings the line back into view. Not while a finger moves things.
+            guard !lineDrag, panStart == nil else { return }
+            viewStart = TimelineViewport.follow(viewStart: viewStart, now: now, visible: visibleSeconds, duration: duration)
         }
         .frame(height: timelineHeight)
         .overlay(alignment: .top) { Rectangle().fill(CS.wiBorder).frame(height: 1).offset(y: -1) }
@@ -191,6 +215,10 @@ struct TimelineV4: View {
     /// leaves the right part of the timeline (the room before the video "+").
     /// Where the white line stands: the middle of the tracks (right of the icon column), as in CapCut.
     static func playheadX(width: CGFloat) -> CGFloat { cursorX + max(0, width - cursorX) / 2 }
+
+    private var visibleSeconds: Double {
+        TimelineViewport.visibleSeconds(tracksWidth: tracksWidth, pixelsPerSecond: pixelsPerSecond)
+    }
 
     static func scrollTime(now: Double, duration: Double, width: CGFloat, pixelsPerSecond: CGFloat) -> Double {
         let visible = Double(max(40, width - cursorX - 40) / pixelsPerSecond)
@@ -284,27 +312,39 @@ struct TimelineV4: View {
 
     // MARK: Gestures
 
-    /// One finger slides the tracks under the fixed cursor.
+    /// PO 21 Nov (Figma 14d): a finger on the play line (or on the time ruler) moves the line to any point; a finger
+    /// elsewhere slides the tracks without changing the time; up / down slides the rows under the video.
     private var scrub: some Gesture {
         DragGesture(minimumDistance: 6)
             .onChanged { value in
                 guard keyframeDrag == nil else { return }
                 if dragAxisVertical == nil {
-                    // Up / down over the rows under the video slides them (when there are more).
-                    dragAxisVertical = abs(value.translation.height) > abs(value.translation.width)
-                        && value.startLocation.y > Self.lowerTop && maxRowScroll > 0
+                    let lineX = Self.cursorX + CGFloat(playback.currentTime - viewStart) * pixelsPerSecond
+                    let onRuler = value.startLocation.y < Self.videoBandY
+                    if TimelineViewport.grabsLine(startX: value.startLocation.x, lineX: lineX, onRuler: onRuler) {
+                        dragAxisVertical = false
+                        lineDrag = true
+                        playback.pause()
+                    } else {
+                        // Up / down over the rows under the video slides them (when there are more).
+                        dragAxisVertical = abs(value.translation.height) > abs(value.translation.width)
+                            && value.startLocation.y > Self.lowerTop && maxRowScroll > 0
+                    }
                 }
                 if dragAxisVertical == true {
                     if rowScrollStart == nil { rowScrollStart = rowScroll }
                     rowScroll = max(0, min(maxRowScroll, (rowScrollStart ?? 0) - value.translation.height))
                     return
                 }
-                if dragStartTime == nil {
-                    dragStartTime = playback.currentTime
-                    playback.pause()
+                if lineDrag {
+                    let target = TimelineViewport.time(atX: value.location.x - Self.cursorX, viewStart: viewStart,
+                                                       pixelsPerSecond: pixelsPerSecond, duration: duration)
+                    playback.seek(to: target)
+                    return
                 }
-                let target = (dragStartTime ?? 0) - Double(value.translation.width / pixelsPerSecond)
-                playback.seek(to: max(0, min(duration, target)))
+                if panStart == nil { panStart = viewStart }
+                viewStart = TimelineViewport.clamp((panStart ?? 0) - Double(value.translation.width / pixelsPerSecond),
+                                                   duration: duration, visible: visibleSeconds)
             }
             .onEnded { _ in
                 #if DEBUG
@@ -313,6 +353,8 @@ struct TimelineV4: View {
                 dragStartTime = nil
                 rowScrollStart = nil
                 dragAxisVertical = nil
+                lineDrag = false
+                panStart = nil
             }
     }
 
@@ -321,7 +363,12 @@ struct TimelineV4: View {
         MagnificationGesture()
             .onChanged { scale in
                 if zoomStart == nil { zoomStart = pixelsPerSecond }
+                let lineOffset = CGFloat(playback.currentTime - viewStart) * pixelsPerSecond
                 pixelsPerSecond = max(Self.minZoom, min(Self.maxZoom, (zoomStart ?? 30) * scale))
+                // The play line keeps its place on screen while zooming.
+                viewStart = TimelineViewport.startKeepingLine(now: playback.currentTime, lineOffset: lineOffset,
+                                                              pixelsPerSecond: pixelsPerSecond, duration: duration,
+                                                              visible: visibleSeconds)
             }
             .onEnded { _ in zoomStart = nil }
     }
@@ -330,9 +377,8 @@ struct TimelineV4: View {
 
     private func ruler(width: CGFloat, x: @escaping (Double) -> CGFloat) -> some View {
         let step = Self.labelStep(pixelsPerSecond)
-        let now = playback.currentTime
-        let first = max(0, Int((now - Double(Self.playheadX(width: width) / pixelsPerSecond)) / step) - 1)
-        let last = Int((now + Double(width / pixelsPerSecond)) / step) + 1
+        let first = max(0, Int(viewStart / step) - 1)
+        let last = Int((viewStart + Double(width / pixelsPerSecond)) / step) + 1
         return ZStack(alignment: .topLeading) {
             ForEach(first...max(first, last), id: \.self) { index in
                 let seconds = Double(index) * step
