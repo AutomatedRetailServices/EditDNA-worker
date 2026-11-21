@@ -9,6 +9,16 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 
 
+## Rama · la línea arrastrada lleva las pistas; sin saltos de bloque (21 nov, sin build todavía)
+
+- PO (build 107): "el time line no se mueve al compás cuando lo quiero llevar yo… cuando termina es como que se mueve de
+  bloque" y "llego al tope de la pantalla, arrastro la línea y si no está en play el time line no se mueve".
+- Ahora (`7eda9648`): en play la línea camina hasta la mitad y desde ahí las pistas se corren suave cuadro a cuadro
+  (sin pasar de página); al final la línea sigue hasta el final del corte. Arrastrando la línea, cerca de un borde
+  (44 pt) las pistas se corren solas (aunque el dedo esté quieto), más rápido mientras más pegado al borde.
+- Probado con dedo de prueba en el simulador (run `44960102712`): línea llevada al borde derecho 3 s → pistas de 0 a
+  28.1 s, línea a 38.0 s (el final); de vuelta al borde izquierdo → pistas a 0. 147 pruebas de la app, 0 fallas.
+
 ## Rama · las hojas de abajo se cierran al bajarlas (21 nov, en el build 107)
 
 - PO: "ese slide up no baja cuando tratas de bajarlo". La hoja (WISheetCard) no tenía gesto. Ahora jalar hacia abajo
