@@ -1,4 +1,4 @@
-# Assessment de diseño · Línea de reproducción que se mueve y se arrastra (rama, sin build todavía)
+# Assessment de diseño · Línea de reproducción que se mueve y se arrastra (build 107)
 
 - **Rama:** `feature/shop-board` · PO 21 nov 2026: "la línea negra… debe moverse independiente… con el dedo se pueda desplazar".
 - **Figma** (página "📱 App build 78 · 03 Edits, Editor y Export"):

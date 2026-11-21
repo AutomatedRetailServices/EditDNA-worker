@@ -9,7 +9,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 
 
-## Rama · las hojas de abajo se cierran al bajarlas (21 nov, sin build todavía)
+## Rama · las hojas de abajo se cierran al bajarlas (21 nov, en el build 107)
 
 - PO: "ese slide up no baja cuando tratas de bajarlo". La hoja (WISheetCard) no tenía gesto. Ahora jalar hacia abajo
   desde arriba (la barrita gris y el título) la cierra: más de 110 pt, o un jalón rápido; un jalón corto vuelve a su
@@ -20,7 +20,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
   menú sí aparece): es el problema conocido de los IDs tapados por el padre, no un cambio de esta rama.
 - 145 pruebas de la app, 0 fallas (3 nuevas: SheetPullTests).
 
-## Rama · "What are you promoting?": opción A, un toque (21 nov, sin build todavía)
+## Rama · "What are you promoting?": opción A, un toque (21 nov, en el build 107)
 
 - PO: "¿cómo podemos rediseñar este paso más cómodo, más práctico?" → elegida la **A** (Figma `3094:357`; la B
   `3094:421` queda como referencia; la hoja vieja `3014:413` sin tocar).
@@ -31,7 +31,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 - 142 pruebas de la app, 0 fallas (3 nuevas: PromotingOrderTests). Captura `promoting_sheet` igual a Figma.
   Nota: la prueba de UI vieja Build24UITests usa el botón Continue, que ya no existe (no corre en el CI).
 
-## Rama · editor: la línea de reproducción se mueve sola y se arrastra (21 nov, sin build todavía)
+## Rama · editor: la línea de reproducción se mueve sola y se arrastra (21 nov, en el build 107)
 
 - PO: "la línea negra que se mueve en play… debe moverse independiente… y que con el dedo se pueda desplazar; ahora
   mismo no permite". Antes (21 oct, estilo CapCut) la línea estaba quieta en el medio y las pistas pasaban debajo.
@@ -159,6 +159,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 107 | 2026-11-21 16:37 | ✅ subido (pedido PENDING) | feature/shop-board | `cad63698` | Línea del editor se mueve y se arrastra; "What are you promoting?" un toque; hojas se cierran al bajarlas |
 | 106 | 2026-11-21 09:20 | ✅ subido 09:35 (pedido `ab4d0e15`) | feature/shop-board | `026083bd` | Línea de tiempo: fotos y videos encima se ven tal como son (sin barra azul) |
 | 105 | 2026-11-20 18:55 | ✅ subido 19:12 (pedido `85b7a287`) | feature/shop-board | `5cdeb1dd` | Editor: el B-roll se reproduce como video de verdad (antes lento) |
 | 104 | 2026-11-20 14:25 | ✅ subido 14:39 (pedido `1bad6754`) | feature/shop-board | `e29f910a` | Cámara: clips guardados en Fotos; Mirror prendido por defecto |
@@ -265,6 +266,14 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 | 1 | 2026-10-12 13:01 | ❌ falló | feature/ios-captions-v2 | `d90bfc50` | Primer intento, no llegó a TestFlight |
 
 ---
+
+## Build 107
+
+- **Fecha:** 21 nov 2026 · **Rama:** `feature/shop-board` · **Commit:** `cad63698` · Pedido por la PO ("ok", 16:36).
+- **Qué cambia:** (1) la línea de reproducción del editor avanza sola y se arrastra con el dedo (Figma 14d
+  `3092:648`); (2) "What are you promoting?" opción A, un toque (Figma `3094:357`); (3) las hojas de abajo se cierran
+  al bajarlas.
+- **Pruebas:** 145 pruebas de la app, 0 fallas (CI `44951261239`); prueba con dedo en el simulador PASS (`44951264262`).
 
 ## Build 106
 
