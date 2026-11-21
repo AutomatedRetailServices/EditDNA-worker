@@ -14,7 +14,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 45
     env:
-      SHOTS: "shop_boards shop_your_board plan"
+      SHOTS: "promoting_sheet promoting_bulk"
     steps:
       - uses: actions/checkout@v4
       - name: Select the newest Xcode
