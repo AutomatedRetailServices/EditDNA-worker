@@ -4,6 +4,25 @@ import SwiftUI
 /// The choice travels with the videos (source metadata product_id / brand / product) and each new project is placed
 /// in that product right away (POST /v1/catalog/assign), so it lands in Edits › Products without "need a product",
 /// Plan my week spreads it by brand / product, and its caption uses them. Bulk can still say "Detect for me".
+/// PO 21 Nov (option A): the last used products first (most recent first), then the rest by brand and product A→Z.
+enum PromotingOrder {
+    static func sorted(_ rows: [(id: String, brand: String, product: String)], recent: [String])
+        -> [(id: String, brand: String, product: String)] {
+        let rank = Dictionary(recent.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
+        return rows.sorted { a, b in
+            switch (rank[a.id], rank[b.id]) {
+            case let (x?, y?): return x < y
+            case (_?, nil): return true
+            case (nil, _?): return false
+            default:
+                let byBrand = a.brand.localizedCaseInsensitiveCompare(b.brand)
+                if byBrand != .orderedSame { return byBrand == .orderedAscending }
+                return a.product.localizedCaseInsensitiveCompare(b.product) == .orderedAscending
+            }
+        }
+    }
+}
+
 enum PromotingChoice {
     struct Pick: Equatable {
         var productID: String?
@@ -132,14 +151,6 @@ struct PromotingSheet: View {
                         .foregroundStyle(CS.wiInk)
                         .padding(.top, 17)
                     if addingNew { newProductForm } else { searchAndResults }
-                    if !addingNew {
-                        WIPillButtonGradient(title: "Continue", enabled: selected != nil) {
-                            if let selected { PromotingChoice.remember(selected) }
-                            onContinue(selected)
-                        }
-                        .padding(.top, 24)
-                        .accessibilityIdentifier("promotingContinue")
-                    }
                     if purpose.allowsDetect {
                         Button { onContinue(nil) } label: {
                             Text(L10n.tr("Mixed products? Detect for me"))
@@ -181,48 +192,147 @@ struct PromotingSheet: View {
             .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(CS.accent, lineWidth: 1.5))
             .padding(.top, 16)
 
-            VStack(spacing: 0) {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        ForEach(groups) { group in
-                            brandRow(group)
-                            if isOpen(group) {
-                                ForEach(group.products, id: \.id) { product in
-                                    productRow(brand: group.name, id: product.id, name: product.name)
-                                }
-                                addProductRow(brand: group.name)
-                            }
-                        }
+            // PO 21 Nov (Figma 3094:357, option A "un toque"): one flat list, product big + brand under it, the last
+            // used first; one tap chooses and goes on (no Continue). Brands as chips to filter.
+            Text(L10n.tr(listTitle))
+                .font(CS.inter(11, .bold)).foregroundStyle(CS.wiSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 4).padding(.top, 8)
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(Array(flatRows.enumerated()), id: \.element.id) { index, row in
+                        flatRow(row, last: index == flatRows.count - 1)
+                    }
+                    if flatRows.isEmpty {
+                        Text(L10n.tr("Nothing found"))
+                            .font(CS.inter(14, .medium)).foregroundStyle(CS.wiSecondary)
+                            .frame(maxWidth: .infinity).frame(height: 60)
                     }
                 }
-                .frame(height: min(CGFloat(visibleRows), 4) * 52)
-                .scrollBounceBehavior(.basedOnSize)
-                // "Add “Cera…” as a new product" (or, with nothing typed, "+ New brand or product").
-                Button {
-                    newProduct = typed
-                    newBrand = ""
-                    brandLocked = false
-                    addingNew = true
-                    focus = .brand
-                } label: {
-                    HStack(spacing: 8) {
-                        Image("WIPlus").renderingMode(.template).resizable().frame(width: 18, height: 18)
-                        Text(typed.isEmpty ? L10n.tr("New brand or product") : L10n.tr("Add “\(typed)” as a new product"))
-                            .font(CS.inter(14, .bold)).lineLimit(1).truncationMode(.middle)
-                        Spacer(minLength: 0)
-                    }
-                    .foregroundStyle(CS.accent)
-                    .padding(.horizontal, 16)
-                    .frame(height: 52)
-                    .background(CS.accentSoft)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("promotingAddNew")
             }
+            .frame(height: min(CGFloat(max(1, flatRows.count)), 4) * 60)
+            .scrollBounceBehavior(.basedOnSize)
+            .background(Color(fixed: 0xFFFFFF), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .softPuff(.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            if brandNames.count > 1 {
+                Text(L10n.tr("ALL BRANDS"))
+                    .font(CS.inter(11, .bold)).foregroundStyle(CS.wiSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 4).padding(.top, 10)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(brandNames, id: \.self) { name in brandChip(name) }
+                    }
+                    .padding(.horizontal, 6)
+                }
+                .frame(height: 44)
+                .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(CS.wiBorder, lineWidth: 1))
+            }
+
+            // "+ New brand or product" (or "Add “Cera…” as a new product"; with a brand chip on, its brand is kept).
+            Button {
+                newProduct = typed
+                newBrand = brandFilter ?? ""
+                brandLocked = brandFilter != nil
+                addingNew = true
+                focus = brandFilter != nil ? .product : .brand
+            } label: {
+                HStack(spacing: 8) {
+                    Image("WIPlus").renderingMode(.template).resizable().frame(width: 14, height: 14)
+                    Text(typed.isEmpty ? L10n.tr("New brand or product") : L10n.tr("Add “\(typed)” as a new product"))
+                        .font(CS.inter(14, .bold)).lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(CS.accent)
+                .padding(.horizontal, 4)
+                .frame(height: 40)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 8)
+            .accessibilityIdentifier("promotingAddNew")
         }
+    }
+
+    // MARK: Option A rows
+
+    struct FlatRow: Identifiable, Equatable {
+        let id: String
+        let brand: String
+        let product: String
+    }
+
+    @State private var brandFilter: String?
+
+    private var listTitle: String {
+        if !typed.isEmpty || brandFilter != nil { return "PRODUCTS" }
+        return PromotingChoice.recent.isEmpty ? "PRODUCTS" : "RECENT"
+    }
+
+    private var brandNames: [String] { groups.map(\.name) }
+
+    /// Every product (filtered by the search and the brand chip), the last used first, then A→Z.
+    private var flatRows: [FlatRow] {
+        let rows = groups
+            .filter { brandFilter == nil || $0.name.caseInsensitiveCompare(brandFilter ?? "") == .orderedSame }
+            .flatMap { group in group.products.map { FlatRow(id: $0.id, brand: group.name, product: $0.name) } }
+        return PromotingOrder.sorted(rows.map { ($0.id, $0.brand, $0.product) }, recent: PromotingChoice.recent)
+            .map { FlatRow(id: $0.id, brand: $0.brand, product: $0.product) }
+    }
+
+    private func flatRow(_ row: FlatRow, last: Bool) -> some View {
+        let isLastUsed = PromotingChoice.recent.first == row.id
+        return Button {
+            let pick = PromotingChoice.Pick(productID: row.id, brand: row.brand, product: row.product)
+            selected = pick
+            PromotingChoice.remember(pick)
+            onContinue(pick)
+        } label: {
+            HStack(spacing: 12) {
+                Text(verbatim: String(row.brand.prefix(1)).uppercased())
+                    .font(CS.inter(15, .heavy)).foregroundStyle(CS.accent)
+                    .frame(width: 36, height: 36)
+                    .background(CS.accentSoft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(verbatim: row.product).font(CS.inter(15, .bold)).foregroundStyle(CS.wiInk)
+                    Text(verbatim: row.brand).font(CS.inter(12, .medium)).foregroundStyle(CS.wiSecondary)
+                }
+                .lineLimit(1)
+                Spacer(minLength: 6)
+                if isLastUsed {
+                    Text(L10n.tr("Last used")).font(CS.inter(11, .bold)).foregroundStyle(CS.accent)
+                        .padding(.horizontal, 8).frame(height: 22)
+                        .background(CS.accentSoft, in: Capsule())
+                } else {
+                    Image("WIChevronSmall").renderingMode(.template).resizable()
+                        .frame(width: 16, height: 16).foregroundStyle(CS.wiSecondary)
+                }
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 60)
+            .overlay(alignment: .bottom) {
+                if !last { Rectangle().fill(CS.wiBorder).frame(height: 1).padding(.leading, 64).padding(.trailing, 16) }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("promotingRow")
+    }
+
+    private func brandChip(_ name: String) -> some View {
+        let on = brandFilter?.caseInsensitiveCompare(name) == .orderedSame
+        return Button {
+            withAnimation(.easeOut(duration: 0.15)) { brandFilter = on ? nil : name }
+        } label: {
+            Text(verbatim: name).font(CS.inter(13, .semibold))
+                .foregroundStyle(on ? Color(fixed: 0xFFFFFF) : CS.wiInk)
+                .padding(.horizontal, 12).frame(height: 32)
+                .background(on ? CS.accent : CS.accentSoft, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("promotingBrand_\(name)")
     }
 
     private func brandRow(_ group: BrandGroup) -> some View {
