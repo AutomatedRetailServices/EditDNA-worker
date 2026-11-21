@@ -9,6 +9,17 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 
 
+## Rama · las hojas de abajo se cierran al bajarlas (21 nov, sin build todavía)
+
+- PO: "ese slide up no baja cuando tratas de bajarlo". La hoja (WISheetCard) no tenía gesto. Ahora jalar hacia abajo
+  desde arriba (la barrita gris y el título) la cierra: más de 110 pt, o un jalón rápido; un jalón corto vuelve a su
+  sitio. En "What are you promoting?" y en "Video too long".
+- Probado con un dedo de prueba en el simulador (ShopDesignUITests.testPromotingSheetPullsDownToClose, run
+  `44951264262`): PASS se cierra al jalar, PASS un jalón corto no la cierra. En la misma corrida, la prueba vieja del
+  Shop board marca 2 FAIL de búsqueda (el "seleccionado" de Tall y el ID del menú de mantener; el botón Duplicate del
+  menú sí aparece): es el problema conocido de los IDs tapados por el padre, no un cambio de esta rama.
+- 145 pruebas de la app, 0 fallas (3 nuevas: SheetPullTests).
+
 ## Rama · "What are you promoting?": opción A, un toque (21 nov, sin build todavía)
 
 - PO: "¿cómo podemos rediseñar este paso más cómodo, más práctico?" → elegida la **A** (Figma `3094:357`; la B
