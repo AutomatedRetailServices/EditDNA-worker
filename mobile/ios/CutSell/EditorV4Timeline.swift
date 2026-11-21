@@ -25,6 +25,9 @@ struct TimelineV4: View {
     /// A finger is moving the play line.
     @State private var lineDrag = false
     @State private var tracksWidth: CGFloat = 300
+    /// Where the finger moving the line is (points from the left of the tracks), for sliding at the sides.
+    @State private var lineFingerX: CGFloat?
+    @State private var edgeTimer: Timer?
     /// The rows under the video row slide up and down when there are more than fit.
     @State private var rowScroll: CGFloat = 0
     @State private var rowScrollStart: CGFloat?
@@ -337,9 +340,9 @@ struct TimelineV4: View {
                     return
                 }
                 if lineDrag {
-                    let target = TimelineViewport.time(atX: value.location.x - Self.cursorX, viewStart: viewStart,
-                                                       pixelsPerSecond: pixelsPerSecond, duration: duration)
-                    playback.seek(to: target)
+                    lineFingerX = value.location.x - Self.cursorX
+                    moveLineToFinger()
+                    startEdgeSlide()
                     return
                 }
                 if panStart == nil { panStart = viewStart }
@@ -355,7 +358,34 @@ struct TimelineV4: View {
                 dragAxisVertical = nil
                 lineDrag = false
                 panStart = nil
+                lineFingerX = nil
+                edgeTimer?.invalidate()
+                edgeTimer = nil
             }
+    }
+
+    /// The line goes to the time under the finger.
+    private func moveLineToFinger() {
+        guard let fx = lineFingerX else { return }
+        let target = TimelineViewport.time(atX: min(max(0, fx), tracksWidth), viewStart: viewStart,
+                                           pixelsPerSecond: pixelsPerSecond, duration: duration)
+        playback.seek(to: target)
+    }
+
+    /// PO 21 Nov (build 107): holding the line near a side slides the tracks along (even with the finger still), so any
+    /// second of the cut can be reached by dragging the line.
+    private func startEdgeSlide() {
+        guard edgeTimer == nil else { return }
+        let dt = 1.0 / 30
+        edgeTimer = Timer.scheduledTimer(withTimeInterval: dt, repeats: true) { _ in
+            Task { @MainActor in
+                guard lineDrag, let fx = lineFingerX else { return }
+                let slide = TimelineViewport.edgeSlide(fingerX: fx, tracksWidth: tracksWidth, visible: visibleSeconds, dt: dt)
+                guard slide != 0 else { return }
+                viewStart = TimelineViewport.clamp(viewStart + slide, duration: duration, visible: visibleSeconds)
+                moveLineToFinger()
+            }
+        }
     }
 
     /// Two fingers zoom in and out on the same timeline.

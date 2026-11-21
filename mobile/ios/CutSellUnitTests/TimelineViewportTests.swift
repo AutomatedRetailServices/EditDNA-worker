@@ -3,11 +3,19 @@ import XCTest
 
 /// PO 21 Nov 2026 (Figma 14d): the play line moves by itself and can be dragged with a finger.
 final class TimelineViewportTests: XCTestCase {
-    func testWhilePlayingTheLineMovesAndTheTracksTurnThePageOnlyAtTheRightSide() {
+    func testWhilePlayingTheLineWalksToTheMiddleThenTheTracksSlideSmoothly() {
         // 10 s visible, a 60 s cut.
-        XCTAssertEqual(TimelineViewport.follow(viewStart: 0, now: 5, visible: 10, duration: 60), 0)      // line moves
-        XCTAssertEqual(TimelineViewport.follow(viewStart: 0, now: 8.4, visible: 10, duration: 60), 0)
-        XCTAssertEqual(TimelineViewport.follow(viewStart: 0, now: 8.6, visible: 10, duration: 60), 7.1, accuracy: 0.001)
+        XCTAssertEqual(TimelineViewport.follow(viewStart: 0, now: 4, visible: 10, duration: 60), 0)   // line walks
+        XCTAssertEqual(TimelineViewport.follow(viewStart: 0, now: 5.1, visible: 10, duration: 60), 0.1, accuracy: 0.001)
+        // Frame after frame (1/30 s) the tracks move 1/30 s: no jumps ("de bloque").
+        let a = TimelineViewport.follow(viewStart: 10, now: 15.0, visible: 10, duration: 60)
+        let b = TimelineViewport.follow(viewStart: a, now: 15.0 + 1.0 / 30, visible: 10, duration: 60)
+        XCTAssertEqual(b - a, 1.0 / 30, accuracy: 0.0001)
+    }
+
+    func testAtTheEndTheLineWalksOnToTheEndOfTheCut() {
+        // maxStart = 60 - 8.5 = 51.5: the tracks stop, the line goes on to 60.
+        XCTAssertEqual(TimelineViewport.follow(viewStart: 51.5, now: 59, visible: 10, duration: 60), 51.5, accuracy: 0.001)
     }
 
     func testAJumpBackBringsTheLineIntoView() {
@@ -16,8 +24,18 @@ final class TimelineViewportTests: XCTestCase {
     }
 
     func testTheTracksNeverSlidePastTheEnd() {
-        XCTAssertEqual(TimelineViewport.clamp(80, duration: 60, visible: 10), 55)
+        XCTAssertEqual(TimelineViewport.clamp(80, duration: 60, visible: 10), 51.5, accuracy: 0.001)
         XCTAssertEqual(TimelineViewport.clamp(-3, duration: 60, visible: 10), 0)
+    }
+
+    func testDraggingTheLineToASideSlidesTheTracksAlong() {
+        // 300 pt of tracks, 10 s visible, one frame (1/30 s).
+        XCTAssertEqual(TimelineViewport.edgeSlide(fingerX: 150, tracksWidth: 300, visible: 10, dt: 1.0 / 30), 0)
+        XCTAssertGreaterThan(TimelineViewport.edgeSlide(fingerX: 290, tracksWidth: 300, visible: 10, dt: 1.0 / 30), 0)
+        XCTAssertLessThan(TimelineViewport.edgeSlide(fingerX: 10, tracksWidth: 300, visible: 10, dt: 1.0 / 30), 0)
+        // Deeper into the side = faster.
+        XCTAssertGreaterThan(TimelineViewport.edgeSlide(fingerX: 299, tracksWidth: 300, visible: 10, dt: 1.0 / 30),
+                             TimelineViewport.edgeSlide(fingerX: 270, tracksWidth: 300, visible: 10, dt: 1.0 / 30))
     }
 
     func testAFingerOnTheLineOrTheRulerGrabsTheLine() {
