@@ -580,11 +580,13 @@ private struct SampleEditor: View {
             }
         }
         .onAppear {
+            holder.build(preset: preset, font: font, overlays: overlays, voice: voice)
             if videoOverlay {
-                Task { holder.build(preset: preset, font: font, overlays: overlays, voice: voice,
-                                    videoURL: await ProbeMedia.makeVideo(seconds: 8)) }
-            } else {
-                holder.build(preset: preset, font: font, overlays: overlays, voice: voice)
+                Task {
+                    let url = await ProbeMedia.makeVideo(seconds: 3)
+                    holder.model = nil
+                    holder.build(preset: preset, font: font, overlays: overlays, voice: voice, videoURL: url)
+                }
             }
         }
     }
@@ -626,7 +628,7 @@ private final class SampleEditorHolder: ObservableObject {
             object["media_overlays"] = .array([.object(["overlay_id": .string("v1"), "kind": .string("video"),
                                                         "uri": .string("s3://sample/broll.mp4"),
                                                         "preview_url": .string(videoURL.absoluteString),
-                                                        "layout": .string("full"), "start": .number(2), "end": .number(9),
+                                                        "layout": .string("full"), "start": .number(0.5), "end": .number(3.5),
                                                         "source_start": .number(0)])])
         }
         if voice {
