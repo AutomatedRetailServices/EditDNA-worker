@@ -142,7 +142,7 @@ struct TimelineV4: View {
                     RoundedRectangle(cornerRadius: 4).fill(CS.wiInk)
                         .frame(width: 12, height: 16)
                         .shadow(color: .black.opacity(0.18), radius: 1.5, y: 1)
-                        .offset(x: cursorAt - 6, y: Self.videoBandY - 23)
+                        .offset(x: cursorAt - 6, y: Self.videoBandY - 16)
                         .scaleEffect(lineDrag ? 1.15 : 1, anchor: .center)
                         .allowsHitTesting(false)
                         .accessibilityIdentifier("timelinePlayLine")
