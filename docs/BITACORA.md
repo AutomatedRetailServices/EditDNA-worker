@@ -9,6 +9,17 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 
 
+## Rama · "What are you promoting?": opción A, un toque (21 nov, sin build todavía)
+
+- PO: "¿cómo podemos rediseñar este paso más cómodo, más práctico?" → elegida la **A** (Figma `3094:357`; la B
+  `3094:421` queda como referencia; la hoja vieja `3014:413` sin tocar).
+- Antes: 3 toques (marca → producto → Continue), una marca de 1 producto igual había que abrirla, y al abrir la última
+  marca su producto quedaba escondido abajo. Ahora (`69233691`): una lista plana (producto en grande + marca abajo), lo
+  último usado primero con la etiqueta "Last used"; un toque elige y sigue (sin Continue); marcas como chips para
+  filtrar; "+ New brand or product" (con un chip puesto, ya trae la marca); "Mixed products? Detect for me" igual.
+- 142 pruebas de la app, 0 fallas (3 nuevas: PromotingOrderTests). Captura `promoting_sheet` igual a Figma.
+  Nota: la prueba de UI vieja Build24UITests usa el botón Continue, que ya no existe (no corre en el CI).
+
 ## Rama · editor: la línea de reproducción se mueve sola y se arrastra (21 nov, sin build todavía)
 
 - PO: "la línea negra que se mueve en play… debe moverse independiente… y que con el dedo se pueda desplazar; ahora

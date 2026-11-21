@@ -11,3 +11,12 @@
 - La línea ya no está fija en el medio: avanza en play y las pistas pasan de página al llegar al borde derecho.
 - Agarradera de 12 × 16 pt, color tinta, sombra suave; crece un poco mientras el dedo la mueve.
 - Dedo en la línea o en la regla = mover la línea. Dedo en otra parte = correr las pistas sin cambiar el tiempo.
+
+# "What are you promoting?" · opción A, un toque
+
+| Pantalla | Figma | Estado |
+|---|---|---|
+| Hoja "What are you promoting?" | Opción A `3094:357` (página 01) | ✅ igual a Figma (captura `promoting_sheet`) |
+
+- Lista plana producto + marca, lo último usado primero ("Last used"); un toque = elegir y seguir; sin Continue.
+- Chips de marcas para filtrar; "+ New brand or product"; "Mixed products? Detect for me" sin cambios.
