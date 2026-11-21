@@ -51,6 +51,33 @@ final class ShopDesignUITests: XCTestCase {
                                   "shopBgTab_Cut": "Cut", "shopCut_doubleFrame": "Double frame", "shopHoldDuplicate": "Duplicate",
                                   "shopLayout_tall": "Tall"]
 
+    /// PO 21 Nov: "ese slide up no baja cuando tratas de bajarlo" -- pulling the sheet down by its top closes it.
+    func testPromotingSheetPullsDownToClose() {
+        app = XCUIApplication()
+        app.launchArguments = ["-CutSellScreen", "promoting_sheet"]
+        app.launch()
+        pause(3)
+        let sheet = el("promotingSheet")
+        check(sheet.waitForExistence(timeout: 8), "promoting sheet shown")
+        shot("promoting_open")
+        let title = app.staticTexts["What are you promoting?"].firstMatch
+        check(title.exists, "title found")
+        let from = title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        from.press(forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 0, dy: 320)))
+        pause(1.2)
+        shot("promoting_after_pull")
+        check(!el("promotingSheet").exists, "sheet closed by pulling down")
+        // A short pull springs back (does not close).
+        app.terminate(); app.launch(); pause(3)
+        let title2 = app.staticTexts["What are you promoting?"].firstMatch
+        if title2.waitForExistence(timeout: 8) {
+            let f = title2.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            f.press(forDuration: 0.3, thenDragTo: f.withOffset(CGVector(dx: 0, dy: 40)), withVelocity: .slow, thenHoldForDuration: 0.2)
+            pause(1.0)
+            check(el("promotingSheet").exists, "short pull keeps the sheet")
+        }
+    }
+
     func testTitleAndDesignWorksByHand() {
         app = XCUIApplication()
         app.launchArguments = ["-CutSellScreen", "shop_flow"]

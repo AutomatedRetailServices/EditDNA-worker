@@ -103,10 +103,7 @@ struct DesignScreenshotRoot: View {
         case "edits_processing":
             EditsProcessingPreview()
         case "promoting_sheet", "promoting_bulk":
-            ZStack {
-                HomeHubView(onUpload: { _ in }, onRecord: {}, onOpenProject: { _ in }, selectTab: { _ in })
-                PromotingSheet(purpose: screen == "promoting_bulk" ? .upload(.bulk) : .upload(.single), onContinue: { _ in }, onClose: {})
-            }
+            PromotingSheetSample(bulk: screen == "promoting_bulk")
         case "edits_ready":
             ProjectsView(initialTab: .ready)
         case "product_detail":
@@ -677,3 +674,19 @@ private final class SampleEditorHolder: ObservableObject {
     }
 }
 #endif
+
+
+/// The promoting sheet over Home; closing it (tap outside or pull down, PO 21 Nov) really hides it.
+private struct PromotingSheetSample: View {
+    let bulk: Bool
+    @State private var open = true
+    var body: some View {
+        ZStack {
+            HomeHubView(onUpload: { _ in }, onRecord: {}, onOpenProject: { _ in }, selectTab: { _ in })
+            if open {
+                PromotingSheet(purpose: bulk ? .upload(.bulk) : .upload(.single), onContinue: { _ in },
+                               onClose: { open = false })
+            }
+        }
+    }
+}
