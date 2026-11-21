@@ -1315,9 +1315,10 @@ struct OverlayBlockV4: View {
             }
             .frame(width: width, height: 30, alignment: .leading)
             .clipped()
-            if !title.isEmpty, item.uploading == nil, !item.failed, item.kind == .video {
-                // PO 20 Nov ("debería verse el video normal"), Figma 14c 3090:733: a video shows its own frames;
-                // its name goes in a small dark tag on top (selected: the 2 pt blue border below).
+            if !title.isEmpty, item.uploading == nil, !item.failed {
+                // PO 20 Nov ("todo lo que se overlay en foto o video debe presentarse tal como es"), Figma 14c 3090:733:
+                // a photo or video shows its own picture(s); its name goes in a small dark tag on top
+                // (selected: the 2 pt blue border below). It used to be a solid blue bar (White Indigo).
                 Text(L10n.tr(title)).font(CS.inter(9, .semibold))
                     .foregroundStyle(Color(fixed: 0xFFFFFF))
                     .lineLimit(1)
@@ -1326,12 +1327,6 @@ struct OverlayBlockV4: View {
                     .padding(.leading, 3)
                     .frame(maxHeight: .infinity, alignment: .top)
                     .padding(.top, 3)
-            } else if !title.isEmpty, item.uploading == nil, !item.failed {
-                // White Indigo (Figma 04_Editor 9): solid blue with white text; the selected one white, blue border.
-                (isSelected ? Color(fixed: 0xFFFFFF) : CS.accent)
-                Text(L10n.tr(title)).font(CS.inter(12, .semibold))
-                    .foregroundStyle(isSelected ? CS.accent : Color(fixed: 0xFFFFFF))
-                    .lineLimit(1).padding(.leading, 8)
             }
             if let progress = item.uploading {
                 Color.black.opacity(0.45)
