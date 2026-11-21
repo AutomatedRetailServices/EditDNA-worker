@@ -28,6 +28,8 @@ struct TimelineV4: View {
     /// Where the finger moving the line is (points from the left of the tracks), for sliding at the sides.
     @State private var lineFingerX: CGFloat?
     @State private var edgeTimer: Timer?
+    /// Last time the finger asked the line to go to (for the UI probe; the player may not be ready in samples).
+    @State private var lineTarget: Double?
     /// The rows under the video row slide up and down when there are more than fit.
     @State private var rowScroll: CGFloat = 0
     @State private var rowScrollStart: CGFloat?
@@ -176,6 +178,7 @@ struct TimelineV4: View {
         .onChange(of: rows.count) { _, _ in revealSelectedRow() }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("timelineV4")
+        .accessibilityValue(String(format: "view %.1f line %.1f", viewStart, lineTarget ?? playback.currentTime))
     }
 
     @ViewBuilder
@@ -369,6 +372,7 @@ struct TimelineV4: View {
         guard let fx = lineFingerX else { return }
         let target = TimelineViewport.time(atX: min(max(0, fx), tracksWidth), viewStart: viewStart,
                                            pixelsPerSecond: pixelsPerSecond, duration: duration)
+        lineTarget = target
         playback.seek(to: target)
     }
 

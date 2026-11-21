@@ -60,13 +60,13 @@ final class ShopDesignUITests: XCTestCase {
         pause(4)
         let timeline = el("timelineV4")
         check(timeline.waitForExistence(timeout: 10), "timeline shown")
-        func seconds() -> Int {
-            let label = el("timelineTime").label
-            let parts = label.split(whereSeparator: { !$0.isNumber })
-            guard parts.count >= 2, let m = Int(parts[0]), let s = Int(parts[1]) else { return -1 }
-            return m * 60 + s
+        // The timeline says "view <s> line <s>": where the tracks start and where the finger sent the line.
+        func numbers() -> (view: Double, line: Double) {
+            let parts = (timeline.value as? String ?? "").split(separator: " ")
+            guard parts.count == 4, let v = Double(parts[1]), let l = Double(parts[3]) else { return (-1, -1) }
+            return (v, l)
         }
-        log("time before: \(seconds()) label=\(el("timelineTime").label)")
+        log("before: \(timeline.value ?? "-")")
         let f = timeline.frame
         let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
         let onRuler = origin.withOffset(CGVector(dx: f.minX + 120, dy: f.minY + 30))
@@ -74,9 +74,17 @@ final class ShopDesignUITests: XCTestCase {
         onRuler.press(forDuration: 0.1, thenDragTo: side, withVelocity: .default, thenHoldForDuration: 3.0)
         pause(1)
         shot("line_at_side")
-        let t = seconds()
-        log("time after holding at the side: \(t) label=\(el("timelineTime").label)")
-        check(t > 14, "the line kept going past the screen (\(t) s > 14 s)")
+        let after = numbers()
+        log("after holding at the side: \(timeline.value ?? "-")")
+        check(after.view > 2, "the tracks slid along with the line (view \(after.view) s > 2 s)")
+        check(after.line > 14, "the line went past the first screen (\(after.line) s > 14 s)")
+        // Back to the left side: the tracks come back.
+        side.press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: f.minX + 58, dy: f.minY + 30)),
+                   withVelocity: .default, thenHoldForDuration: 3.0)
+        pause(1)
+        let back = numbers()
+        log("after holding at the left side: \(timeline.value ?? "-")")
+        check(back.view < after.view, "the tracks slid back (view \(back.view) < \(after.view))")
     }
 
     /// PO 21 Nov: "ese slide up no baja cuando tratas de bajarlo" -- pulling the sheet down by its top closes it.
