@@ -9,6 +9,14 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 
 
+## Rama · línea de tiempo: fotos y videos encima se ven tal como son (20 nov, sin build todavía)
+
+- PO: "el video del b-roll en el editor se queda como un video1 en toda una línea azul… todo lo que se overlay en foto o
+  video debe presentarse tal como es". Causa: el diseño viejo (Figma 04_Editor 9, "White Indigo") tapaba los cuadros
+  con una barra azul con el nombre. Ahora (Figma 14c `3090:733`, `932671ad`): se ve la imagen real (fotos) o los cuadros
+  del video, y el nombre va en una etiqueta oscura pequeña arriba a la izquierda; seleccionado = borde azul de 2.
+- Captura del simulador `editor_v4_video_overlay` igual a Figma 14c. 133 pruebas de la app, 0 fallas.
+
 ## Rama · editor: el B-roll se veía lento (20 nov, en el build 105)
 
 - PO (después del build 104): "el error sigue en play… el broll… es lento el video". Causa: en el editor un video
