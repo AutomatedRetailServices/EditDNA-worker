@@ -1315,7 +1315,18 @@ struct OverlayBlockV4: View {
             }
             .frame(width: width, height: 30, alignment: .leading)
             .clipped()
-            if !title.isEmpty, item.uploading == nil, !item.failed {
+            if !title.isEmpty, item.uploading == nil, !item.failed, item.kind == .video {
+                // PO 20 Nov ("debería verse el video normal"), Figma 14c 3090:733: a video shows its own frames;
+                // its name goes in a small dark tag on top (selected: the 2 pt blue border below).
+                Text(L10n.tr(title)).font(CS.inter(9, .semibold))
+                    .foregroundStyle(Color(fixed: 0xFFFFFF))
+                    .lineLimit(1)
+                    .padding(.horizontal, 4).padding(.vertical, 1)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Color(fixed: 0x0B1020).opacity(0.6)))
+                    .padding(.leading, 3)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .padding(.top, 3)
+            } else if !title.isEmpty, item.uploading == nil, !item.failed {
                 // White Indigo (Figma 04_Editor 9): solid blue with white text; the selected one white, blue border.
                 (isSelected ? Color(fixed: 0xFFFFFF) : CS.accent)
                 Text(L10n.tr(title)).font(CS.inter(12, .semibold))

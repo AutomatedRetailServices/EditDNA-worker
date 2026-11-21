@@ -194,6 +194,8 @@ struct DesignScreenshotRoot: View {
             SampleEditor(state: EditorPreviewState(panel: .captions(nil)), preset: "classic", font: "bebas_neue")
         case "editor_v4_overlay_gallery":
             SampleEditor(state: EditorPreviewState(sheet: .overlay))
+        case "editor_v4_video_overlay":
+            SampleEditor(state: EditorPreviewState(), videoOverlay: true)
         case "editor_v4_overlay_selected":
             SampleEditor(state: EditorPreviewState(selection: .overlay("m1", isText: false)), overlays: true)
         case "editor_v4_text_selected":
@@ -567,6 +569,8 @@ private struct SampleEditor: View {
     var font = "montserrat"
     var overlays = false
     var voice = false
+    /// PO 20 Nov (Figma 14c): a generated video as a B-roll overlay, to see its frames on the timeline.
+    var videoOverlay = false
     @StateObject private var holder = SampleEditorHolder()
 
     var body: some View {
@@ -575,7 +579,14 @@ private struct SampleEditor: View {
                 EditorV4View(model: model, project: holder.project, previewState: state)
             }
         }
-        .onAppear { holder.build(preset: preset, font: font, overlays: overlays, voice: voice) }
+        .onAppear {
+            if videoOverlay {
+                Task { holder.build(preset: preset, font: font, overlays: overlays, voice: voice,
+                                    videoURL: await ProbeMedia.makeVideo(seconds: 8)) }
+            } else {
+                holder.build(preset: preset, font: font, overlays: overlays, voice: voice)
+            }
+        }
     }
 }
 
@@ -585,7 +596,7 @@ private final class SampleEditorHolder: ObservableObject {
     let project = Project(projectID: "sample", userID: "sample", title: "Untitled Cut", state: "draft_ready",
                           latestJobID: nil, sourceCount: 1, updatedAt: nil, createdAt: "2026-10-13T08:00:00+00:00")
 
-    func build(preset: String, font: String, overlays: Bool, voice: Bool = false) {
+    func build(preset: String, font: String, overlays: Bool, voice: Bool = false, videoURL: URL? = nil) {
         guard model == nil else { return }
         let model = DraftEditorViewModel(project: project, session: CutSellSession(userID: "sample", accessToken: "sample"))
         let clips: [JSONValue] = [
@@ -610,6 +621,13 @@ private final class SampleEditorHolder: ObservableObject {
             object["media_overlays"] = .array([.object(["overlay_id": .string("m1"), "kind": .string("photo"),
                                                         "x": .number(0.5), "y": .number(0.3), "width": .number(0.55),
                                                         "start": .number(0), "end": .number(30)])])
+        }
+        if let videoURL {
+            object["media_overlays"] = .array([.object(["overlay_id": .string("v1"), "kind": .string("video"),
+                                                        "uri": .string("s3://sample/broll.mp4"),
+                                                        "preview_url": .string(videoURL.absoluteString),
+                                                        "layout": .string("full"), "start": .number(2), "end": .number(9),
+                                                        "source_start": .number(0)])])
         }
         if voice {
             object["audio_clips"] = .array([.object(["audio_id": .string("vo1"), "kind": .string("voice"), "asset_id": .string("a1"),
