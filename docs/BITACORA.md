@@ -159,7 +159,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
-| 107 | 2026-11-21 16:37 | ✅ subido (pedido `ba1ce25c`) | feature/shop-board | `cad63698` | Línea del editor se mueve y se arrastra; "What are you promoting?" un toque; hojas se cierran al bajarlas |
+| 107 | 2026-11-21 16:37 | ✅ subido 16:52 (pedido `ba1ce25c`) | feature/shop-board | `cad63698` | Línea del editor se mueve y se arrastra; "What are you promoting?" un toque; hojas se cierran al bajarlas |
 | 106 | 2026-11-21 09:20 | ✅ subido 09:35 (pedido `ab4d0e15`) | feature/shop-board | `026083bd` | Línea de tiempo: fotos y videos encima se ven tal como son (sin barra azul) |
 | 105 | 2026-11-20 18:55 | ✅ subido 19:12 (pedido `85b7a287`) | feature/shop-board | `5cdeb1dd` | Editor: el B-roll se reproduce como video de verdad (antes lento) |
 | 104 | 2026-11-20 14:25 | ✅ subido 14:39 (pedido `1bad6754`) | feature/shop-board | `e29f910a` | Cámara: clips guardados en Fotos; Mirror prendido por defecto |
