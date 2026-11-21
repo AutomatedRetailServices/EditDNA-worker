@@ -9,6 +9,19 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 
 
+## Rama · editor: la línea de reproducción se mueve sola y se arrastra (21 nov, sin build todavía)
+
+- PO: "la línea negra que se mueve en play… debe moverse independiente… y que con el dedo se pueda desplazar; ahora
+  mismo no permite". Antes (21 oct, estilo CapCut) la línea estaba quieta en el medio y las pistas pasaban debajo.
+- Ahora (Figma 14d `3092:648`, `5d972e17`): en play la línea avanza sobre las pistas; las pistas pasan de página solo
+  cuando llega al 85 % del ancho. Con el dedo en la línea (±24 pt) o en la regla de tiempos se lleva a cualquier punto;
+  arrastrar en otro lugar corre las pistas sin cambiar el tiempo; arriba/abajo sigue moviendo las filas; con dos dedos
+  el zoom deja la línea en su sitio. Agarradera pequeña sobre la regla.
+- 139 pruebas de la app, 0 fallas (6 nuevas: TimelineViewportTests). Captura del simulador revisada.
+- Costo (PO "analiza el precio de costo de ese video del broll"): estimado ~US$0.03 por video (corte Sonnet 2-3 ¢
+  medido en 54 s + B-roll Haiku < 0.5 ¢ según la tabla del código, sin Modal ni R2). 200 videos ≈ US$6-10. El costo
+  exacto por video no se registra hoy: propuesta de una línea de costo en el registro del servidor, pendiente del OK.
+
 ## Rama · línea de tiempo: fotos y videos encima se ven tal como son (20 nov, en el build 106)
 
 - PO: "el video del b-roll en el editor se queda como un video1 en toda una línea azul… todo lo que se overlay en foto o
