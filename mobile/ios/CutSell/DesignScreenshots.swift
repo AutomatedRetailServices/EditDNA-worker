@@ -569,7 +569,7 @@ private struct SampleEditor: View {
     var font = "montserrat"
     var overlays = false
     var voice = false
-    /// PO 20 Nov (Figma 14c): a generated video as a B-roll overlay, to see its frames on the timeline.
+    /// PO 20 Nov (Figma 14c): a drawn picture as an overlay, to see it on the timeline (photo/video use the same block).
     var videoOverlay = false
     @StateObject private var holder = SampleEditorHolder()
 
@@ -580,15 +580,26 @@ private struct SampleEditor: View {
             }
         }
         .onAppear {
-            holder.build(preset: preset, font: font, overlays: overlays, voice: voice)
-            if videoOverlay {
-                Task {
-                    let url = await ProbeMedia.makeVideo(seconds: 3)
-                    holder.model = nil
-                    holder.build(preset: preset, font: font, overlays: overlays, voice: voice, videoURL: url)
-                }
-            }
+            holder.build(preset: preset, font: font, overlays: overlays, voice: voice,
+                         pictureURL: videoOverlay ? Self.samplePicture() : nil)
         }
+    }
+
+    /// A drawn picture (no user media) written to a file, used as the overlay's picture on the timeline.
+    private static func samplePicture() -> URL? {
+        let size = CGSize(width: 360, height: 640)
+        let image = UIGraphicsImageRenderer(size: size).image { ctx in
+            let colors = [UIColor(red: 0.95, green: 0.55, blue: 0.25, alpha: 1).cgColor,
+                          UIColor(red: 0.35, green: 0.2, blue: 0.75, alpha: 1).cgColor] as CFArray
+            if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1]) {
+                ctx.cgContext.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: size.width, y: size.height), options: [])
+            }
+            UIColor.white.setFill()
+            UIBezierPath(ovalIn: CGRect(x: 110, y: 250, width: 140, height: 140)).fill()
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("sample-overlay.png")
+        guard let data = image.pngData(), (try? data.write(to: url)) != nil else { return nil }
+        return url
     }
 }
 
@@ -598,7 +609,7 @@ private final class SampleEditorHolder: ObservableObject {
     let project = Project(projectID: "sample", userID: "sample", title: "Untitled Cut", state: "draft_ready",
                           latestJobID: nil, sourceCount: 1, updatedAt: nil, createdAt: "2026-10-13T08:00:00+00:00")
 
-    func build(preset: String, font: String, overlays: Bool, voice: Bool = false, videoURL: URL? = nil) {
+    func build(preset: String, font: String, overlays: Bool, voice: Bool = false, pictureURL: URL? = nil) {
         guard model == nil else { return }
         let model = DraftEditorViewModel(project: project, session: CutSellSession(userID: "sample", accessToken: "sample"))
         let clips: [JSONValue] = [
@@ -624,12 +635,12 @@ private final class SampleEditorHolder: ObservableObject {
                                                         "x": .number(0.5), "y": .number(0.3), "width": .number(0.55),
                                                         "start": .number(0), "end": .number(30)])])
         }
-        if let videoURL {
-            object["media_overlays"] = .array([.object(["overlay_id": .string("v1"), "kind": .string("video"),
-                                                        "uri": .string("s3://sample/broll.mp4"),
-                                                        "preview_url": .string(videoURL.absoluteString),
-                                                        "layout": .string("full"), "start": .number(0.5), "end": .number(3.5),
-                                                        "source_start": .number(0)])])
+        if let pictureURL {
+            object["media_overlays"] = .array([.object(["overlay_id": .string("p1"), "kind": .string("photo"),
+                                                        "uri": .string("s3://sample/overlay.png"),
+                                                        "preview_url": .string(pictureURL.absoluteString),
+                                                        "x": .number(0.5), "y": .number(0.4), "width": .number(0.5),
+                                                        "start": .number(0.5), "end": .number(6)])])
         }
         if voice {
             object["audio_clips"] = .array([.object(["audio_id": .string("vo1"), "kind": .string("voice"), "asset_id": .string("a1"),
