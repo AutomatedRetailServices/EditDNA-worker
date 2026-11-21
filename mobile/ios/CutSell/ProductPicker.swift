@@ -144,7 +144,7 @@ struct PromotingSheet: View {
                 .onTapGesture(perform: onClose)
                 .accessibilityLabel(L10n.tr("Close"))
                 .accessibilityAddTraits(.isButton)
-            WISheetCard {
+            WISheetCard(onDismiss: onClose) {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(L10n.tr("What are you promoting?"))
                         .font(CS.inter(22, .heavy))

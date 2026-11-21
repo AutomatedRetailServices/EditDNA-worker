@@ -197,7 +197,7 @@ struct LimitScreen: View {
                 .onTapGesture(perform: onClose)
                 .accessibilityLabel(L10n.tr("Close"))
                 .accessibilityAddTraits(.isButton)
-            WISheetCard {
+            WISheetCard(onDismiss: onClose) {
                 VStack(spacing: 0) {
                     WIStatusBadge(kind: .warning, size: 56).padding(.top, 21)
                     Text(L10n.tr(heading))

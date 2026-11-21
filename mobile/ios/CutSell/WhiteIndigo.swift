@@ -285,7 +285,11 @@ struct WIPillButton: View {
 
 /// Bottom sheet of the White Indigo look (Figma 1176:2991): white, radius 28 on top, grey handle, 45 % dim behind.
 struct WISheetCard<Content: View>: View {
+    /// PO 21 Nov 2026 ("ese slide up no baja cuando tratas de bajarlo"): with this set, pulling the sheet down by its
+    /// top (the grey bar and the title) closes it, like an iPhone sheet.
+    var onDismiss: (() -> Void)? = nil
     @ViewBuilder var content: () -> Content
+    @State private var pull: CGFloat = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -299,5 +303,33 @@ struct WISheetCard<Content: View>: View {
                 .fill(CS.wiPage)
                 .ignoresSafeArea(edges: .bottom)
         }
+        .contentShape(Rectangle())
+        .offset(y: pull)
+        .simultaneousGesture(onDismiss == nil ? nil : pullDown)
+    }
+
+    private var pullDown: some Gesture {
+        DragGesture(minimumDistance: 8, coordinateSpace: .local)
+            .onChanged { value in
+                guard value.startLocation.y < SheetPull.grabHeight else { return }
+                pull = max(0, value.translation.height)
+            }
+            .onEnded { value in
+                guard value.startLocation.y < SheetPull.grabHeight else { return }
+                if SheetPull.closes(translation: value.translation.height, predicted: value.predictedEndTranslation.height) {
+                    onDismiss?()
+                } else {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { pull = 0 }
+                }
+            }
+    }
+}
+
+/// When a pull on a sheet's top closes it.
+enum SheetPull {
+    /// The grey bar and the title (points from the top of the sheet).
+    static let grabHeight: CGFloat = 76
+    static func closes(translation: CGFloat, predicted: CGFloat) -> Bool {
+        translation > 110 || (translation > 30 && predicted > 240)
     }
 }
