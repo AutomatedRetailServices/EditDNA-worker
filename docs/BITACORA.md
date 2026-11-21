@@ -9,7 +9,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 
 
-## Rama · línea de tiempo: fotos y videos encima se ven tal como son (20 nov, sin build todavía)
+## Rama · línea de tiempo: fotos y videos encima se ven tal como son (20 nov, en el build 106)
 
 - PO: "el video del b-roll en el editor se queda como un video1 en toda una línea azul… todo lo que se overlay en foto o
   video debe presentarse tal como es". Causa: el diseño viejo (Figma 04_Editor 9, "White Indigo") tapaba los cuadros
@@ -124,6 +124,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 106 | 2026-11-21 09:20 | ✅ subido (pedido PENDING) | feature/shop-board | `026083bd` | Línea de tiempo: fotos y videos encima se ven tal como son (sin barra azul) |
 | 105 | 2026-11-20 18:55 | ✅ subido 19:12 (pedido `85b7a287`) | feature/shop-board | `5cdeb1dd` | Editor: el B-roll se reproduce como video de verdad (antes lento) |
 | 104 | 2026-11-20 14:25 | ✅ subido 14:39 (pedido `1bad6754`) | feature/shop-board | `e29f910a` | Cámara: clips guardados en Fotos; Mirror prendido por defecto |
 | 103 | 2026-11-19 18:17 | ✅ subido 18:17 (pedido `74fb3a0d`) | feature/shop-board | `87f89f57` | Editor: cada clip con el giro de su propio video (clips girados en "Cut Nov 14") |
@@ -229,6 +230,13 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 | 1 | 2026-10-12 13:01 | ❌ falló | feature/ios-captions-v2 | `d90bfc50` | Primer intento, no llegó a TestFlight |
 
 ---
+
+## Build 106
+
+- **Fecha:** 21 nov 2026 · **Rama:** `feature/shop-board` · **Commit:** `026083bd` · Pedido por la PO ("subelo", 09:19).
+- **Qué cambia:** en la línea de tiempo, una foto o video encima muestra su imagen real (cuadros del video) con el
+  nombre en una etiqueta pequeña (Figma 14c `3090:733`); antes era una barra azul sólida.
+- **Pruebas:** 133 pruebas de la app, 0 fallas (CI `44858674205`); captura del simulador igual a Figma.
 
 ## Build 105
 

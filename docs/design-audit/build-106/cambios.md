@@ -1,4 +1,4 @@
-# Assessment de diseño · Línea de tiempo: fotos y videos encima tal como son (rama, sin build todavía)
+# Assessment de diseño · Línea de tiempo: fotos y videos encima tal como son (build 106)
 
 - **Rama:** `feature/shop-board` · PO 20 nov 2026: "todo lo que se overlay en foto o video debe presentarse tal como es".
 - **Figma** (página "📱 App build 78 · 03 Edits, Editor y Export"):
