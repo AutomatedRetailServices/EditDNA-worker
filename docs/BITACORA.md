@@ -9,7 +9,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 
 
-## Rama · la línea arrastrada lleva las pistas; sin saltos de bloque (21 nov, sin build todavía)
+## Rama · la línea arrastrada lleva las pistas; sin saltos de bloque (21 nov, en el build 108)
 
 - PO (build 107): "el time line no se mueve al compás cuando lo quiero llevar yo… cuando termina es como que se mueve de
   bloque" y "llego al tope de la pantalla, arrastro la línea y si no está en play el time line no se mueve".
@@ -169,6 +169,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 108 | 2026-11-21 19:26 | ✅ subido (pedido PENDING) | feature/shop-board | `4afdb0b9` | Línea arrastrada al borde lleva las pistas; en play sin saltos de bloque |
 | 107 | 2026-11-21 16:37 | ✅ subido 16:52 (pedido `ba1ce25c`) | feature/shop-board | `cad63698` | Línea del editor se mueve y se arrastra; "What are you promoting?" un toque; hojas se cierran al bajarlas |
 | 106 | 2026-11-21 09:20 | ✅ subido 09:35 (pedido `ab4d0e15`) | feature/shop-board | `026083bd` | Línea de tiempo: fotos y videos encima se ven tal como son (sin barra azul) |
 | 105 | 2026-11-20 18:55 | ✅ subido 19:12 (pedido `85b7a287`) | feature/shop-board | `5cdeb1dd` | Editor: el B-roll se reproduce como video de verdad (antes lento) |
@@ -276,6 +277,13 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 | 1 | 2026-10-12 13:01 | ❌ falló | feature/ios-captions-v2 | `d90bfc50` | Primer intento, no llegó a TestFlight |
 
 ---
+
+## Build 108
+
+- **Fecha:** 21 nov 2026 · **Rama:** `feature/shop-board` · **Commit:** `4afdb0b9` · Pedido por la PO ("si", 19:25).
+- **Qué cambia:** arrastrando la línea negra al borde (sin play) las pistas se corren solas hasta el final; en play
+  las pistas se corren suave (sin saltos de bloque).
+- **Pruebas:** 147 pruebas de la app, 0 fallas (CI `44960101333`); dedo de prueba en el simulador PASS (`44960102712`).
 
 ## Build 107
 
