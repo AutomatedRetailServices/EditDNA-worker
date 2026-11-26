@@ -14,7 +14,8 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 - PO: "vamos a cambiar el icono del app en apple store y en testflight" (carrito con video y etiqueta $), "centrado…
   90%", y eligió la opción **Oscuro** ("es el último icono, el negro del shopping, el oscuro"). AppIcon-1024.png =
   carrito (fondo quitado) al 90 % del ancho, centrado, fondo degradado azul-morado oscuro (#1A163C → #080A18) con
-  brillo morado suave detrás del carrito; los puntos de la cinta de película en blanco, como en la imagen
+  brillo suave detrás del carrito con los colores del ".ai" del logo (naranja, rojo, rosado, magenta,
+  morado, azul, celeste, en diagonal, misma forma que el brillo morado); el hueco del aro transparente; los puntos de la cinta de película en blanco, como en la imagen
   elegida; RGB sin transparencia. Cambia con el próximo build. (Figma no recibe
   imágenes desde aquí.)
 
