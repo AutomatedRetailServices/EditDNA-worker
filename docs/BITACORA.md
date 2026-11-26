@@ -13,7 +13,9 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 - PO: "en figma vamos a cambiar el icono del app en apple store y en testflight" (imagen del carrito con video y
   etiqueta $), "centrado y al mismo nivel de tamaño… necesita un 81%… llévalo a 90%". AppIcon-1024.png = carrito
-  (fondo quitado) al 90 % del ancho, centrado, sobre el lavanda de la app (#F0F2FF → #D6DEFF), RGB sin transparencia.
+  (fondo quitado) al 90 % del ancho, centrado, sobre fondo blanco con el brillo neón detrás como el ícono viejo de la bolsa
+  (celeste arriba a la derecha → azul → morado → rosado/rojo abajo a la izquierda); huecos de la película en blanco;
+  RGB sin transparencia ("ahora fondo blanco con el mismo lightening del antes… glowing").
   El ícono de TestFlight / App Store sale de aquí: cambia con el próximo build. (Figma no recibe imágenes desde aquí.)
 
 ## Rama · la línea arrastrada lleva las pistas; sin saltos de bloque (21 nov, en el build 108)
