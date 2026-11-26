@@ -9,15 +9,15 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 
 
-## Rama · ícono nuevo de la app: carrito con video (26 nov, sin build todavía)
+## Rama · ícono nuevo de la app: carrito con video (26 nov)
 
-- PO: "vamos a cambiar el icono del app en apple store y en testflight" (carrito con video y etiqueta $), "centrado…
-  90%", y eligió la opción **Oscuro** ("es el último icono, el negro del shopping, el oscuro"). AppIcon-1024.png =
-  carrito (fondo quitado) al 90 % del ancho, centrado, fondo degradado azul-morado oscuro (#1A163C → #080A18) con
-  brillo suave detrás del carrito con los colores del ".ai" del logo (naranja, rojo, rosado, magenta,
-  morado, azul, celeste, en diagonal, misma forma que el brillo morado); el hueco del aro transparente; los puntos de la cinta de película en blanco, como en la imagen
-  elegida; RGB sin transparencia. Cambia con el próximo build. (Figma no recibe
-  imágenes desde aquí.)
+- PO: "vamos a cambiar el icono del app en apple store y en testflight" (carrito con video y etiqueta $), 90 % del
+  ancho, centrado; final elegido: **fondo blanco, brillo morado suave detrás (luz, sin sombra gris), pantalla azul**
+  ("coloca esto… para el testflight, cámbialo con el que tenemos actual"). AppIcon-1024.png 1024×1024 RGB sin
+  transparencia; el hueco del aro deja ver el fondo; los puntos de la cinta en blanco. Se probaron y descartaron:
+  lavanda, fondo oscuro (morado y colores .ai), luz girando de colores y la pantalla repintada con los colores del
+  .ai (se veía "pintada con brocha": habría que generar la imagen de nuevo). Figma: frame "Ícono de la app" con nota
+  (Figma no recibe imágenes desde aquí).
 
 ## Rama · la línea arrastrada lleva las pistas; sin saltos de bloque (21 nov, en el build 108)
 
