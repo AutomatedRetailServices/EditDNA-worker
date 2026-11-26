@@ -24,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-26, macos-latest]
+        os: [macos-27, macos-26-xlarge]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 75
     steps:
@@ -32,7 +32,7 @@ jobs:
 
       - name: Select the newest Xcode
         run: |
-          ls -d /Applications/Xcode*.app || true
+          ls -d /Applications/Xcode*.app || true; sw_vers || true
           latest="$(ls -d /Applications/Xcode_27*.app 2>/dev/null | grep -vi beta | sort -V | tail -1)"
           if [ -z "$latest" ]; then echo "::error title=xcode27::no Xcode 27 on ${{ matrix.os }}"; exit 1; fi
           echo "::notice title=xcode::$latest"
