@@ -9,7 +9,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 
 
-## Rama · ícono nuevo de la app: carrito con video (26 nov)
+## Rama · ícono nuevo de la app: carrito con video (26 nov, en el build 109)
 
 - PO: "vamos a cambiar el icono del app en apple store y en testflight" (carrito con video y etiqueta $), 90 % del
   ancho, centrado; final elegido: **fondo blanco, brillo morado suave detrás (luz, sin sombra gris), pantalla azul**
@@ -179,6 +179,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 109 | 2026-11-26 16:42 | ✅ subido (pedido PENDING) | feature/shop-board | `ec1c848c` | Ícono nuevo: carrito con video (fondo blanco, brillo morado) |
 | 108 | 2026-11-21 19:26 | ✅ subido 19:42 (pedido `f7ad7827`) | feature/shop-board | `4afdb0b9` | Línea arrastrada al borde lleva las pistas; en play sin saltos de bloque |
 | 107 | 2026-11-21 16:37 | ✅ subido 16:52 (pedido `ba1ce25c`) | feature/shop-board | `cad63698` | Línea del editor se mueve y se arrastra; "What are you promoting?" un toque; hojas se cierran al bajarlas |
 | 106 | 2026-11-21 09:20 | ✅ subido 09:35 (pedido `ab4d0e15`) | feature/shop-board | `026083bd` | Línea de tiempo: fotos y videos encima se ven tal como son (sin barra azul) |
@@ -287,6 +288,13 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 | 1 | 2026-10-12 13:01 | ❌ falló | feature/ios-captions-v2 | `d90bfc50` | Primer intento, no llegó a TestFlight |
 
 ---
+
+## Build 109
+
+- **Fecha:** 26 nov 2026 · **Rama:** `feature/shop-board` · **Commit:** `ec1c848c` · Pedido por la PO ("coloca esto… para el
+  testflight, cámbialo con el que tenemos actual", 16:39).
+- **Qué cambia:** ícono de la app = carrito con video (fondo blanco, brillo morado, pantalla azul). También lleva lo
+  de la rama desde el 108 (ninguna pantalla nueva: el inicio con mascota sigue en propuesta en Figma).
 
 ## Build 108
 
