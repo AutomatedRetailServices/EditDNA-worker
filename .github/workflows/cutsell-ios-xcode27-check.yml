@@ -10,7 +10,7 @@ on:
     branches: [probe/xcode27]
     paths:
       - 'mobile/ios/**'
-      - '.github/workflows/cutsell-ios-unit-tests.yml'
+      - '.github/workflows/cutsell-ios-xcode27-check.yml'
 
 concurrency:
   group: cutsell-ios-xcode27-${{ github.ref }}
