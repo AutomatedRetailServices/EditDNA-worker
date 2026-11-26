@@ -179,7 +179,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
-| 109 | 2026-11-26 16:42 | ✅ subido (pedido PENDING) | feature/shop-board | `ec1c848c` | Ícono nuevo: carrito con video (fondo blanco, brillo morado) |
+| 109 | 2026-11-26 16:42 | ✅ subido (pedido `0dd64d6b`) | feature/shop-board | `ec1c848c` | Ícono nuevo: carrito con video (fondo blanco, brillo morado) |
 | 108 | 2026-11-21 19:26 | ✅ subido 19:42 (pedido `f7ad7827`) | feature/shop-board | `4afdb0b9` | Línea arrastrada al borde lleva las pistas; en play sin saltos de bloque |
 | 107 | 2026-11-21 16:37 | ✅ subido 16:52 (pedido `ba1ce25c`) | feature/shop-board | `cad63698` | Línea del editor se mueve y se arrastra; "What are you promoting?" un toque; hojas se cierran al bajarlas |
 | 106 | 2026-11-21 09:20 | ✅ subido 09:35 (pedido `ab4d0e15`) | feature/shop-board | `026083bd` | Línea de tiempo: fotos y videos encima se ven tal como son (sin barra azul) |
