@@ -295,6 +295,10 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
   con el **iOS 27 SDK (Xcode 27)**. Xcode 27 ya salió (junio/septiembre 2026; hay 27.1 y 27.2). Nuestros builds corren
   en `macos-15-intel`, que trae como máximo Xcode 26.3. Arreglo: correr el build en una máquina de GitHub que traiga
   Xcode 27 y probar que compila (sin costo extra). No urge para TestFlight hoy; obligatorio antes de abril 2027.
+- 26 nov, prueba (rama `probe/xcode27`, sin subir nada): las Mac gratis de GitHub todavía **no traen Xcode 27**.
+  `macos-26` y `macos-latest` llegan hasta Xcode 26.6; `macos-27` no existe aún (se queda en cola); las Mac grandes
+  (`-xlarge`) son de pago: se canceló al instante, 0 minutos cobrados. Siguiente paso: repetir la prueba cuando GitHub
+  agregue Xcode 27 (`.github/workflows/cutsell-ios-xcode27-check.yml` en esa rama, solo empujar a `probe/xcode27`).
 
 ## Build 109
 
