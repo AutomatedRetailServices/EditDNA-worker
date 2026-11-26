@@ -179,7 +179,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
-| 109 | 2026-11-26 16:42 | ✅ subido (pedido `0dd64d6b`) | feature/shop-board | `ec1c848c` | Ícono nuevo: carrito con video (fondo blanco, brillo morado) |
+| 109 | 2026-11-26 16:42 | ✅ subido 16:53 (pedido `0dd64d6b`; Apple confirmó la entrega por correo, el paso final de espera se cortó por red) | feature/shop-board | `ec1c848c` | Ícono nuevo: carrito con video (fondo blanco, brillo morado) |
 | 108 | 2026-11-21 19:26 | ✅ subido 19:42 (pedido `f7ad7827`) | feature/shop-board | `4afdb0b9` | Línea arrastrada al borde lleva las pistas; en play sin saltos de bloque |
 | 107 | 2026-11-21 16:37 | ✅ subido 16:52 (pedido `ba1ce25c`) | feature/shop-board | `cad63698` | Línea del editor se mueve y se arrastra; "What are you promoting?" un toque; hojas se cierran al bajarlas |
 | 106 | 2026-11-21 09:20 | ✅ subido 09:35 (pedido `ab4d0e15`) | feature/shop-board | `026083bd` | Línea de tiempo: fotos y videos encima se ven tal como son (sin barra azul) |
@@ -288,6 +288,13 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 | 1 | 2026-10-12 13:01 | ❌ falló | feature/ios-captions-v2 | `d90bfc50` | Primer intento, no llegó a TestFlight |
 
 ---
+
+## Pendiente · Xcode 27 antes de abril 2027
+
+- Apple (correo del build 109, ITMS-90725): la app se compiló con el iOS 26.2 SDK; desde **abril 2027** hay que subir
+  con el **iOS 27 SDK (Xcode 27)**. Xcode 27 ya salió (junio/septiembre 2026; hay 27.1 y 27.2). Nuestros builds corren
+  en `macos-15-intel`, que trae como máximo Xcode 26.3. Arreglo: correr el build en una máquina de GitHub que traiga
+  Xcode 27 y probar que compila (sin costo extra). No urge para TestFlight hoy; obligatorio antes de abril 2027.
 
 ## Build 109
 
