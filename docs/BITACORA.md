@@ -12,8 +12,8 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 ## Rama · ícono nuevo de la app: carrito con video (26 nov, sin build todavía)
 
 - PO: "en figma vamos a cambiar el icono del app en apple store y en testflight" (imagen del carrito con video y
-  etiqueta $), "centrado y al mismo nivel de tamaño… necesita un 81%". Hecho (`78cbbe61`): AppIcon-1024.png = carrito
-  (fondo quitado) al 81 % del ancho, centrado, sobre el lavanda de la app (#F0F2FF → #D6DEFF), RGB sin transparencia.
+  etiqueta $), "centrado y al mismo nivel de tamaño… necesita un 81%… llévalo a 90%". AppIcon-1024.png = carrito
+  (fondo quitado) al 90 % del ancho, centrado, sobre el lavanda de la app (#F0F2FF → #D6DEFF), RGB sin transparencia.
   El ícono de TestFlight / App Store sale de aquí: cambia con el próximo build. (Figma no recibe imágenes desde aquí.)
 
 ## Rama · la línea arrastrada lleva las pistas; sin saltos de bloque (21 nov, en el build 108)
