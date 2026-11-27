@@ -179,6 +179,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 111 | 2026-11-26 21:32 | ✅ subido (pedido PENDING) | feature/shop-board | `8bdecb1a` | Ícono sin etiqueta $; el número rojo se borra al abrir |
 | 110 | 2026-11-26 20:24 | ✅ subido 20:37 (pedido `c8cf500d`) | feature/shop-board | `4854519e` | Ícono final: carrito plateado sobre negro con brillo |
 | 109 | 2026-11-26 16:42 | ✅ subido 16:53 (pedido `0dd64d6b`; Apple confirmó la entrega por correo, el paso final de espera se cortó por red) | feature/shop-board | `ec1c848c` | Ícono nuevo: carrito con video (fondo blanco, brillo morado) |
 | 108 | 2026-11-21 19:26 | ✅ subido 19:42 (pedido `f7ad7827`) | feature/shop-board | `4afdb0b9` | Línea arrastrada al borde lleva las pistas; en play sin saltos de bloque |
@@ -290,12 +291,12 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 ---
 
-## Rama · ícono sin etiqueta $ (26 nov, sin build todavía)
+## Rama · ícono sin etiqueta $ (26 nov, en el build 111)
 
 - PO: "cambia el ícono por este entonces": el mismo carrito plateado sobre negro con brillo azul-morado, **sin la
   etiqueta $**. Imagen de la PO, 1024×1024 RGB, puesta tal cual en AppIcon-1024.png (reemplaza al del build 110).
 
-## Rama · el ícono mostraba "44" en rojo (26 nov, sin build todavía)
+## Rama · el ícono mostraba "44" en rojo (26 nov, en el build 111)
 
 - PO: "¿por qué el ícono del app en mi iPhone tiene 44 notificaciones?". Causa: el número rojo es la cuenta de avisos
   del servidor ("Your cut is ready", "Mix ready"…) que la app nunca marcaba como vistos; la pantalla de avisos ya no
@@ -318,6 +319,13 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
   `macos-26` y `macos-latest` llegan hasta Xcode 26.6; `macos-27` no existe aún (se queda en cola); las Mac grandes
   (`-xlarge`) son de pago: se canceló al instante, 0 minutos cobrados. Siguiente paso: repetir la prueba cuando GitHub
   agregue Xcode 27 (`.github/workflows/cutsell-ios-xcode27-check.yml` en esa rama, solo empujar a `probe/xcode27`).
+
+## Build 111
+
+- **Fecha:** 26 nov 2026 · **Rama:** `feature/shop-board` · **Commit:** `8bdecb1a` · Pedido por la PO ("si", 21:31).
+- **Qué cambia:** (1) ícono = carrito plateado sobre negro sin la etiqueta $; (2) el número rojo del ícono (44) se
+  borra al abrir la app.
+- **Pruebas:** 147 pruebas de la app, 0 fallas (corrida del arreglo `45925430739`; la del ícono en curso).
 
 ## Build 110
 
