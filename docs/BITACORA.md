@@ -179,6 +179,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 112 | 2026-11-27 03:50 | ✅ subido (pedido PENDING) | feature/shop-board | `52912b52` | Ícono: carrito plateado más grande |
 | 111 | 2026-11-26 21:32 | ✅ subido 21:46 (pedido `f7b6149e`) | feature/shop-board | `8bdecb1a` | Ícono sin etiqueta $; el número rojo se borra al abrir |
 | 110 | 2026-11-26 20:24 | ✅ subido 20:37 (pedido `c8cf500d`) | feature/shop-board | `4854519e` | Ícono final: carrito plateado sobre negro con brillo |
 | 109 | 2026-11-26 16:42 | ✅ subido 16:53 (pedido `0dd64d6b`; Apple confirmó la entrega por correo, el paso final de espera se cortó por red) | feature/shop-board | `ec1c848c` | Ícono nuevo: carrito con video (fondo blanco, brillo morado) |
@@ -291,7 +292,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 ---
 
-## Rama · ícono: carrito plateado más grande (27 nov)
+## Rama · ícono: carrito plateado más grande (27 nov, en el build 112)
 
 - PO: "cambia el ícono en el testflight por este": el carrito plateado sobre negro con brillo azul-morado, sin
   etiqueta, **más grande y centrado** (ocupa casi todo el ícono). Imagen de la PO, 1024×1024 RGB, puesta tal cual.
@@ -324,6 +325,12 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
   `macos-26` y `macos-latest` llegan hasta Xcode 26.6; `macos-27` no existe aún (se queda en cola); las Mac grandes
   (`-xlarge`) son de pago: se canceló al instante, 0 minutos cobrados. Siguiente paso: repetir la prueba cuando GitHub
   agregue Xcode 27 (`.github/workflows/cutsell-ios-xcode27-check.yml` en esa rama, solo empujar a `probe/xcode27`).
+
+## Build 112
+
+- **Fecha:** 27 nov 2026 · **Rama:** `feature/shop-board` · **Commit:** `52912b52` · Pedido por la PO ("cambia el icono en
+  el testflight por este", 03:48).
+- **Qué cambia:** ícono = carrito plateado más grande y centrado (imagen de la PO). Nada más.
 
 ## Build 111
 
