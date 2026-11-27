@@ -179,6 +179,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 114 | 2026-11-27 05:55 | ✅ subido (pedido PENDING) | feature/shop-board | `ddcd4c0a` | Ícono: carrito neón sin la etiqueta $, 80 % |
 | 113 | 2026-11-27 05:37 | ✅ subido 05:48 (pedido `d8c3fd86`) | feature/shop-board | `6c040e6b` | Ícono: carrito al 80 % |
 | 112 | 2026-11-27 03:50 | ✅ subido 04:08 (pedido `bf62bb3a`) | feature/shop-board | `52912b52` | Ícono: carrito plateado más grande |
 | 111 | 2026-11-26 21:32 | ✅ subido 21:46 (pedido `f7b6149e`) | feature/shop-board | `8bdecb1a` | Ícono sin etiqueta $; el número rojo se borra al abrir |
@@ -332,6 +333,11 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
   `macos-26` y `macos-latest` llegan hasta Xcode 26.6; `macos-27` no existe aún (se queda en cola); las Mac grandes
   (`-xlarge`) son de pago: se canceló al instante, 0 minutos cobrados. Siguiente paso: repetir la prueba cuando GitHub
   agregue Xcode 27 (`.github/workflows/cutsell-ios-xcode27-check.yml` en esa rama, solo empujar a `probe/xcode27`).
+
+## Build 114
+
+- **Fecha:** 27 nov 2026 · **Rama:** `feature/shop-board` · **Commit:** `ddcd4c0a` · Pedido por la PO ("quítale el tag y usa esta").
+- **Qué cambia:** ícono = carrito neón azul/morado con el play blanco, sin la etiqueta rosada ni el aro; centrado al 80 % sobre negro. Nada más.
 
 ## Build 113
 
