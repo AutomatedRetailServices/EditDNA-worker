@@ -291,6 +291,11 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 ---
 
+## Rama · ícono: carrito plateado más grande (27 nov)
+
+- PO: "cambia el ícono en el testflight por este": el carrito plateado sobre negro con brillo azul-morado, sin
+  etiqueta, **más grande y centrado** (ocupa casi todo el ícono). Imagen de la PO, 1024×1024 RGB, puesta tal cual.
+
 ## Rama · ícono sin etiqueta $ (26 nov, en el build 111)
 
 - PO: "cambia el ícono por este entonces": el mismo carrito plateado sobre negro con brillo azul-morado, **sin la
