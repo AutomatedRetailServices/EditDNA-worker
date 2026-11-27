@@ -179,7 +179,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
-| 111 | 2026-11-26 21:32 | ✅ subido (pedido PENDING) | feature/shop-board | `8bdecb1a` | Ícono sin etiqueta $; el número rojo se borra al abrir |
+| 111 | 2026-11-26 21:32 | ✅ subido (pedido `f7b6149e`) | feature/shop-board | `8bdecb1a` | Ícono sin etiqueta $; el número rojo se borra al abrir |
 | 110 | 2026-11-26 20:24 | ✅ subido 20:37 (pedido `c8cf500d`) | feature/shop-board | `4854519e` | Ícono final: carrito plateado sobre negro con brillo |
 | 109 | 2026-11-26 16:42 | ✅ subido 16:53 (pedido `0dd64d6b`; Apple confirmó la entrega por correo, el paso final de espera se cortó por red) | feature/shop-board | `ec1c848c` | Ícono nuevo: carrito con video (fondo blanco, brillo morado) |
 | 108 | 2026-11-21 19:26 | ✅ subido 19:42 (pedido `f7ad7827`) | feature/shop-board | `4afdb0b9` | Línea arrastrada al borde lleva las pistas; en play sin saltos de bloque |
