@@ -179,6 +179,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 110 | 2026-11-26 20:24 | ✅ subido (pedido PENDING) | feature/shop-board | `4854519e` | Ícono final: carrito plateado sobre negro con brillo |
 | 109 | 2026-11-26 16:42 | ✅ subido 16:53 (pedido `0dd64d6b`; Apple confirmó la entrega por correo, el paso final de espera se cortó por red) | feature/shop-board | `ec1c848c` | Ícono nuevo: carrito con video (fondo blanco, brillo morado) |
 | 108 | 2026-11-21 19:26 | ✅ subido 19:42 (pedido `f7ad7827`) | feature/shop-board | `4afdb0b9` | Línea arrastrada al borde lleva las pistas; en play sin saltos de bloque |
 | 107 | 2026-11-21 16:37 | ✅ subido 16:52 (pedido `ba1ce25c`) | feature/shop-board | `cad63698` | Línea del editor se mueve y se arrastra; "What are you promoting?" un toque; hojas se cierran al bajarlas |
@@ -289,7 +290,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 ---
 
-## Rama · ícono final: carrito plateado sobre negro (26 nov)
+## Rama · ícono final: carrito plateado sobre negro (26 nov, en el build 110)
 
 - PO: "este es el ícono para subir en el nuevo testflight": carrito **plateado** con pantalla azul, etiqueta $
   rosada, **fondo negro con brillo azul-morado**. Imagen de la PO, 1024×1024 RGB, puesta tal cual en
@@ -305,6 +306,12 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
   `macos-26` y `macos-latest` llegan hasta Xcode 26.6; `macos-27` no existe aún (se queda en cola); las Mac grandes
   (`-xlarge`) son de pago: se canceló al instante, 0 minutos cobrados. Siguiente paso: repetir la prueba cuando GitHub
   agregue Xcode 27 (`.github/workflows/cutsell-ios-xcode27-check.yml` en esa rama, solo empujar a `probe/xcode27`).
+
+## Build 110
+
+- **Fecha:** 26 nov 2026 · **Rama:** `feature/shop-board` · **Commit:** `4854519e` · Pedido por la PO ("este es el icono
+  para subir en el nuevo testflight", 20:22).
+- **Qué cambia:** ícono = carrito plateado sobre negro con brillo azul-morado (imagen de la PO). Nada más.
 
 ## Build 109
 
