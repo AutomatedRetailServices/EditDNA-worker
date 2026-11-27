@@ -325,7 +325,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 - **Fecha:** 26 nov 2026 · **Rama:** `feature/shop-board` · **Commit:** `8bdecb1a` · Pedido por la PO ("si", 21:31).
 - **Qué cambia:** (1) ícono = carrito plateado sobre negro sin la etiqueta $; (2) el número rojo del ícono (44) se
   borra al abrir la app.
-- **Pruebas:** 147 pruebas de la app, 0 fallas (corrida del arreglo `45925430739`; la del ícono en curso).
+- **Pruebas:** 147 pruebas de la app, 0 fallas (CI `45928757602`, verde).
 
 ## Build 110
 
