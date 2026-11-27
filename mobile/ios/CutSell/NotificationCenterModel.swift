@@ -63,7 +63,8 @@ final class NotificationCenterModel: ObservableObject {
     }
 
     func markAllRead() {
-        let ids = items.map(\.notificationID)
+        let seen = Set(UserDefaults.standard.stringArray(forKey: seenKey) ?? [])
+        let ids = Array(seen.union(items.map(\.notificationID)))
         UserDefaults.standard.set(ids, forKey: seenKey)
         unreadCount = 0
         UNUserNotificationCenter.current().setBadgeCount(0)

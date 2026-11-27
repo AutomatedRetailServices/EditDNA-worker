@@ -290,6 +290,13 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 ---
 
+## Rama · el ícono mostraba "44" en rojo (26 nov, sin build todavía)
+
+- PO: "¿por qué el ícono del app en mi iPhone tiene 44 notificaciones?". Causa: el número rojo es la cuenta de avisos
+  del servidor ("Your cut is ready", "Mix ready"…) que la app nunca marcaba como vistos; la pantalla de avisos ya no
+  existe, así que `markAllRead()` no se llamaba nunca y el número solo subía (hasta 50). Arreglo: al abrir o volver a
+  la app se marcan como vistos y el número se borra; los avisos nuevos con la app cerrada siguen sumando hasta abrirla.
+
 ## Rama · ícono final: carrito plateado sobre negro (26 nov, en el build 110)
 
 - PO: "este es el ícono para subir en el nuevo testflight": carrito **plateado** con pantalla azul, etiqueta $

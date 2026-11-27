@@ -80,6 +80,8 @@ struct CutSellApp: App {
                     if let session = appState.session {
                         await notificationCenter.refresh(session: session, surfaceLocalAlerts: false)
                     }
+                    // PO 26 Nov ("¿por qué el ícono tiene 44 notificaciones?"): opening the app clears the red number.
+                    notificationCenter.markAllRead()
                     await PushRegistration.start()
                     // Build 22: an upload whose parts are all on R2 is completed and its cut started.
                     if await PendingUploadFinisher.run(session: appState.session, reason: "launch", resumeUpload: { record in
@@ -101,6 +103,7 @@ struct CutSellApp: App {
                         if let current = appState.session {
                             await notificationCenter.refresh(session: current)
                         }
+                        notificationCenter.markAllRead()
                         if await PendingUploadFinisher.run(session: appState.session, reason: "reopen", resumeUpload: { record in
                         await ResumeRunner.resume(record, appState: appState)
                     }) > 0 {
