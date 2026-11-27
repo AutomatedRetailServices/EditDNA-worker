@@ -292,6 +292,12 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 ---
 
+## Rama · ícono al 80 % (27 nov)
+
+- PO (build 112): "debe ser más pequeño… muy grande al tamaño del recuadro pierde visión de lo que es" → eligió
+  **80 %**: la misma imagen reducida al 80 % y centrada sobre negro (#020104), con el borde fundido para que no se
+  vea el corte.
+
 ## Rama · ícono: carrito plateado más grande (27 nov, en el build 112)
 
 - PO: "cambia el ícono en el testflight por este": el carrito plateado sobre negro con brillo azul-morado, sin
