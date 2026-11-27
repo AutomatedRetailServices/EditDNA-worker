@@ -179,7 +179,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
-| 116 | 2026-11-27 09:05 | ✅ subido (pedido PENDING) | feature/shop-board | `f2ddb316` | Ícono: carrito neón sobre blanco, inclinado hacia adelante (rapidez) |
+| 116 | 2026-11-27 09:05 | ✅ subido (pedido `579e72da`) | feature/shop-board | `f2ddb316` | Ícono: carrito neón sobre blanco, inclinado hacia adelante (rapidez) |
 | 115 | 2026-11-27 06:39 | ✅ subido 06:49 (pedido `61eed9aa`; Apple recibió el paquete, el paso de espera falló por red como en la 109) | feature/shop-board | `9229aa80` | Ícono: carrito neón sobre blanco, play más pequeño (68 %) |
 | 114 | 2026-11-27 05:55 | ✅ subido 06:13 (pedido `9698e4e1`) | feature/shop-board | `ddcd4c0a` | Ícono: carrito neón sin la etiqueta $, 80 % |
 | 113 | 2026-11-27 05:37 | ✅ subido 05:48 (pedido `d8c3fd86`) | feature/shop-board | `6c040e6b` | Ícono: carrito al 80 % |
