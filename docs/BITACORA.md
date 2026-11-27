@@ -289,6 +289,12 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 ---
 
+## Rama · ícono final: carrito plateado sobre negro (26 nov)
+
+- PO: "este es el ícono para subir en el nuevo testflight": carrito **plateado** con pantalla azul, etiqueta $
+  rosada, **fondo negro con brillo azul-morado**. Imagen de la PO, 1024×1024 RGB, puesta tal cual en
+  AppIcon-1024.png (reemplaza al blanco del build 109).
+
 ## Pendiente · Xcode 27 antes de abril 2027
 
 - Apple (correo del build 109, ITMS-90725): la app se compiló con el iOS 26.2 SDK; desde **abril 2027** hay que subir
