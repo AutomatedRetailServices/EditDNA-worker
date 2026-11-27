@@ -179,6 +179,7 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 | Build | Fecha (ET) | Resultado | Rama | Commit | En una línea |
 |---|---|---|---|---|---|
+| 116 | 2026-11-27 09:05 | ✅ subido (pedido PENDING) | feature/shop-board | `f2ddb316` | Ícono: carrito neón sobre blanco, inclinado hacia adelante (rapidez) |
 | 115 | 2026-11-27 06:39 | ✅ subido 06:49 (pedido `61eed9aa`; Apple recibió el paquete, el paso de espera falló por red como en la 109) | feature/shop-board | `9229aa80` | Ícono: carrito neón sobre blanco, play más pequeño (68 %) |
 | 114 | 2026-11-27 05:55 | ✅ subido 06:13 (pedido `9698e4e1`) | feature/shop-board | `ddcd4c0a` | Ícono: carrito neón sin la etiqueta $, 80 % |
 | 113 | 2026-11-27 05:37 | ✅ subido 05:48 (pedido `d8c3fd86`) | feature/shop-board | `6c040e6b` | Ícono: carrito al 80 % |
@@ -334,6 +335,11 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
   `macos-26` y `macos-latest` llegan hasta Xcode 26.6; `macos-27` no existe aún (se queda en cola); las Mac grandes
   (`-xlarge`) son de pago: se canceló al instante, 0 minutos cobrados. Siguiente paso: repetir la prueba cuando GitHub
   agregue Xcode 27 (`.github/workflows/cutsell-ios-xcode27-check.yml` en esa rama, solo empujar a `probe/xcode27`).
+
+## Build 116
+
+- **Fecha:** 27 nov 2026 · **Rama:** `feature/shop-board` · **Commit:** `f2ddb316` · Pedido por la PO (eligió la opción A, "si", 09:04).
+- **Qué cambia:** ícono = el carrito de la build 115 (fondo blanco, play al 68 %) inclinado hacia adelante como letra cursiva para dar sensación de rapidez; ruedas en el piso, sin rayas. Nada más.
 
 ## Build 115
 
