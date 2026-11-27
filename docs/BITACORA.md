@@ -325,6 +325,15 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
   rosada, **fondo negro con brillo azul-morado**. Imagen de la PO, 1024×1024 RGB, puesta tal cual en
   AppIcon-1024.png (reemplaza al blanco del build 109).
 
+## Figma · Inicio v10 con Selly (27 nov, solo diseño)
+
+- La PO nombró a la mascota **Selly** (robot lila, cabeza de pantalla con cara neón, play en el pecho) y mandó su imagen.
+- Figma, página 01: nuevo frame **3119:470** "Inicio v10 · Selly (mascota) + CutSell.ai" (copia de v9 3116:468, que no se tocó).
+  Espacio "Selly (arrastra la imagen de Selly aquí)" 203×330 en (94,128) y una instancia de Logo/Horizontal (3003:5928) de 170 px debajo.
+- La imagen no se puede subir a Figma desde aquí (proxy); la PO la arrastra al espacio. Mockup compuesto aparte para verlo.
+- Pendiente de la PO: permiso para guardar el arte de Selly en el repo público; el logo de Figma aún usa la bolsa vieja, no el carrito nuevo.
+- Nada cambió en la app todavía.
+
 ## Pendiente · Xcode 27 antes de abril 2027
 
 - Apple (correo del build 109, ITMS-90725): la app se compiló con el iOS 26.2 SDK; desde **abril 2027** hay que subir
