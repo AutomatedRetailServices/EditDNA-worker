@@ -290,6 +290,11 @@ Regla: después de CADA build nuevo, agregar su entrada al inicio de este archiv
 
 ---
 
+## Rama · ícono sin etiqueta $ (26 nov, sin build todavía)
+
+- PO: "cambia el ícono por este entonces": el mismo carrito plateado sobre negro con brillo azul-morado, **sin la
+  etiqueta $**. Imagen de la PO, 1024×1024 RGB, puesta tal cual en AppIcon-1024.png (reemplaza al del build 110).
+
 ## Rama · el ícono mostraba "44" en rojo (26 nov, sin build todavía)
 
 - PO: "¿por qué el ícono del app en mi iPhone tiene 44 notificaciones?". Causa: el número rojo es la cuenta de avisos
